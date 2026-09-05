@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Acme Dashboard — Settings</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <strong>Acme Dashboard</strong>
+    <a href="./index.html" data-testid="nav-home">Home</a>
+    <a href="./settings.html" class="active" data-testid="nav-settings">Settings</a>
+  </header>
+  <main>
+    <h1>Settings</h1>
+    <div class="card">
+      <label for="team-name">Team name</label>
+      <input type="text" id="team-name" data-testid="team-name-input" placeholder="e.g. Growth" />
+      <button id="save-btn" data-testid="save-settings-btn">Save</button>
+      <p class="confirmation" id="confirmation" data-testid="save-confirmation" hidden>Saved.</p>
+    </div>
+  </main>
+
+  <script>
+    document.getElementById('save-btn').addEventListener('click', () => {
+      document.getElementById('confirmation').hidden = false;
+    });
+  </script>
+</body>
+</html>
