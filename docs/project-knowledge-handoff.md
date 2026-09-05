@@ -168,11 +168,27 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
 - **The actual live voice/tool-call loop has never run end to end.** It needs a real
   `GEMINI_API_KEY`, which wasn't available while building this. Everything in `useLiveAgent.js`
   is correct-per-docs, not correct-per-observed-behavior. Run it for real before trusting it.
-- **Model name and audio sample rates are best-current-knowledge, not pinned facts.**
-  `LIVE_MODEL = "gemini-3.1-flash-live-preview"` (server/index.js) and
-  `PLAYBACK_SAMPLE_RATE = 24000` (agent-client/src/useLiveAgent.js) — both called out in code
-  comments as "verify against current docs if something's off." Google ships new Live models
-  fairly often; check `ai.google.dev/gemini-api/docs/live-api` before assuming these are current.
+- **Model name and audio sample rates were re-verified against Google's docs directly (Sept
+  2026)**, not just recalled: `gemini-3.1-flash-live-preview` is confirmed as the current
+  recommended Live model (successor to `gemini-2.5-flash-native-audio-preview`), input is 16kHz
+  PCM mono, output is 24kHz PCM mono — all matching what's in the code. Still worth re-checking
+  `ai.google.dev/gemini-api/docs/models` before assuming this stays current; Google ships new Live
+  models fairly often, and this verification is a point-in-time snapshot, not a guarantee.
+- **Audio-only Live sessions hard-cap at 15 minutes**, full stop, independent of network
+  reliability — a fact discovered *after* the initial build, not designed around from the start.
+  Fixed by wiring up **session resumption**: `sessionResumption: {}` in the connect config starts
+  a resumable session, `sessionResumptionUpdate` messages carry a handle
+  (`useLiveAgent.js` stores it in `resumeHandleRef`), and every `connect()` call — including
+  reconnects — passes that stored handle back if one exists, so a 15-minute cutoff is handled by
+  the same reconnect path as a real network drop rather than being a separate failure mode.
+  **Not verified against a live session** — the exact field names (`sessionResumptionUpdate`,
+  `.resumable`, `.newHandle`) are inferred from the SDK's consistent camelCase convention
+  elsewhere (`serverContent`, `toolCall.functionCalls`), not confirmed from an actual received
+  message. If resumption silently doesn't kick in, check these names first.
+- **Minor, harmless inefficiency**: `sendKnowledgeContext` and the DOM-snapshot context turn are
+  both resent on every `connect()`, including a resumed reconnect — meaning a successfully
+  resumed session gets its own context re-added redundantly. Not a bug, just slightly wasteful;
+  worth skipping on a resumed connect specifically if this ever gets revisited.
 - **Mic capture uses `ScriptProcessorNode`**, which is a deprecated Web Audio API. Chosen
   deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
   meaningfully more code — a separate worklet module, message-passing to the main thread). Fine

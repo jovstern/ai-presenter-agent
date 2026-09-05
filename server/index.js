@@ -13,7 +13,10 @@ import { Hono } from "hono";
 import { GoogleGenAI } from "@google/genai";
 
 const PORT = process.env.PORT || 8787;
-const LIVE_MODEL = "gemini-3.1-flash-live-preview"; // check ai.google.dev/gemini-api/docs/live-api for the current model id
+// Confirmed current/recommended against ai.google.dev/gemini-api/docs/models (Sept 2026) — the
+// successor to gemini-2.5-flash-native-audio-preview. Re-check that page if this ever needs
+// bumping; Google ships new Live models fairly often.
+const LIVE_MODEL = "gemini-3.1-flash-live-preview";
 
 if (!process.env.GEMINI_API_KEY) {
   console.warn(
@@ -36,9 +39,16 @@ app.get("/api/live-token", async (c) => {
         uses: 1,
         newSessionExpireTime: new Date(Date.now() + 60 * 1000), // 1 min to connect
         expireTime: new Date(Date.now() + 30 * 60 * 1000), // 30 min session ceiling
+        // Mirrors what the client actually sends to ai.live.connect (see useLiveAgent.js).
+        // liveConnectConstraints locks the token to a model + config; unclear from docs how
+        // strictly the config half is enforced, so this stays in sync defensively rather than
+        // risk the client's real connect config being rejected as a mismatch.
         liveConnectConstraints: {
           model: LIVE_MODEL,
-          config: { responseModalities: ["AUDIO"] },
+          config: {
+            responseModalities: ["AUDIO"],
+            sessionResumption: {},
+          },
         },
       },
     });

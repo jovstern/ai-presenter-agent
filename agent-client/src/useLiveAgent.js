@@ -10,8 +10,8 @@ import { buildContextText } from "./knowledgeStore.js";
 // giving up quietly.
 const RECONNECT_DELAYS_MS = [0, 1000, 3000, 7000, 15000, 30000];
 const MIC_SAMPLE_RATE = 16000;
-// Gemini Live streams audio out at 24kHz mono — double check against current docs if playback
-// sounds pitched/sped incorrectly, model-specific details do change.
+// Confirmed against ai.google.dev/gemini-api/docs/live-api/capabilities (Sept 2026): Live API
+// input is 16kHz PCM mono (auto-resampled if you send something else), output is 24kHz PCM mono.
 const PLAYBACK_SAMPLE_RATE = 24000;
 
 export function useLiveAgent({ volumeMeterRef }) {
@@ -25,6 +25,11 @@ export function useLiveAgent({ volumeMeterRef }) {
   const pendingActionsRef = useRef(new Map()); // action id -> resolve()
   const loopGuardRef = useRef(createLoopGuard());
   const playbackQueueTimeRef = useRef(0);
+  // Same doc page: audio-only Live sessions hard-cap at 15 minutes, full stop, independent of
+  // network reliability. Session resumption is the documented way past that ceiling — reconnect
+  // with the last handle instead of starting fresh, so a 15-minute cutoff behaves like any other
+  // reconnect (see scheduleReconnect) instead of losing the conversation.
+  const resumeHandleRef = useRef(null);
 
   const appendTranscript = useCallback((role, text) => {
     setTranscript((prev) => [...prev.slice(-19), { id: crypto.randomUUID(), role, text }]);
@@ -167,6 +172,15 @@ export function useLiveAgent({ volumeMeterRef }) {
       if (message.toolCall) {
         for (const fc of message.toolCall.functionCalls) handleToolCall(fc);
       }
+
+      // Field names are camelCase to match every other message shape this SDK uses
+      // (serverContent, toolCall.functionCalls) — not independently confirmed against a live
+      // session, since that needs a real API key. If resumption silently doesn't kick in, check
+      // these names first against whatever the SDK actually sends.
+      const resumptionUpdate = message.sessionResumptionUpdate;
+      if (resumptionUpdate?.resumable && resumptionUpdate?.newHandle) {
+        resumeHandleRef.current = resumptionUpdate.newHandle;
+      }
     },
     [appendTranscript, handleToolCall, playAudioChunk]
   );
@@ -234,6 +248,13 @@ export function useLiveAgent({ volumeMeterRef }) {
         config: {
           responseModalities: [Modality.AUDIO],
           tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+          // Explicit rather than relying on the model's default, since a conversational avatar
+          // should always prioritize latency over deeper reasoning.
+          thinkingConfig: { thinkingLevel: "minimal" },
+          // Empty object = "start a resumable session." A stored handle here = "resume that
+          // session" rather than starting over — used both for a plain dropped connection and
+          // for the 15-minute hard session cap mentioned above.
+          sessionResumption: resumeHandleRef.current ? { handle: resumeHandleRef.current } : {},
         },
         callbacks: {
           onopen: () => {
