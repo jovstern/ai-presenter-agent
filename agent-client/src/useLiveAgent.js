@@ -3,6 +3,7 @@ import { GoogleGenAI, Modality } from "@google/genai";
 import { TOOL_DECLARATIONS } from "./actionTools.js";
 import { createLoopGuard } from "./loopGuard.js";
 import { floatTo16BitPCM, int16ToBase64, base64ToInt16, int16ToFloat32 } from "./pcm.js";
+import { buildContextText } from "./knowledgeStore.js";
 
 // v1 gap #6: a dropped connection was silent to the user. This backoff is real (not a fixed
 // interval) *and* surfaces a terminal "failed" state with a manual retry, instead of just
@@ -99,6 +100,30 @@ export function useLiveAgent({ volumeMeterRef }) {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, []);
+
+  // --- user-provided knowledge (localStorage, see knowledgeStore.js) — not real RAG, just a
+  // context dump at connect time and again whenever the user edits it mid-session -------------
+  const sendKnowledgeContext = useCallback((session) => {
+    const text = buildContextText();
+    if (!text) return;
+    session.sendClientContent({
+      turns: [
+        {
+          role: "user",
+          parts: [{ text: `[knowledge provided in advance by the user, not spoken]\n${text}` }],
+        },
+      ],
+      turnComplete: false,
+    });
+  }, []);
+
+  useEffect(() => {
+    function onKnowledgeChanged() {
+      if (sessionRef.current) sendKnowledgeContext(sessionRef.current);
+    }
+    window.addEventListener("ds-knowledge-changed", onKnowledgeChanged);
+    return () => window.removeEventListener("ds-knowledge-changed", onKnowledgeChanged);
+  }, [sendKnowledgeContext]);
 
   // --- server -> client: narration audio/text, tool calls -----------------------------------
   const handleToolCall = useCallback(
@@ -221,6 +246,7 @@ export function useLiveAgent({ volumeMeterRef }) {
         },
       });
       sessionRef.current = session;
+      sendKnowledgeContext(session);
       await startMicCapture(session);
     } catch (err) {
       console.error("[agent] connect failed", err);

@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import AgentApp from "./AgentApp.jsx";
+import { ToastProvider } from "./Toast.jsx";
 
 // A shadow root gives this widget full style isolation from whatever's in the sandbox/target-app
 // around it — no host-page CSS leaks in, and nothing in here leaks out. Because this ships as a
@@ -21,7 +22,88 @@ const STYLE = `
     box-shadow: 0 8px 24px rgba(0,0,0,0.35);
     z-index: 999999;
   }
-  .ds-header { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+  .ds-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .ds-knowledge-trigger {
+    border: none;
+    background: #334155;
+    color: #e2e8f0;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .ds-knowledge-trigger:hover { background: #475569; }
+  .ds-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.6);
+    z-index: 1000000;
+  }
+  .ds-dialog-content {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 320px;
+    max-height: 80vh;
+    overflow-y: auto;
+    background: #16213e;
+    color: #e2e8f0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.45);
+    z-index: 1000001;
+  }
+  .ds-dialog-title { margin: 0 0 8px; font-size: 15px; }
+  .ds-dialog-description { margin: 0 0 14px; font-size: 12px; color: #94a3b8; line-height: 1.5; }
+  .ds-dropzone {
+    border: 1.5px dashed #475569;
+    border-radius: 8px;
+    padding: 20px 12px;
+    text-align: center;
+    font-size: 12px;
+    color: #94a3b8;
+    cursor: pointer;
+    margin-bottom: 12px;
+  }
+  .ds-dropzone--active { border-color: #38bdf8; color: #e2e8f0; background: rgba(56,189,248,0.08); }
+  .ds-file-list { list-style: none; margin: 0; padding: 0; }
+  .ds-file-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #273349; font-size: 12px; }
+  .ds-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ds-file-size { color: #64748b; }
+  .ds-file-remove { background: none; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; line-height: 1; }
+  .ds-file-remove:hover { color: #ef4444; }
+  .ds-file-empty { color: #64748b; font-size: 12px; padding: 6px 0; }
+  .ds-dialog-close {
+    margin-top: 14px;
+    width: 100%;
+    padding: 6px 0;
+    border: none;
+    border-radius: 6px;
+    background: #2b4c7e;
+    color: white;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .ds-toast-viewport {
+    position: fixed;
+    bottom: 20px;
+    right: 270px;
+    width: 240px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    z-index: 1000002;
+  }
+  .ds-toast {
+    background: #16213e;
+    color: #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  }
+  .ds-toast-description { margin: 0; }
   .ds-status { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #334155; }
   .ds-status--ready { background: #166534; }
   .ds-status--reconnecting { background: #92400e; }
@@ -71,7 +153,16 @@ class DsAgentAvatar extends HTMLElement {
     const mountPoint = document.createElement("div");
     shadow.appendChild(mountPoint);
 
-    createRoot(mountPoint).render(<AgentApp />);
+    // A dedicated node inside the shadow root for Radix's Dialog.Portal to render into — Radix
+    // defaults to document.body, which would escape this widget's style isolation entirely.
+    const portalContainer = document.createElement("div");
+    shadow.appendChild(portalContainer);
+
+    createRoot(mountPoint).render(
+      <ToastProvider>
+        <AgentApp portalContainer={portalContainer} />
+      </ToastProvider>
+    );
   }
 }
 

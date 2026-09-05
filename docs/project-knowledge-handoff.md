@@ -148,12 +148,12 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes: `loopGuard.test.js` (4 tests) and
+- `agent-client`'s test suite passes (13 tests, 3 files): `loopGuard.test.js` (4 tests),
   `renderIsolation.test.jsx` (1 test, using `React.Profiler` to prove the transcript log does
   **not** re-render across 20 simulated volume updates, and **does** re-render on a real
-  transcript change).
-- `vite build` produces a single self-contained `dist/agent-client.js` (~771KB unminified-report,
-  ~206KB gzip) with no build errors.
+  transcript change), and `knowledgeStore.test.js` (8 tests — see §5.1).
+- `vite build` produces a single self-contained `dist/agent-client.js` (~837KB unminified-report,
+  ~228KB gzip after adding Radix — was ~771KB/206KB before it) with no build errors.
 - The server boots, and every static route (`/sandbox/`, `/target-app/index.html`,
   `/target-app/settings.html`, `/sandbox/bridge.js`, `/agent-client/agent-client.js`) returns 200.
 - `/api/live-token` fails **cleanly** with a JSON 500 when `GEMINI_API_KEY` isn't set — confirmed
@@ -213,38 +213,53 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
 
 ## 5. Future planning (not yet built — read before starting on these)
 
-### 5.1 RAG knowledge modal (client-side, no backend)
+### 5.1 RAG-lite knowledge modal (client-side, no backend) — IMPLEMENTED
 
-A new UI idea for the agent widget: a button on the agent card opens a **Radix `Dialog`**
-containing a drag-and-drop zone. The user drops files the agent should "know" about the
-company/site in advance; those files (or their extracted text) are stored in the browser's
-**`localStorage`** — no server-side storage, no backend indexing pipeline, unlike the original
-system's Cusmo-owned RAG pipeline.
+Built: a button on the agent card (`📄 <count>`) opens a **Radix `Dialog`** (`KnowledgeModal.jsx`)
+with a drag-and-drop zone plus a click-to-browse fallback. Dropped files are read via
+`FileReader` and stored, as `{id, name, size, addedAt, text}`, in `localStorage` under
+`ds-agent-knowledge-files` (`knowledgeStore.js`) — no server-side storage, no backend indexing
+pipeline, unlike the original system's Cusmo-owned RAG pipeline.
 
-Open questions worth resolving before building this (see the conversation that produced this doc
-for the fuller discussion):
+Decisions actually made (the open questions from the plan, resolved):
 
-- **File types**: `.txt`/`.md` are trivial (`FileReader.readAsText`, no dependency). PDF/DOCX
-  need real client-side parsing libraries (`pdf.js`, `mammoth.js`) — meaningfully more bundle size
-  and complexity than the rest of this codebase has taken on so far. Decide text-only-first vs.
-  paying that cost up front.
-- **Size limits**: `localStorage` caps out around 5–10MB per origin, browser-dependent. Needs an
-  explicit cap and a clear "too large" message — silently failing or truncating is worse than
-  refusing up front.
-- **Injection mechanism**: the simplest honest approach is dumping the extracted text into a
-  `session.sendClientContent(..., turnComplete:false)` context turn at session start — the same
-  mechanism already used for the DOM snapshot (see `useLiveAgent.js`). This is **context-stuffing,
-  not real RAG** (no chunking, no embeddings, no retrieval) — call it that explicitly wherever
-  it's described, rather than letting "RAG" imply more sophistication than it has. A real RAG
-  pipeline (chunk → embed → retrieve top-k per turn) is a legitimate future step, but is a
-  different, larger project than "store files and paste them into context."
+- **File types: `.txt`/`.md` only**, deliberately, to avoid pulling in `pdf.js`/`mammoth.js` and
+  the bundle-size/complexity that comes with them. Revisit if PDF/DOCX support is ever requested —
+  it's an additive change (`ACCEPTED_EXTENSIONS` + a parsing step in `addFile`), not a rework.
+- **Size limit: 4MB total** across all stored files (`MAX_TOTAL_BYTES` in `knowledgeStore.js`),
+  comfortably under `localStorage`'s ~5–10MB per-origin ceiling. `addFile` refuses outright with a
+  reason string when a new file would exceed it — no silent failure, no truncation.
+- **Injection mechanism: context-stuffing, confirmed as the actual approach, not just proposed.**
+  `useLiveAgent.js`'s `sendKnowledgeContext` dumps the concatenated file text into a
+  `session.sendClientContent(..., turnComplete:false)` turn — once right after connect, and again
+  automatically whenever the store changes (a `ds-knowledge-changed` window event fired by every
+  `knowledgeStore` write, listened for in both `KnowledgeModal.jsx` for its own file list and in
+  `useLiveAgent.js` to re-send context mid-session). This is **not real RAG** — no chunking, no
+  embeddings, no retrieval — call it "context-stuffing" or "RAG-lite" explicitly if asked, rather
+  than letting "RAG" imply more sophistication than it has. A real pipeline (chunk → embed →
+  retrieve top-k per turn) is a legitimate future step and a materially bigger project than this.
+- **The gotcha that cost the most time to get right: Radix's `Dialog.Portal` defaults to
+  rendering into `document.body`**, which would silently escape this widget's shadow root — the
+  dialog would render, but unstyled (none of the injected `<style>` in the shadow root would
+  reach it) and outside the isolation the shadow root exists to provide. Fix: `main.jsx` creates a
+  second plain `<div>` inside the shadow root purely as a portal target, passes it down through
+  `AgentApp` as `portalContainer`, and `KnowledgeModal` passes it to `Dialog.Portal container={...}`.
+  Anything else built with Radix inside this shadow root needs the same treatment if it uses
+  `Portal` (Toast, notably, does **not** need this — its `Viewport` renders in place, not via a
+  portal, so `Toast.jsx` needed no such wiring).
+- Tested: `knowledgeStore.test.js` (8 tests) covers accept/reject-by-extension, the size cap, add/
+  remove/list, the concatenated context blob, byte totals, and that the change event fires exactly
+  once per write. Not tested: the modal component itself (drag/drop interaction, Radix wiring) —
+  reasonable next addition if this UI gets more complex.
 
-### 5.2 Radix UI for generic components
+### 5.2 Radix UI for generic components — IMPLEMENTED
 
-Replace hand-rolled markup for anything modal/dialog/dropdown-shaped with **Radix UI primitives**
-(`@radix-ui/react-dialog` for the knowledge modal at minimum; consider `@radix-ui/react-toast` for
-the "connection failed" messaging in `AgentApp.jsx`, which is currently a plain conditional
-button). Radix gives accessible keyboard/focus handling for free instead of reinventing it.
+`@radix-ui/react-dialog` powers the knowledge modal (§5.1); `@radix-ui/react-toast`
+(`Toast.jsx`, a `ToastProvider` + `useToast()` hook) now also drives the connection-status
+messaging — `AgentApp.jsx` fires a real toast ("Connection lost — tap Reconnect to try again.")
+the moment `status` becomes `"failed"`, on top of the existing Reconnect button. That's v1 gap #6
+closed for real, not just with a button: the silent-disconnect problem from the original system
+now has actual user-visible feedback, not only a recovery affordance.
 
 ### 5.3 The `server/` scope question
 
