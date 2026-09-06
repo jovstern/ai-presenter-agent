@@ -113,12 +113,38 @@
   function handleIframeLoad() {
     diffAndSendSnapshot();
     post({ type: "ds-ready" });
+    attachMutationObserver();
   }
 
   if (iframe.contentDocument && iframe.contentDocument.readyState === "complete") {
     handleIframeLoad();
   }
   iframe.addEventListener("load", handleIframeLoad);
+
+  // --- ongoing DOM changes: MutationObserver + debounce, not a fixed wait -------------------
+  // A fixed setTimeout after dispatching an action was the original approach here, but it's
+  // wrong in both directions: too short for a slower real-world update (an animation, a
+  // debounced re-render, a fetch-then-render), too long for a synchronous one (this target-app's
+  // counter updates before el.click() even returns). Observing real mutations is event-driven
+  // instead of a guess, and — attached continuously per page rather than only right after our
+  // own actions — it also catches changes the agent didn't cause (a real app updating its own
+  // data), which a post-action-only timeout could never see. The debounce exists because one
+  // logical update (a re-render) can fire the observer's callback many times in quick succession;
+  // waiting for a brief quiet period after the *last* mutation avoids resending mid-update.
+  let mutationObserver = null;
+  let debounceTimer = null;
+  const MUTATION_DEBOUNCE_MS = 120;
+
+  function attachMutationObserver() {
+    if (mutationObserver) mutationObserver.disconnect();
+    const doc = iframe.contentDocument;
+    if (!doc?.body) return;
+    mutationObserver = new MutationObserver(() => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(diffAndSendSnapshot, MUTATION_DEBOUNCE_MS);
+    });
+    mutationObserver.observe(doc.body, { childList: true, subtree: true, attributes: true, characterData: true });
+  }
 
   // --- action library (closure-scoped — never assigned to `window`) --------
 
@@ -195,8 +221,9 @@
 
     post({ type: "ds-action-result", id: data.id, ...result });
 
-    // A successful nav/click/fill can change what's on screen — refresh the snapshot shortly
-    // after, once the DOM has had a chance to settle.
-    setTimeout(diffAndSendSnapshot, 150);
+    // No manual re-snapshot needed here: if this action actually changed the DOM, the
+    // MutationObserver set up in attachMutationObserver() picks it up on its own. A `navigate`
+    // action is the one exception — it replaces the whole document, which fires the iframe's
+    // `load` event and re-runs handleIframeLoad() (snapshot + a fresh observer) independently.
   });
 })();
