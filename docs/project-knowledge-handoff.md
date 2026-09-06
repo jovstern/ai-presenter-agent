@@ -148,10 +148,12 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes (13 tests, 3 files): `loopGuard.test.js` (4 tests),
+- `agent-client`'s test suite passes (21 tests, 4 files): `loopGuard.test.js` (4 tests),
   `renderIsolation.test.jsx` (1 test, using `React.Profiler` to prove the transcript log does
   **not** re-render across 20 simulated volume updates, and **does** re-render on a real
-  transcript change), and `knowledgeStore.test.js` (8 tests — see §5.1).
+  transcript change), `knowledgeStore.test.js` (8 tests — see §5.1), and
+  `domSnapshotContext.test.js` (8 tests — the keyframe-vs-delta decision, see the decisions log
+  below and `demostack-ai-presenter-agent.md` §5.3).
 - `vite build` produces a single self-contained `dist/agent-client.js` (~837KB unminified-report,
   ~228KB gzip after adding Radix — was ~771KB/206KB before it) with no build errors.
 - The server boots, and every static route (`/sandbox/`, `/target-app/index.html`,
@@ -185,10 +187,12 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
   `.resumable`, `.newHandle`) are inferred from the SDK's consistent camelCase convention
   elsewhere (`serverContent`, `toolCall.functionCalls`), not confirmed from an actual received
   message. If resumption silently doesn't kick in, check these names first.
-- **Minor, harmless inefficiency**: `sendKnowledgeContext` and the DOM-snapshot context turn are
-  both resent on every `connect()`, including a resumed reconnect — meaning a successfully
-  resumed session gets its own context re-added redundantly. Not a bug, just slightly wasteful;
-  worth skipping on a resumed connect specifically if this ever gets revisited.
+- **`sendKnowledgeContext` and the DOM-snapshot keyframe are both resent on every `connect()`,
+  including a resumed reconnect — deliberately, not an oversight.** A (re)connect can't fully
+  trust that a resumed session's turn history is intact, so both resend fresh grounding rather
+  than assuming the model still remembers. The one acknowledged cost: on a *successfully* resumed
+  session (where the model's context genuinely did survive), this adds a small amount of
+  redundant context. Worth revisiting only if that turns out to matter in practice.
 - **Mic capture uses `ScriptProcessorNode`**, which is a deprecated Web Audio API. Chosen
   deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
   meaningfully more code — a separate worklet module, message-passing to the main thread). Fine
@@ -200,6 +204,8 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`
   in `bridge.js`) is a guess, not tuned against a real page or a real model's context behavior.
+  (The keyframe-vs-delta *decision* logic itself, in `domSnapshotContext.js`, is unit-tested — it's
+  specifically the real-world tuning of the cap and the 0.6 full-refresh ratio that's unverified.)
 - **No production deployment story exists** (no Dockerfile, no hosting config, no HTTPS setup).
   Note for later: mic capture (`getUserMedia`) requires a secure context — fine on `localhost`,
   but will need real HTTPS the moment this is deployed anywhere else.
@@ -226,6 +232,16 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
   proving the isolation actually holds, not just a flamegraph glanced at once.
 - **`ScriptProcessorNode` over `AudioWorklet`** — simpler, deprecated-but-functional, a known
   tradeoff (see §3.3), not an oversight.
+- **Session resumption wired up proactively, before ever hitting the 15-minute session cap in
+  practice** — discovered the limit by reading the docs, not by observing a real session die at
+  minute 15. Chose to fix it structurally (reuse the existing reconnect path) rather than wait and
+  see, since a demo running past 15 minutes was a predictable, not edge-case, scenario.
+- **DOM snapshot updates were originally always sent as "full" to the model** — bridge.js computed
+  a diff but nothing downstream used it. Corrected after being asked directly "when should we send
+  a full snapshot" surfaced the gap: `domSnapshotContext.js` now makes that call explicitly (full
+  keyframe on navigation / first snapshot / large delta; compact delta otherwise), modeled on a
+  video codec's keyframe/delta-frame split. `bridge.js` itself didn't need to change — the
+  token-cost decision belongs entirely on the client side that actually talks to the model.
 
 ## 5. Future planning (not yet built — read before starting on these)
 

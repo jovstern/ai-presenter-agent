@@ -139,8 +139,15 @@ needed; this is intentionally the simplest piece.
 
 - Flattened list of interactive/meaningful nodes only: role/tag, accessible name/label, the
   `data-testid`-based selector, visibility/enabled flag.
-- Diffed against the last snapshot sent — only changed nodes go out again.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
+- The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
+  (changed/removed) against its last snapshot — cheap, same-process postMessage regardless of page
+  size. The decision that actually costs tokens — whether to tell the *model* the whole page or
+  just what changed — is made downstream, in `agent-client/src/domSnapshotContext.js`: a **full
+  keyframe** on page navigation, when nothing's been sent yet, or when the delta covers most of
+  the page anyway; a **compact delta** otherwise. Same tradeoff a video codec makes between
+  keyframes and delta frames, and for the same reason — a delta is only worth sending when it's
+  actually cheaper than a fresh keyframe.
 
 ### 5.4 Server
 

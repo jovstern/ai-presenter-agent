@@ -91,12 +91,17 @@
 
     if (changed.length === 0 && removed.length === 0) return;
 
+    // This bridge always reports all three (changed/removed/full) — it's a same-process
+    // postMessage, cheap regardless of page size. The decision that actually costs something —
+    // whether to tell the *model* the full page or just what changed — happens on the
+    // agent-client side, see domSnapshotContext.js. Keeping that decision out of this file is
+    // deliberate: this bridge shouldn't need to know anything about how its output gets used.
     post({
       type: "ds-dom-snapshot",
       page: iframe.contentWindow.location.pathname.split("/").pop(),
       changed,
       removed,
-      full, // small pages here — sending the full set too keeps the agent-client simple
+      full,
     });
   }
 

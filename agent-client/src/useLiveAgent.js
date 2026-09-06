@@ -4,6 +4,7 @@ import { TOOL_DECLARATIONS } from "./actionTools.js";
 import { createLoopGuard } from "./loopGuard.js";
 import { floatTo16BitPCM, int16ToBase64, base64ToInt16, int16ToFloat32 } from "./pcm.js";
 import { buildContextText } from "./knowledgeStore.js";
+import { isFullRefresh, buildFullSnapshotText, buildIncrementalText } from "./domSnapshotContext.js";
 
 // v1 gap #6: a dropped connection was silent to the user. This backoff is real (not a fixed
 // interval) *and* surfaces a terminal "failed" state with a manual retry, instead of just
@@ -30,6 +31,8 @@ export function useLiveAgent({ volumeMeterRef }) {
   // with the last handle instead of starting fresh, so a 15-minute cutoff behaves like any other
   // reconnect (see scheduleReconnect) instead of losing the conversation.
   const resumeHandleRef = useRef(null);
+  const lastPageRef = useRef(null); // for detecting navigation, see domSnapshotContext.js
+  const lastSnapshotRef = useRef(null); // most recent {page, full} — resent on reconnect
 
   const appendTranscript = useCallback((role, text) => {
     setTranscript((prev) => [...prev.slice(-19), { id: crypto.randomUUID(), role, text }]);
@@ -72,21 +75,29 @@ export function useLiveAgent({ volumeMeterRef }) {
       }
 
       if (data.type === "ds-dom-snapshot") {
-        const session = sessionRef.current;
-        if (!session || data.full.length === 0) return;
-        const summary = data.full
-          .map((n) => `${n.selector} (${n.role}): "${n.label}"${n.disabled ? " [disabled]" : ""}`)
-          .join("\n");
-        // turnComplete:false — this is context, not a user utterance expecting a spoken reply.
-        session.sendClientContent({
-          turns: [
-            {
-              role: "user",
-              parts: [{ text: `[page context, not spoken] Now on "${data.page}". Elements:\n${summary}` }],
-            },
-          ],
-          turnComplete: false,
+        // Keyframe vs. delta-frame decision — see domSnapshotContext.js. Tracked regardless of
+        // whether a session is currently connected, so a reconnect always has a recent full
+        // snapshot on hand to resend (see connect()'s use of lastSnapshotRef below).
+        const fullRefresh = isFullRefresh({
+          page: data.page,
+          previousPage: lastPageRef.current,
+          changed: data.changed,
+          removed: data.removed,
+          full: data.full,
         });
+        lastPageRef.current = data.page;
+        lastSnapshotRef.current = { page: data.page, full: data.full };
+
+        const session = sessionRef.current;
+        if (!session) return;
+
+        const text = fullRefresh
+          ? buildFullSnapshotText({ page: data.page, full: data.full })
+          : buildIncrementalText({ page: data.page, changed: data.changed, removed: data.removed });
+        if (!text) return;
+
+        // turnComplete:false — this is context, not a user utterance expecting a spoken reply.
+        session.sendClientContent({ turns: [{ role: "user", parts: [{ text }] }], turnComplete: false });
         return;
       }
 
@@ -268,6 +279,15 @@ export function useLiveAgent({ volumeMeterRef }) {
       });
       sessionRef.current = session;
       sendKnowledgeContext(session);
+      // A (re)connect can't trust that the model's turn history survived intact — whether this
+      // is a fresh session or a resumed one, ground it with a full keyframe of whatever DOM
+      // state is already known, rather than waiting for the next bridge event (which may not
+      // come at all if nothing changes on screen after reconnecting).
+      if (lastSnapshotRef.current) {
+        const text = buildFullSnapshotText(lastSnapshotRef.current);
+        if (text) session.sendClientContent({ turns: [{ role: "user", parts: [{ text }] }], turnComplete: false });
+      }
+      lastPageRef.current = null; // next bridge update, if any, should also count as a keyframe
       await startMicCapture(session);
     } catch (err) {
       console.error("[agent] connect failed", err);
