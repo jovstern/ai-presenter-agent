@@ -1,4 +1,4 @@
-# demostack-ai-presenter-agent-v2
+# ai-presenter-agent-v2
 
 A from-scratch rebuild of the runtime half of Demostack's AI Presenter Agent: a voice avatar
 (Gemini Live API) embedded in an iframe that both talks and acts (click/scroll/navigate/fill) on
