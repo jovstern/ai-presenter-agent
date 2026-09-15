@@ -141,8 +141,8 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 docs/            this doc + the spec + the sandbox-simulation doc
 target-app/      2 static pages (Home, Settings), a handful of data-testid elements
 sandbox/         iframe host page + bridge.js (action library, DOM snapshot, validation)
-agent-client/    React app, built to a single script, mounted in a shadow root
-server/          Hono server: mints a Gemini Live ephemeral token, serves the static bundles
+agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
+server/          Express server: mints a Gemini Live ephemeral token, serves the static bundles
 ```
 
 ### 3.2 What's built and actually verified (not just written)
@@ -154,10 +154,13 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
   transcript change), `knowledgeStore.test.js` (8 tests — see §5.1), and
   `domSnapshotContext.test.js` (8 tests — the keyframe-vs-delta decision, see the decisions log
   below and `demostack-ai-presenter-agent.md` §5.3).
-- `vite build` produces a single self-contained `dist/agent-client.js` (~837KB unminified-report,
-  ~228KB gzip after adding Radix — was ~771KB/206KB before it) with no build errors.
-- The server boots, and every static route (`/sandbox/`, `/target-app/index.html`,
-  `/target-app/settings.html`, `/sandbox/bridge.js`, `/agent-client/agent-client.js`) returns 200.
+- `vite build` produces a single self-contained `dist/agent-client.js` (~1026KB unminified-report,
+  ~282KB gzip on React 19 + the React Compiler — was ~837KB/228KB on React 18) with no build
+  errors.
+- Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
+  route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
+  `/agent-client/agent-client.js`) still returns 200, confirmed by actually hitting each one after
+  the migration, not assumed from the route table alone.
 - `/api/live-token` fails **cleanly** with a JSON 500 when `GEMINI_API_KEY` isn't set — confirmed
   by actually hitting it, not assumed.
 - The exact Gemini Live SDK surface used (`ai.live.connect`, `client.authTokens.create`,
@@ -242,6 +245,21 @@ server/          Hono server: mints a Gemini Live ephemeral token, serves the st
   keyframe on navigation / first snapshot / large delta; compact delta otherwise), modeled on a
   video codec's keyframe/delta-frame split. `bridge.js` itself didn't need to change — the
   token-cost decision belongs entirely on the client side that actually talks to the model.
+- **React 18 → 19, with the React Compiler on** (2026-09-15) — a direct stack preference, not a
+  bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
+  compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
+  memoization rather than hand-adding it, only reach for a manual hook where the compiler
+  demonstrably can't cover the case. Cost: the built bundle grew from ~837KB/228KB gzip to
+  ~1026KB/282KB gzip (compiler + React 19 runtime overhead) — not yet judged whether that's worth
+  trimming.
+- **Radix UI as the default for new interactive UI elements** (2026-09-15) — codifies what was
+  already true in practice (`Dialog` for the knowledge modal, `Toast` for connection status);
+  existing hand-rolled pieces (`VolumeMeter`, `TranscriptLog`) are custom visualizations outside
+  what Radix's primitives cover and weren't refactored.
+- **Hono → Express for `server/`** (2026-09-15) — a direct stack preference. Same responsibilities
+  kept (token endpoint + static file serving for all three other packages, not split apart) — see
+  §5.3 for the deferred option of shrinking it to token-only. All routes re-verified by hand after
+  the migration, not just carried over on faith.
 
 ## 5. Future planning (not yet built — read before starting on these)
 

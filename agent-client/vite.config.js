@@ -5,7 +5,13 @@ import react from "@vitejs/plugin-react";
 // tag" shape the real system used, and the reason a shadow root + manually-injected <style>
 // are used instead of a separate CSS file (see src/main.jsx).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react({
+      babel: {
+        plugins: [["babel-plugin-react-compiler", {}]],
+      },
+    }),
+  ],
   build: {
     outDir: "dist",
     cssCodeSplit: false,

@@ -9,6 +9,14 @@
 > Each item has a checkbox. Tick the ones worth doing; leave the rest. Nothing here has been
 > changed in the code — this doc is the only thing added.
 >
+> **Editorial note (added afterward, not by the original reviewer):** H5 is now half-stale. Point
+> 1 (diff computed but discarded, contradicting spec §5.3) was fixed by introducing
+> `domSnapshotContext.js` — the client now sends a full keyframe or a compact delta, decided
+> explicitly. Point 2 (no `MutationObserver`) was fixed the same way this review independently
+> suggested — a debounced observer, reattached on every iframe load, replacing the fixed
+> post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) is still open. Left the checkbox
+> and severity as this reviewer wrote them; just don't read H5 as fully open anymore.
+>
 > Severity: **Blocker** = likely broken or conspicuously missing the first time it runs for real ·
 > **High** = correctness / security / core UX · **Medium** = will bite eventually · **Low** = polish.
 

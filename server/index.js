@@ -7,9 +7,7 @@
  * simplification that's cutting a corner.
  */
 import "dotenv/config";
-import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
-import { Hono } from "hono";
+import express from "express";
 import { GoogleGenAI } from "@google/genai";
 
 const PORT = process.env.PORT || 8787;
@@ -25,14 +23,14 @@ if (!process.env.GEMINI_API_KEY) {
 }
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-const app = new Hono();
+const app = express();
 
-app.get("/", (c) => c.redirect("/sandbox/"));
+app.get("/", (req, res) => res.redirect("/sandbox/"));
 
 // One-time, single-use, short-lived token. The client passes this to `ai.live.connect` in place
 // of the real API key. `newSessionExpireTime` bounds how long the client has to *open* the
 // session; `expireTime` bounds how long that session can stay open once opened.
-app.get("/api/live-token", async (c) => {
+app.get("/api/live-token", async (req, res) => {
   try {
     const token = await ai.authTokens.create({
       config: {
@@ -52,30 +50,18 @@ app.get("/api/live-token", async (c) => {
         },
       },
     });
-    return c.json({ token: token.name, model: LIVE_MODEL });
+    res.json({ token: token.name, model: LIVE_MODEL });
   } catch (err) {
     console.error("[server] failed to mint ephemeral token:", err);
-    return c.json({ error: "failed to mint live token" }, 500);
+    res.status(500).json({ error: "failed to mint live token" });
   }
 });
 
-app.use(
-  "/target-app/*",
-  serveStatic({ root: "../target-app", rewriteRequestPath: (p) => p.replace(/^\/target-app/, "") })
-);
-app.use(
-  "/sandbox/*",
-  serveStatic({ root: "../sandbox", rewriteRequestPath: (p) => p.replace(/^\/sandbox/, "") })
-);
-app.use(
-  "/agent-client/*",
-  serveStatic({
-    root: "../agent-client/dist",
-    rewriteRequestPath: (p) => p.replace(/^\/agent-client/, ""),
-  })
-);
+app.use("/target-app", express.static("../target-app"));
+app.use("/sandbox", express.static("../sandbox"));
+app.use("/agent-client", express.static("../agent-client/dist"));
 
-serve({ fetch: app.fetch, port: PORT }, (info) => {
-  console.log(`Presenter Agent server on http://localhost:${info.port}`);
-  console.log(`Open http://localhost:${info.port}/sandbox/`);
+app.listen(PORT, () => {
+  console.log(`Presenter Agent server on http://localhost:${PORT}`);
+  console.log(`Open http://localhost:${PORT}/sandbox/`);
 });
