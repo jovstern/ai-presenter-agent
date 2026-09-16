@@ -71,3 +71,15 @@ are marked IMPLEMENTED — already built, not just planned.
   `sandbox/` have none. Follow the existing vitest pattern when adding tests to `agent-client`.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub Issues on `github.com/jovstern/ai-presenter-agent`, via the `gh` CLI. See
+`docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context layout (one `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by
+`/domain-modeling`). See `docs/agents/domain.md`.
