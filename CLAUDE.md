@@ -74,12 +74,5 @@ are marked IMPLEMENTED — already built, not just planned.
 
 ## Agent skills
 
-### Issue tracker
-
-Issues live as GitHub Issues on `github.com/jovstern/ai-presenter-agent`, via the `gh` CLI. See
-`docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-Single-context layout (one `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by
-`/domain-modeling`). See `docs/agents/domain.md`.
+Agent-skill / plugin config (issue tracker, domain docs) lives in `docs/agents/README.md`, not
+here — this section is deliberately kept to a pointer.
