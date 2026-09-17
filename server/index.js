@@ -13,8 +13,9 @@ const app = express();
 // gate on same-origin and rate-limit per IP. This does NOT close the
 // co-resident-script vector H1 describes (a hostile script running on this
 // same origin, e.g. inside the sandboxed clone) — that needs a short-TTL nonce
-// embedded in the sandbox page and echoed back by the client, which can't be
-// wired up until sandbox/ exists (M3/M4). Tracked there.
+// embedded in the sandbox page and echoed back by the client. sandbox/ exists
+// now (M3), but nothing binds a nonce to it yet — still tracked for M4, where
+// the bridge's action-dispatch messages get a real session to bind against.
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const requestLog = new Map(); // ip -> { count, windowStart }
@@ -79,13 +80,11 @@ app.get('/api/live-token', async (req, res) => {
   }
 });
 
-// M1 scope note: sandbox/ and target-app/ don't exist yet (that's M3). Serving
-// agent-client's build output plus a bare harness page is enough to manually
-// verify the voice round trip in a real browser; the harness is replaced by
-// sandbox/index.html once M3 lands.
 app.use('/agent-client', express.static(path.join(__dirname, '../agent-client/dist')));
+app.use('/sandbox', express.static(path.join(__dirname, '../sandbox')));
+app.use('/target-app', express.static(path.join(__dirname, '../target-app')));
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dev-harness.html'));
+  res.sendFile(path.join(__dirname, '../sandbox/index.html'));
 });
 
 app.listen(PORT, () => {

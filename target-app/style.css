@@ -1,0 +1,25 @@
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 480px;
+  margin: 40px auto;
+  padding: 0 16px;
+  color: #1a1a1a;
+}
+
+nav a {
+  margin-right: 12px;
+}
+
+.save-confirmation {
+  display: none;
+  color: #1a7a1a;
+  margin-top: 8px;
+}
+
+.save-confirmation--visible {
+  display: block;
+}
+
+.spacer {
+  height: 800px;
+}

@@ -35,8 +35,9 @@
 >   endpoint; a request with neither header, e.g. curl, is rejected) and rate-limits per IP. Still
 >   doesn't close the co-resident-script vector H1 actually describes — a hostile script already
 >   running on this origin can forge both headers trivially. That needs a short-TTL nonce embedded
->   in the sandbox page and echoed back by the client, which can't be wired up until `sandbox/`
->   exists — still open, tracked for M3/M4.
+>   in the sandbox page and echoed back by the client — `sandbox/` exists as of M3, but nothing
+>   binds a nonce to it yet, since there's no live session to bind against until the bridge is
+>   actually wired to tool-calling. Still open, tracked for M4.
 >
 > B3, B4, and everything else below remain open or not yet applicable (e.g. B3's re-greet-on-
 > navigation bug has no iframe/navigation to trigger it yet in this rebuild).
