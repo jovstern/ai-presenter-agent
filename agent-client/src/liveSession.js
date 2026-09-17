@@ -141,6 +141,12 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
         return;
       }
       session = newSession;
+      // Greet once per fresh session, not on a resumed reconnect — otherwise
+      // a mid-conversation resumption would restart the conversation with a
+      // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
+      if (!resumeHandle) {
+        session.sendClientContent({ turns: 'Greet the user with a brief hello.', turnComplete: true });
+      }
     } catch {
       if (gen !== generation) return;
       setStatus('failed');
