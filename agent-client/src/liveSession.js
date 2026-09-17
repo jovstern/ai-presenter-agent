@@ -2,6 +2,7 @@
 // condition wasn't picked up by this build and pulled in the Node build
 // instead, which references `process` and crashes in the browser.
 import { GoogleGenAI, Modality } from '@google/genai/web';
+import { CHANGE_EVENT, buildContextMessage } from './knowledgeStore.js';
 
 const MODEL = 'gemini-3.8-live';
 
@@ -37,6 +38,18 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
   function sendFrame(base64Frame) {
     session.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
   }
+
+  // Resent on every connect() (including a resumed reconnect) and whenever
+  // the knowledge store changes mid-session — a (re)connect can't fully
+  // trust a resumed session's turn history is intact, so this resends fresh
+  // grounding rather than assuming the model still remembers.
+  function sendKnowledgeContext() {
+    if (!session) return;
+    const message = buildContextMessage();
+    if (message) session.sendClientContent({ turns: message, turnComplete: false });
+  }
+
+  window.addEventListener(CHANGE_EVENT, sendKnowledgeContext);
 
   function setStatus(status) {
     onStatusChange?.(status);
@@ -153,6 +166,7 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
       session = newSession;
       pendingFrames.forEach(sendFrame);
       pendingFrames = [];
+      sendKnowledgeContext();
       // Greet once per fresh session, not on a resumed reconnect — otherwise
       // a mid-conversation resumption would restart the conversation with a
       // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
