@@ -17,6 +17,30 @@
 > post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) is still open. Left the checkbox
 > and severity as this reviewer wrote them; just don't read H5 as fully open anymore.
 >
+> **Editorial note (M1 rebuild, GitHub issue #1 / PR #6):** the file paths below (`bridge.js`,
+> `actionTools.js`, a 294-line `useLiveAgent.js`) no longer exist — the whole implementation was
+> deleted and rebuilt from scratch (`7c2965b`). The equivalent logic for a few items now lives in
+> `agent-client/src/liveSession.js` and `agent-client/src/audioIO.js`:
+> - **B1** (no transcription) — fixed. `outputAudioTranscription`/`inputAudioTranscription` are set
+>   in the connect config from the start, not added after the fact.
+> - **B2** (reconnect leaks the mic pipeline / races two sessions) — fixed structurally. Mic capture
+>   (`audioIO.js`) and session/reconnect (`liveSession.js`) are separate modules; reconnect logic
+>   never calls back into capture, and `liveSession.js` uses a generation counter plus a single
+>   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
+> - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
+>   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
+> - **H1** (open token-vending endpoint) — **partially** fixed. `server/index.js` gates
+>   `/api/live-token` on same-origin (checked against `Origin`, falling back to `Referer` since
+>   Chrome's `fetch()` omits `Origin` on same-origin requests — confirmed against this exact
+>   endpoint; a request with neither header, e.g. curl, is rejected) and rate-limits per IP. Still
+>   doesn't close the co-resident-script vector H1 actually describes — a hostile script already
+>   running on this origin can forge both headers trivially. That needs a short-TTL nonce embedded
+>   in the sandbox page and echoed back by the client, which can't be wired up until `sandbox/`
+>   exists — still open, tracked for M3/M4.
+>
+> B3, B4, and everything else below remain open or not yet applicable (e.g. B3's re-greet-on-
+> navigation bug has no iframe/navigation to trigger it yet in this rebuild).
+>
 > Severity: **Blocker** = likely broken or conspicuously missing the first time it runs for real ·
 > **High** = correctness / security / core UX · **Medium** = will bite eventually · **Low** = polish.
 

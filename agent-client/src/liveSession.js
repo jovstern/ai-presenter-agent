@@ -20,6 +20,11 @@ const SYSTEM_INSTRUCTION =
 // resumption. Deliberately knows nothing about the microphone — reconnects
 // never touch audio capture, which is what caused the old build's reconnect
 // bug (docs/code-review-notes.md B2: mic pipeline duplicated on every retry).
+// Mic frames arrive continuously from the moment Connect is clicked, but
+// ai.live.connect() takes a beat to resolve — bound how much audio queues up
+// for that gap so "hears you" doesn't depend on speaking after a fixed delay.
+const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
+
 export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, onInterrupted }) {
   let session = null;
   let generation = 0;
@@ -27,6 +32,11 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
   let reconnectTimer = null;
   let attempt = 0;
   let manuallyClosed = false;
+  let pendingFrames = [];
+
+  function sendFrame(base64Frame) {
+    session.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
+  }
 
   function setStatus(status) {
     onStatusChange?.(status);
@@ -141,6 +151,8 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
         return;
       }
       session = newSession;
+      pendingFrames.forEach(sendFrame);
+      pendingFrames = [];
       // Greet once per fresh session, not on a resumed reconnect — otherwise
       // a mid-conversation resumption would restart the conversation with a
       // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
@@ -155,7 +167,12 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
   }
 
   function sendAudioFrame(base64Frame) {
-    session?.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
+    if (session) {
+      sendFrame(base64Frame);
+      return;
+    }
+    pendingFrames.push(base64Frame);
+    if (pendingFrames.length > MAX_PENDING_FRAMES) pendingFrames.shift();
   }
 
   function disconnect() {
@@ -163,6 +180,7 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
     manuallyClosed = true;
     attempt = 0;
     resumeHandle = null;
+    pendingFrames = [];
     teardown();
     setStatus('closed');
   }

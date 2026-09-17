@@ -20,9 +20,22 @@ const RATE_LIMIT_WINDOW_MS = 60_000;
 const requestLog = new Map(); // ip -> { count, windowStart }
 
 function isSameOrigin(req) {
+  const expected = `${req.protocol}://${req.get('host')}`;
   const origin = req.get('origin');
-  if (!origin) return true; // no Origin header (e.g. direct navigation) — can't verify, allow
-  return origin === `${req.protocol}://${req.get('host')}`;
+  if (origin) return origin === expected;
+
+  // Chrome's fetch() omits Origin for same-origin requests (confirmed against
+  // this exact endpoint), so falling back to Referer isn't optional — it's
+  // the only signal a legitimate same-origin call actually sends. No Origin
+  // AND no Referer (curl, a bare HTTP client, most non-browser callers) is
+  // rejected rather than waved through.
+  const referer = req.get('referer');
+  if (!referer) return false;
+  try {
+    return new URL(referer).origin === expected;
+  } catch {
+    return false;
+  }
 }
 
 function isRateLimited(req) {
