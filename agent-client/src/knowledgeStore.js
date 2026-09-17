@@ -31,6 +31,14 @@ function hasAcceptedExtension(name) {
   return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 
+// Shared shape for addFile/setRules instead of each hand-rolling { ok, ... }.
+function ok(extra) {
+  return { ok: true, ...extra };
+}
+function fail(reason) {
+  return { ok: false, reason };
+}
+
 export function listFiles() {
   return readFiles();
 }
@@ -39,22 +47,26 @@ export function totalBytes() {
   return readFiles().reduce((sum, f) => sum + f.size, 0);
 }
 
-// Resolves { ok: true, file } or { ok: false, reason }. Refuses outright on
-// a rejected extension or an over-cap size — no silent failure, no truncation.
+export function fileCount() {
+  return readFiles().length;
+}
+
+// Resolves ok({ file }) or fail(reason). Refuses outright on a rejected
+// extension or an over-cap size — no silent failure, no truncation.
 export async function addFile(file) {
   if (!hasAcceptedExtension(file.name)) {
-    return { ok: false, reason: `Only ${ACCEPTED_EXTENSIONS.join('/')} files are accepted` };
+    return fail(`Only ${ACCEPTED_EXTENSIONS.join('/')} files are accepted`);
   }
   const files = readFiles();
   const currentTotal = files.reduce((sum, f) => sum + f.size, 0);
   if (currentTotal + file.size > MAX_TOTAL_BYTES) {
-    return { ok: false, reason: `Adding this file would exceed the ${MAX_TOTAL_BYTES / (1024 * 1024)}MB total limit` };
+    return fail(`Adding this file would exceed the ${MAX_TOTAL_BYTES / (1024 * 1024)}MB total limit`);
   }
 
   const text = await file.text();
   const entry = { id: crypto.randomUUID(), name: file.name, size: file.size, addedAt: Date.now(), text };
   writeFiles([...files, entry]);
-  return { ok: true, file: entry };
+  return ok({ file: entry });
 }
 
 export function removeFile(id) {
@@ -65,18 +77,24 @@ export function getRules() {
   return localStorage.getItem(RULES_KEY) ?? '';
 }
 
-// Resolves { ok: true } or { ok: false, reason }.
+// Resolves ok() or fail(reason).
 export function setRules(text) {
   if (text.length > MAX_RULES_CHARS) {
-    return { ok: false, reason: `Rules must be ${MAX_RULES_CHARS} characters or fewer` };
+    return fail(`Rules must be ${MAX_RULES_CHARS} characters or fewer`);
   }
   localStorage.setItem(RULES_KEY, text);
   window.dispatchEvent(new Event(CHANGE_EVENT));
-  return { ok: true };
+  return ok();
 }
 
 export function hasContent() {
   return readFiles().length > 0 || getRules().trim().length > 0;
+}
+
+// For useSyncExternalStore: subscribe to every store write, files or rules.
+export function subscribe(callback) {
+  window.addEventListener(CHANGE_EVENT, callback);
+  return () => window.removeEventListener(CHANGE_EVENT, callback);
 }
 
 // The context-stuffing blob sent into the live session: rules framed and

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import * as knowledgeStore from './knowledgeStore.js';
@@ -8,17 +8,10 @@ export function AgentApp({ portalContainer }) {
   const isConnected = status === 'open' || status === 'connecting';
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  const [fileCount, setFileCount] = useState(() => knowledgeStore.listFiles().length);
-  const [hasContent, setHasContent] = useState(() => knowledgeStore.hasContent());
-
-  useEffect(() => {
-    function refresh() {
-      setFileCount(knowledgeStore.listFiles().length);
-      setHasContent(knowledgeStore.hasContent());
-    }
-    window.addEventListener(knowledgeStore.CHANGE_EVENT, refresh);
-    return () => window.removeEventListener(knowledgeStore.CHANGE_EVENT, refresh);
-  }, []);
+  // Read straight from the store rather than mirroring it into local state —
+  // knowledgeStore.subscribe/fileCount/hasContent are the source of truth.
+  const fileCount = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.fileCount);
+  const hasContent = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.hasContent);
 
   return (
     <div className="agent-app">
