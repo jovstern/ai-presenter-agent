@@ -29,6 +29,7 @@ function mount() {
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
     .agent-app__status { margin-left: 8px; color: #666; }
+    .agent-app__mic-error { margin-top: 8px; color: #b3261e; font-size: 0.9em; }
     .agent-app__transcript { list-style: none; margin: 8px 0 0; padding: 0; max-height: 200px; overflow-y: auto; }
     .agent-app__line { margin-bottom: 4px; }
     .agent-app__line--agent { color: #1a1a1a; }

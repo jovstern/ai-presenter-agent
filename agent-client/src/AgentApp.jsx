@@ -1,7 +1,7 @@
 import { useLiveAgent } from './useLiveAgent.js';
 
 export function AgentApp() {
-  const { status, transcript, connect, disconnect } = useLiveAgent();
+  const { status, transcript, micError, connect, disconnect } = useLiveAgent();
   const isConnected = status === 'open' || status === 'connecting';
 
   return (
@@ -10,6 +10,7 @@ export function AgentApp() {
         {isConnected ? 'Disconnect' : 'Connect'}
       </button>
       <span className="agent-app__status">{status}</span>
+      {micError && <div className="agent-app__mic-error">Mic error: {micError}</div>}
       <ul className="agent-app__transcript">
         {transcript.map((entry, i) => (
           <li key={i} className={`agent-app__line agent-app__line--${entry.role}`}>

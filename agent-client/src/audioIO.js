@@ -3,7 +3,7 @@ import { encodeInputFrame, OUTPUT_SAMPLE_RATE } from './pcm.js';
 // Mic capture. Uses a deprecated ScriptProcessorNode rather than an
 // AudioWorklet — deliberate, for simplicity; revisit if this ever needs to
 // leave a local demo (see docs/project-knowledge-handoff.md §3.3).
-export function startCapture({ onFrame }) {
+export function startCapture({ onFrame, onError }) {
   let audioContext;
   let stream;
   let source;
@@ -12,7 +12,12 @@ export function startCapture({ onFrame }) {
   let stopped = false;
 
   const ready = (async () => {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      onError?.(err);
+      return;
+    }
     if (stopped) {
       stream.getTracks().forEach((t) => t.stop());
       return;

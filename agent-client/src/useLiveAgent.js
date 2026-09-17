@@ -9,6 +9,7 @@ import { decodeOutputChunk } from './pcm.js';
 export function useLiveAgent() {
   const [status, setStatus] = useState('idle');
   const [transcript, setTranscript] = useState([]);
+  const [micError, setMicError] = useState(null);
   const sessionRef = useRef(null);
   const captureRef = useRef(null);
   const playerRef = useRef(null);
@@ -32,10 +33,12 @@ export function useLiveAgent() {
   }, []);
 
   const connect = useCallback(async () => {
+    setMicError(null);
     const session = getSession();
     playerRef.current = createPlayer();
     captureRef.current = startCapture({
       onFrame: (frame) => session.sendAudioFrame(frame),
+      onError: (err) => setMicError(err.message || String(err)),
     });
     await session.connect();
   }, [getSession]);
@@ -48,5 +51,5 @@ export function useLiveAgent() {
     playerRef.current = null;
   }, []);
 
-  return { status, transcript, connect, disconnect };
+  return { status, transcript, micError, connect, disconnect };
 }
