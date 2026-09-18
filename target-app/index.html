@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Target App — Home</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <nav>
+      <a data-testid="nav-home" href="index.html">Home</a>
+      <a data-testid="nav-settings" href="settings.html">Settings</a>
+    </nav>
+
+    <h1 data-testid="home-heading">Home</h1>
+
+    <p>
+      Counter: <span data-testid="counter-value">0</span>
+      <button data-testid="counter-increment">Increment</button>
+    </p>
+
+    <p>
+      <input data-testid="search-input" type="text" placeholder="Search" />
+      <button data-testid="search-button">Search</button>
+    </p>
+
+    <div class="spacer"></div>
+    <p data-testid="scroll-target">You scrolled to the bottom of Home.</p>
+
+    <script>
+      document.querySelector('[data-testid="counter-increment"]').addEventListener('click', () => {
+        const el = document.querySelector('[data-testid="counter-value"]');
+        el.textContent = String(Number(el.textContent) + 1);
+      });
+    </script>
+  </body>
+</html>
