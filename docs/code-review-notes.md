@@ -29,15 +29,25 @@
 >   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
 > - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
 >   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
-> - **H1** (open token-vending endpoint) — **partially** fixed. `server/index.js` gates
->   `/api/live-token` on same-origin (checked against `Origin`, falling back to `Referer` since
->   Chrome's `fetch()` omits `Origin` on same-origin requests — confirmed against this exact
->   endpoint; a request with neither header, e.g. curl, is rejected) and rate-limits per IP. Still
->   doesn't close the co-resident-script vector H1 actually describes — a hostile script already
->   running on this origin can forge both headers trivially. That needs a short-TTL nonce embedded
->   in the sandbox page and echoed back by the client — `sandbox/` exists as of M3, but nothing
->   binds a nonce to it yet, since there's no live session to bind against until the bridge is
->   actually wired to tool-calling. Still open, tracked for M4.
+> - **H1** (open token-vending endpoint) — fixed as far as this design can close it. `server/
+>   index.js` gates `/api/live-token` on same-origin (`Origin`, falling back to `Referer` since
+>   Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per IP, and now (M4)
+>   also requires a nonce that `sandbox/index.html` embeds at serve time (`window.__DS_NONCE__`,
+>   templated in by the server) and `liveSession.js` echoes back as a query param. This closes the
+>   cross-origin-frame/other-window vector cleanly. It does **not** close the co-resident-script
+>   vector H1 actually describes — a hostile script already running on this origin can read
+>   `window.__DS_NONCE__` off the page exactly like `agent-client` does. What the nonce actually
+>   buys against that script: a request must come from a script that loaded on this exact page, not
+>   an arbitrary cross-origin/cross-frame caller. This residual gap is inherent to the "hostile
+>   script running on the same origin" threat model, not a missing implementation step — closing it
+>   fully would need isolating the clone from the agent (e.g. a separate origin/sandboxed iframe for
+>   the clone), out of scope for this rebuild.
+>
+>   **Deviated from H1's original wording**: the nonce is reusable within a 1-hour TTL, not
+>   single-use. A live Gemini token is itself single-use + 60s, so a real conversation fetches a
+>   fresh one on every connect *and* every reconnect (network drop, session-cap resumption). A
+>   single-use nonce made every reconnect after the first fail with a 403 — caught while testing
+>   B2's reconnect path in a real browser, not a theoretical concern.
 >
 > B3, B4, and everything else below remain open or not yet applicable (e.g. B3's re-greet-on-
 > navigation bug has no iframe/navigation to trigger it yet in this rebuild).
