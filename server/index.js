@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,19 +8,47 @@ import { GoogleGenAI } from '@google/genai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const SANDBOX_HTML_PATH = path.join(__dirname, '../sandbox/index.html');
 
 const app = express();
 
-// Partial fix for docs/code-review-notes.md H1 (open token vending machine):
-// gate on same-origin and rate-limit per IP. This does NOT close the
-// co-resident-script vector H1 describes (a hostile script running on this
-// same origin, e.g. inside the sandboxed clone) — that needs a short-TTL nonce
-// embedded in the sandbox page and echoed back by the client. sandbox/ exists
-// now (M3), but nothing binds a nonce to it yet — still tracked for M4, where
-// the bridge's action-dispatch messages get a real session to bind against.
+// Fix for docs/code-review-notes.md H1 (open token vending machine): gate on
+// same-origin, rate-limit per IP, and require a nonce that sandbox/index.html
+// embeds at serve time and the client echoes back. This closes the
+// cross-origin-frame/other-window vector. It does NOT close the co-resident-
+// script vector H1 also describes — a hostile script already running on this
+// origin can read window.__DS_NONCE__ off the page just like agent-client
+// does. What the nonce actually buys: a request must come from a script that
+// loaded on *this* page, not an arbitrary cross-origin/cross-frame caller.
+//
+// Deliberately NOT single-use, despite H1's original wording: a live Gemini
+// token is itself single-use + 60s (below), so a real conversation fetches a
+// fresh one on every connect *and* every reconnect (network drop, session-
+// cap resumption). A single-use nonce made every reconnect after the first
+// fail with a 403 — caught by testing B2's reconnect path, not a theoretical
+// concern. Reusable within a generous TTL instead; a page open longer than
+// that needs a reload, which is an acceptable bar for this project's scope.
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const requestLog = new Map(); // ip -> { count, windowStart }
+
+const NONCE_TTL_MS = 60 * 60_000; // 1 hour — long enough for a real demo session
+const nonces = new Map(); // nonce -> expiresAt
+
+function issueNonce() {
+  const now = Date.now();
+  for (const [key, expiresAt] of nonces) {
+    if (expiresAt < now) nonces.delete(key);
+  }
+  const nonce = crypto.randomUUID();
+  nonces.set(nonce, now + NONCE_TTL_MS);
+  return nonce;
+}
+
+function isValidNonce(nonce) {
+  if (!nonce || !nonces.has(nonce)) return false;
+  return Date.now() <= nonces.get(nonce);
+}
 
 function isSameOrigin(req) {
   const expected = `${req.protocol}://${req.get('host')}`;
@@ -59,6 +89,10 @@ app.get('/api/live-token', async (req, res) => {
     res.status(429).json({ error: 'Too many requests' });
     return;
   }
+  if (!isValidNonce(req.query.nonce)) {
+    res.status(403).json({ error: 'Missing, invalid, or expired nonce' });
+    return;
+  }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -84,7 +118,8 @@ app.use('/agent-client', express.static(path.join(__dirname, '../agent-client/di
 app.use('/sandbox', express.static(path.join(__dirname, '../sandbox')));
 app.use('/target-app', express.static(path.join(__dirname, '../target-app')));
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../sandbox/index.html'));
+  const html = fs.readFileSync(SANDBOX_HTML_PATH, 'utf8').replace('%%DS_NONCE%%', issueNonce());
+  res.type('html').send(html);
 });
 
 app.listen(PORT, () => {
