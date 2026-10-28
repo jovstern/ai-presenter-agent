@@ -174,9 +174,23 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
 
 ### 3.3 What's NOT verified — the honest gap list
 
-- **The actual live voice/tool-call loop has never run end to end.** It needs a real
-  `GEMINI_API_KEY`, which wasn't available while building this. Everything in `useLiveAgent.js`
-  is correct-per-docs, not correct-per-observed-behavior. Run it for real before trusting it.
+- **The session logic is unit-tested; the real Live service still isn't in the loop.** Since M4
+  T3, `agent-client/src/__tests__/liveSession.test.js` drives `liveSession.js` against a fake
+  `@google/genai/web` client, a stubbed token `fetch` and a fake bridge: the B2 drop collapse
+  (`onerror`+`onclose` → one reconnect), a superseded connect, H4's in-order tool batches, a batch
+  orphaned by a reconnect, resumption, the loop guard, the status sequence and `dispose()`. That
+  proves the state machine, not the wire protocol: message shapes and timing come from Google's
+  docs, not from observed traffic, so a real-key browser run is still the test that counts.
+- **Reconnect behaviour (`liveSession.js`).** A drop (`onerror` and/or `onclose`, a failed token
+  fetch, or a rejected `live.connect()`) retires the session's generation and schedules a single
+  retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
+  `{ attempt, maxAttempts: 6 }`) while a retry is pending, and becomes `failed` only once all six
+  are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
+  no longer accepted: the reason tells the user to reload. The attempt count resets on the first
+  server message of a session (normally `setupComplete`), not on `onopen`, so a socket that opens
+  and closes without the server answering keeps climbing the backoff instead of retrying at 0 ms.
+  A manual Connect/Retry starts a fresh budget. Unit-tested; not yet exercised against a real
+  network drop in this form.
 - **Model name and audio sample rates were re-verified against Google's docs directly (Sept
   2026)**, not just recalled: `gemini-3.1-flash-live-preview` is confirmed as the current
   recommended Live model (successor to `gemini-2.5-flash-native-audio-preview`), input is 16kHz
@@ -187,10 +201,11 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   reliability — a fact discovered *after* the initial build, not designed around from the start.
   Fixed by wiring up **session resumption**: `sessionResumption: {}` in the connect config starts
   a resumable session, `sessionResumptionUpdate` messages carry a handle
-  (`useLiveAgent.js` stores it in `resumeHandleRef`), and every `connect()` call — including
-  reconnects — passes that stored handle back if one exists, so a 15-minute cutoff is handled by
-  the same reconnect path as a real network drop rather than being a separate failure mode.
-  **Not verified against a live session** — the exact field names (`sessionResumptionUpdate`,
+  (`liveSession.js` stores it in `resumeHandle`), and every reconnect passes that stored handle
+  back if one exists, so a 15-minute cutoff is handled by the same reconnect path as a real
+  network drop rather than being a separate failure mode. The unit tests check that the handle is
+  passed and that a resumed session isn't greeted again. **Not verified against a live session**:
+  the exact field names (`sessionResumptionUpdate`,
   `.resumable`, `.newHandle`) are inferred from the SDK's consistent camelCase convention
   elsewhere (`serverContent`, `toolCall.functionCalls`), not confirmed from an actual received
   message. If resumption silently doesn't kick in, check these names first.

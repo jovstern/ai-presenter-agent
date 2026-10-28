@@ -212,7 +212,23 @@ Suggested, in rough order of value:
 > the handshake can connect first and take the bridge. H1 stays open until the token endpoint
 > and CSP work in M5.
 
-### [ ] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
+### [x] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
+
+> **Fixed (M1 split + M4 T3 tests).** The hook was split as directed: `audioIO.js` owns capture and
+> playback (M1), `liveSession.js` owns the socket, reconnect, resumption, tool dispatch and
+> context injection, and `useLiveAgent.js` is glue with no `useCallback`s or `exhaustive-deps`
+> escape hatches. Since M4 T3, `agent-client/src/__tests__/liveSession.test.js` (15 tests, fake
+> `@google/genai/web` + stubbed token `fetch` + fake bridge, fake timers) covers: `onerror`+`onclose`
+> → exactly one reconnect (B2); a connect superseded during `live.connect()` or the token fetch;
+> a `[navigate, click]` batch dispatched in order (H4); no stale tool response after a mid-batch
+> reconnect; resumption with the handle and no re-greeting; the status sequence `connecting` →
+> `open` → `reconnecting` → `open` → … → `failed`; `reconnecting` (not `failed`) while a retry is
+> pending; the loop guard's 4th-call block; a manual connect after `failed` resetting the
+> attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
+> server message, not `onopen`); a 4xx token response failing at once with a reload reason while
+> 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
+> The hook itself gets its tests in M4 T4.
+
 
 `useLiveAgent.js` (294 lines) owns the socket lifecycle, reconnect + resumption, mic capture,
 playback scheduling, tool dispatch, and context injection — and has no test coverage. The three

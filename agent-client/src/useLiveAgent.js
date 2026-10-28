@@ -23,7 +23,9 @@ export function useLiveAgent(bridge) {
     if (!sessionRef.current) {
       sessionRef.current = createLiveSession({
         bridge,
-        onStatusChange: setStatus,
+        // Only the status name is used so far; the { attempt, maxAttempts,
+        // reason } details that come with reconnecting/failed aren't shown yet.
+        onStatusChange: (nextStatus) => setStatus(nextStatus),
         onAudioChunk: (base64) => {
           playerRef.current?.enqueue(decodeOutputChunk(base64));
         },
