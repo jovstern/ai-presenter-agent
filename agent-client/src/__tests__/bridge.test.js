@@ -128,3 +128,23 @@ describe('sandbox/bridge.js navigate', () => {
     });
   });
 });
+
+describe('sandbox/bridge.js channel', () => {
+  it('keeps replying on the port when MessagePort.prototype.postMessage is patched after load', async () => {
+    const tap = vi.fn();
+    const original = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (...args) {
+      tap(...args);
+      return original.apply(this, args);
+    };
+    try {
+      const result = nextMessage(agentPort, 'action-result');
+      // Sent with the captured original, so the tap only sees the bridge's reply if the bridge used the patched one.
+      original.call(agentPort, { type: 'action', id: 'a4', action: 'click', args: ['missing'] });
+      expect(await result).toMatchObject({ id: 'a4', success: false });
+      expect(tap).not.toHaveBeenCalled();
+    } finally {
+      MessagePort.prototype.postMessage = original;
+    }
+  });
+});

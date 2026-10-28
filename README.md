@@ -62,7 +62,7 @@ in advance; they stay in your browser's `localStorage`.
 
 ```bash
 cd agent-client
-npm test        # vitest: 8 files, 74 tests
+npm test        # vitest: 8 files, 76 tests
 npm run build   # single-file IIFE bundle in agent-client/dist/
 ```
 
@@ -75,7 +75,8 @@ The suite in `agent-client/src/__tests__/`:
   Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
-  own page and reports a page that never loads as a failure.
+  own page and reports a page that never loads as a failure; replies survive a later patch of
+  `MessagePort.prototype.postMessage`.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.

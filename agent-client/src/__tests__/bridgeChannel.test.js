@@ -174,3 +174,24 @@ describe('connectBridge', () => {
     await expect(pending).resolves.toMatchObject({ success: false });
   });
 });
+
+describe('connectBridge vs. a patched MessagePort.prototype.postMessage', () => {
+  it('keeps sending on the port with the postMessage captured at load', async () => {
+    const { channel, nextBridgeMessage } = open();
+    const tap = vi.fn();
+    const original = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function (...args) {
+      tap(...args);
+      return original.apply(this, args);
+    };
+    try {
+      channel.requestSnapshot();
+      channel.dispatchAction('click', ['save-button']);
+      expect(await nextBridgeMessage()).toEqual({ type: 'request-snapshot' });
+      expect(await nextBridgeMessage()).toMatchObject({ type: 'action', action: 'click' });
+      expect(tap).not.toHaveBeenCalled();
+    } finally {
+      MessagePort.prototype.postMessage = original;
+    }
+  });
+});

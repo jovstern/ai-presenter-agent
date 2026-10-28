@@ -36,7 +36,7 @@ rather than retrofit — this list is the actual build checklist for this repo:
 
 | # | v1 gap | v2 goal |
 |---|--------|---------|
-| 1 | `postMessage` bridge between agent and sandbox had no origin/token validation | One validated handshake (`event.origin` + `event.source`, first connect only), then all traffic on a private `MessageChannel` other page scripts can't read or forge ([ADR 0001](./adr/0001-private-bridge-channel.md)) |
+| 1 | `postMessage` bridge between agent and sandbox had no origin/token validation | One validated handshake (`event.origin` + `event.source`, first connect only), then all traffic on a private `MessageChannel`: invisible to passive `message` listeners and immune to forged `window` messages, though not to a script that patches `MessagePort.prototype.postMessage` before load ([ADR 0001](./adr/0001-private-bridge-channel.md)) |
 | 2 | Action-execution library lived on `window` — reachable directly, bypassing any message validation | Keep it in a closure only the message handler can call; never attach it to a global |
 | 3 | Action dispatch likely indexed an object by a string that ultimately traces back to model output | Explicit allowlist/switch over known action names before dispatch — never dynamic property access on untrusted input |
 | 4 | Agent sometimes hallucinated navigation targets that don't exist | Constrain *all* navigation (scripted flow steps **and** live/freeform decisions) to the same crawled-route allowlist — realized here as native Gemini function-calling with an enum of known pages, so the model literally cannot emit an unknown target |
@@ -146,10 +146,12 @@ needed; this is intentionally the simplest piece.
 - Listens on `window` for one thing only: the first `ds-bridge-connect` whose `event.origin` is
   the sandbox's own origin, whose `event.source` is the sandbox window itself, and which carries
   exactly one port. Later connects are ignored. All other traffic (actions, results, snapshots,
-  `navigated`) goes over that private port, so other page scripts can neither observe nor forge
-  it (v2 goal #1, [ADR 0001](./adr/0001-private-bridge-channel.md)). Residual risk: a hostile
-  script that runs before the agent-client's handshake could connect first; closing that needs
-  another origin (`code-review-notes.md` H1).
+  `navigated`) goes over that private port, so passive `message` listeners never see it and
+  forged `window` messages are ignored (v2 goal #1, [ADR 0001](./adr/0001-private-bridge-channel.md)).
+  Both ends capture `MessagePort.prototype.postMessage` at load, so patching it later doesn't
+  reach the traffic. Residual risks: a script that patches it *before* load, and a hostile script
+  that runs before the agent-client's handshake and connects first; closing those needs another
+  origin (`code-review-notes.md` H1).
 - Checks every action name against an explicit allowlist before dispatch, and wraps each action
   in try/catch so a throw still replies `{success:false, error}` (v2 goal #3).
 - Drops snapshots and `navigated` produced before the handshake; the agent-client asks for a

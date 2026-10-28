@@ -66,12 +66,16 @@ That hop uses `window.postMessage` exactly once: at mount, the agent-client crea
 accepts the first such connect (same origin, `event.source === window`, exactly one port) and
 ignores every later one. From then on all traffic (actions, results, snapshots, `navigated`)
 travels on the private port, because anything on `window` is visible to — and forgeable by —
-every other script in the same window, which an origin check can't tell apart
+every other script in the same window, which an origin check can't tell apart. The port keeps
+traffic away from passive `message` listeners and forged `window` messages; it does not stop a
+same-realm script that patches `MessagePort.prototype.postMessage`, which is why both ends capture
+that method at load
 ([ADR 0001](./adr/0001-private-bridge-channel.md)). Keep that distinction clear when explaining
 this out loud: same-origin doesn't mean "no messaging," it means "no messaging *required* — you're
 choosing it for decoupling, and you still have to secure it like you mean it" (private channel +
-allowlist, per the rebuild spec's goals #1–#3). The residual risk is a hostile script that runs
-before the handshake and connects first; closing it needs the clone on another origin.
+allowlist, per the rebuild spec's goals #1–#3). The residual risks are a script that patches
+`MessagePort.prototype.postMessage` before load, and a hostile script that runs before the
+handshake and connects first; closing them needs the clone on another origin.
 
 ## 5. If you ever want a real external site (deferred, not built here)
 

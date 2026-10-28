@@ -3,6 +3,11 @@
 // to agent-client over a private MessageChannel: one window.postMessage
 // handshake transfers the port, then all traffic stays on it.
 (function () {
+  // Captured at load, so a script that patches MessagePort.prototype.postMessage
+  // later can't read or alter replies (a patch made before load still can;
+  // see the residual risks below and docs/adr/0001-private-bridge-channel.md).
+  const send = MessagePort.prototype.postMessage;
+
   const KNOWN_ROUTES = ['home', 'settings'];
   // Absolute, not relative to target-app/ — iframe.src resolves against the
   // parent (sandbox) page's URL, not the iframe's current document.
@@ -26,11 +31,13 @@
   // §1.10, the exact v1 gap this is designed around).
   //
   // Binding to the agent is a private MessageChannel instead of a session
-  // token (docs/adr/0001-private-bridge-channel.md): other scripts on the page
-  // can't read snapshots/results or forge actions on the port. Residual risk,
-  // documented and not closed: a hostile script that runs *before*
-  // agent-client's handshake could connect first and take the bridge; closing
-  // that needs the clone on another origin (docs/code-review-notes.md H1).
+  // token (docs/adr/0001-private-bridge-channel.md): passive `message`
+  // listeners on the page never see snapshots/results, and forged `window`
+  // messages are ignored. Residual risks, documented and not closed: a hostile
+  // script that runs *before* agent-client's handshake could connect first and
+  // take the bridge, and one that patches MessagePort.prototype.postMessage
+  // before this script loads sees the traffic; closing both needs the clone on
+  // another origin (docs/code-review-notes.md H1).
   function findByTestId(testId) {
     return iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
   }
@@ -99,7 +106,7 @@
   let agentPort = null;
 
   function postToAgent(message) {
-    agentPort?.postMessage(message);
+    if (agentPort) send.call(agentPort, message);
   }
 
   // Accept the first ds-bridge-connect only: posted by this window itself

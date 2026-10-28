@@ -498,6 +498,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   keyboard.
 - `KnowledgeModal.test.jsx`: add a file → listed; an oversize file → alert; remove; rules
   over the limit → the message; Escape closes.
+- Fixed here explicitly (all pre-existing on `master`, found by the M4 UI review): the
+  dialog's focus trap leaking out of it inside the shadow root; Escape not returning focus to
+  the knowledge button that opened it; and the mouse-only drop zone (the real `<button>` above).
+  `KnowledgeModal.test.jsx` covers the focus return and the keyboard path to the file picker.
 
 *(medium, 10 min)*
 

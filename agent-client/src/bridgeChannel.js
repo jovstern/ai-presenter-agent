@@ -1,7 +1,16 @@
 // Private channel to sandbox/bridge.js (docs/adr/0001-private-bridge-channel.md).
 // One window.postMessage handshake transfers a MessagePort; after that every
-// message travels on the port, so other scripts on the page can neither read
-// snapshots/results nor forge them. Deliberately never listens on `window`.
+// message travels on the port, so passive `message` listeners on the page never
+// see snapshots/results, and forged `window` messages are ignored. Deliberately
+// never listens on `window`.
+//
+// What it does NOT stop: a same-realm script can patch
+// MessagePort.prototype.postMessage to read or alter what is sent. `send`
+// below is captured when this script loads, which closes patching *after*
+// load; a patch made *before* load, or a hostile script winning the handshake
+// before ours (the pre-handshake hijack), remain open until the clone runs on
+// another origin (docs/code-review-notes.md H1).
+const send = MessagePort.prototype.postMessage;
 
 // How long to wait for the bridge to reply to a dispatched action before
 // reporting failure to the model — an unresponsive page shouldn't hang the turn.
@@ -51,12 +60,12 @@ export function connectBridge({ postConnect = postConnectToWindow } = {}) {
         ACTION_TIMEOUT_MS,
       );
       pendingActions.set(id, { resolve, timer });
-      port.postMessage({ type: 'action', id, action, args });
+      send.call(port, { type: 'action', id, action, args });
     });
   }
 
   function requestSnapshot() {
-    port.postMessage({ type: 'request-snapshot' });
+    send.call(port, { type: 'request-snapshot' });
   }
 
   function subscribe(listeners, callback) {

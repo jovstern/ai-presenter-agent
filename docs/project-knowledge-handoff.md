@@ -164,9 +164,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes (74 tests, 8 files, as of the M4 fix wave): `liveSession.test.js`
-  (23 — the session state machine, see §3.3), `bridge.test.js` (3 — `sandbox/bridge.js`'s
-  `navigate` against a stubbed iframe), `bridgeChannel.test.js` (9 — the private channel),
+- `agent-client`'s test suite passes (76 tests, 8 files, as of the M4 fix wave): `liveSession.test.js`
+  (23 — the session state machine, see §3.3), `bridge.test.js` (4 — `sandbox/bridge.js`'s
+  `navigate` against a stubbed iframe, and its replies surviving a later `postMessage` patch), `bridgeChannel.test.js` (10 — the private channel),
   `knowledgeStore.test.js` (10 — see §5.1), `useLiveAgent.test.jsx` (14 — the hook and card via
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
@@ -275,9 +275,12 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   across the iframe boundary. The one hop that exists is a deliberate decoupling between two
   independently-built bundles, not a same-origin-policy requirement. See `sandbox-simulation.md` §4.
 - **That hop runs on a private `MessageChannel`, not `window.postMessage`** (2026-10-28) — one
-  first-only `ds-bridge-connect` handshake, then all traffic on the port, so other same-origin
-  scripts can't read or forge it; chosen over a session token they could read off the broadcast.
-  See [ADR 0001](./adr/0001-private-bridge-channel.md) (the residual first-connect risk is there).
+  first-only `ds-bridge-connect` handshake, then all traffic on the port, so passive `message`
+  listeners never see it and forged `window` messages are ignored; chosen over a session token
+  they could read off the broadcast. It does not stop a same-realm script that patches
+  `MessagePort.prototype.postMessage`: both ends capture that method at load, which closes
+  tampering after load but not before it. See [ADR 0001](./adr/0001-private-bridge-channel.md)
+  (the residual pre-load and first-connect risks are there).
 - **`navigate` tool uses a schema `enum` of known pages** — structurally prevents the exact
   hallucinated-navigation bug seen in the original system, instead of relying on prompting the
   model not to do it.

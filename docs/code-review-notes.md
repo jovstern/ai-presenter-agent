@@ -12,8 +12,9 @@
 > inferred, no bridge-validation test, untuned snapshot cap, `ScriptProcessorNode`, no deploy
 > story) — those aren't repeated here.
 >
-> Each item has a checkbox. Tick the ones worth doing; leave the rest. Nothing here has been
-> changed in the code — this doc is the only thing added.
+> Each item has a checkbox. Tick the ones worth doing; leave the rest. *(Historical, the original
+> reviewer's framing: "Nothing here has been changed in the code — this doc is the only thing
+> added." The code has changed since; see the editorial notes and each item's "Fixed" note.)*
 >
 > **Editorial note (added afterward, not by the original reviewer):** H5 is now half-stale. Point
 > 1 (diff computed but discarded, contradicting spec §5.3) was fixed by introducing
@@ -35,7 +36,7 @@
 >   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
 > - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
 >   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
-> - **H1** (open token-vending endpoint) — fixed as far as this design can close it. `server/
+> - **H1** (open token-vending endpoint) — partly mitigated; open until the M5 CSP (#13). `server/
 >   index.js` gates `/api/live-token` on same-origin (`Origin`, falling back to `Referer` since
 >   Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per IP, and now (M4)
 >   also requires a nonce that `sandbox/index.html` embeds at serve time (`window.__DS_NONCE__`,
@@ -236,9 +237,11 @@ Suggested, in rough order of value:
 
 > **Note (M4 T2):** the agent-client ↔ bridge traffic now runs on a private `MessageChannel`
 > ([ADR 0001](./adr/0001-private-bridge-channel.md)): one `ds-bridge-connect` handshake on
-> `window`, accepted first-only, then everything on the port, so co-resident scripts can no
-> longer read snapshots/results or forge them. Residual risk: a hostile script that runs before
-> the handshake can connect first and take the bridge.
+> `window`, accepted first-only, then everything on the port, so passive `message` listeners no
+> longer see snapshots/results and forged `window` messages are ignored. It does not stop a
+> same-realm script that patches `MessagePort.prototype.postMessage`; since the M4 fix wave both
+> ends capture that method at load, which closes tampering after load. Residual risks: tampering
+> before load, and a hostile script that runs before the handshake and connects first.
 >
 > **Still open (M4 T5):** the endpoint half is done (`server/index.js`: same-origin check,
 > per-IP rate limit, page nonce — see the editorial note at the top). H1 stays unticked until the
