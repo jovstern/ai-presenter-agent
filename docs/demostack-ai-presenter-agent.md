@@ -43,17 +43,22 @@ rather than retrofit — this list is the actual build checklist for this repo:
 | 5 | Repetition loops (agent repeats a sentence/action) | Loop guard: cap consecutive identical actions/utterances, force escalation past the cap |
 | 6 | Dropped WebSocket/Live session was silent to the user (volume graph + mic just vanish) | Explicit reconnecting / failed states, with a manual retry affordance on final failure |
 | 7 | DOM grounding shape was informal / undocumented | Formal reduced snapshot: interactive/labeled nodes only, diffed against the last snapshot, size-capped |
-| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value |
-| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates |
+| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value. **Status:** lost in the from-scratch rebuild (no volume meter today); restored in M7 (#11) as the volume orb |
+| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates. **Status:** lost in the from-scratch rebuild; `renderIsolation.test.jsx` is restored in M7 (#11) |
 | 10 | Template edits' effect on already-created demo-agents was never verified | Out of scope for this build (no template/demo-agent model here) — documented for the full-product build later |
+
+> **Note (M4 T5):** goals #8 and #9 were built in the first v2 implementation and lost when it was
+> deleted and rebuilt from scratch. The current card has no volume meter and no render-count test;
+> both come back with the designed widget in M7 (issue #11).
 
 ## 3. Functional requirements (this build)
 
 - A **sandbox** page hosting an `<iframe>` pointing at the target-app, same-origin.
 - A **target-app**: a couple of static pages with a handful of labeled interactive elements
   (nav link, button, form) — the stand-in for a "cloned app."
-- An **agent-client**: a prebuilt script + custom element, mounted into a shadow root in the
-  sandbox, that connects directly to Gemini Live, converses by voice, and dispatches actions.
+- An **agent-client**: a prebuilt script that mounts itself into a shadow root (on a plain host
+  `<div>`) in the sandbox, connects directly to Gemini Live, converses by voice, and dispatches
+  actions.
 - A minimal **server**: mints a short-lived ephemeral token for Gemini Live (the only thing it
   does — see §5.4) and serves the static bundles.
 
@@ -185,13 +190,17 @@ events go directly from the browser to Gemini Live.
   on final failure, shows a visible failed state with a manual retry button (v2 goal #6).
 - Volume meter: volume value lives in a ref, bars update imperatively via `requestAnimationFrame`
   — no React state, no re-renders for that value at all (v2 goal #8, the "go further" option from
-  the deep-dive doc).
+  the deep-dive doc). Not in the current build: lost in the rebuild, restored in M7 (#11).
 
 ### 5.6 Testing
 
 - Render-count test on the sibling components (avatar image, transcript log) asserting their
-  render counts stay flat under a burst of simulated volume updates (v2 goal #9).
-- A unit test for the bridge's origin/token/allowlist validation — the exact gap v1 shipped with.
+  render counts stay flat under a burst of simulated volume updates (v2 goal #9). Lost in the
+  rebuild; restored in M7 (#11).
+- A test for the bridge's origin/source/allowlist validation — the exact gap v1 shipped with.
+  The agent side of the private channel is unit-tested today (`bridgeChannel.test.js`); the
+  test of `sandbox/bridge.js`'s handshake and allowlist arrives with the M5 e2e (#13,
+  `e2e/bridge.spec.js`).
 
 ## 6. Open questions
 

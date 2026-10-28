@@ -138,25 +138,42 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 ### 3.1 What exists
 
 ```
-docs/            this doc + the spec + the sandbox-simulation doc
+docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/
 target-app/      2 static pages (Home, Settings), a handful of data-testid elements
-sandbox/         iframe host page + bridge.js (action library, DOM snapshot, validation)
+sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
 agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
 server/          Express server: mints a Gemini Live ephemeral token, serves the static bundles
 ```
 
+Two npm packages (`agent-client`, `server`) and two static directories (`sandbox`,
+`target-app`). Inside `agent-client/src/`:
+
+- `main.jsx` — mounts the shadow root on a plain host `<div>`, opens the bridge channel once for
+  the page's lifetime, unmounts on a non-persisted `pagehide`.
+- `bridgeChannel.js` — the agent's end of the private `MessageChannel` to `sandbox/bridge.js`
+  ([ADR 0001](./adr/0001-private-bridge-channel.md)).
+- `liveSession.js` — the Live socket: token fetch, connect, one-retry-per-drop backoff,
+  resumption, serialized tool dispatch, knowledge and snapshot injection. The riskiest file.
+- `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
+  playback, barge-in); owns teardown.
+- `AgentApp.jsx` — the minimal card (one Connect / Disconnect / Retry button, status line, alert
+  on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
+- Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
+  `knowledgeStore.js`.
+
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes (21 tests, 4 files): `loopGuard.test.js` (4 tests),
-  `renderIsolation.test.jsx` (1 test, using `React.Profiler` to prove the transcript log does
-  **not** re-render across 20 simulated volume updates, and **does** re-render on a real
-  transcript change), `knowledgeStore.test.js` (8 tests — see §5.1), and
-  `domSnapshotContext.test.js` (8 tests — the keyframe-vs-delta decision, see the decisions log
-  below and `demostack-ai-presenter-agent.md` §5.3).
-- `vite build` produces a single self-contained `dist/agent-client.js` (~1026KB unminified-report,
-  ~282KB gzip on React 19 + the React Compiler — was ~837KB/228KB on React 18) with no build
-  errors.
+- `agent-client`'s test suite passes (57 tests, 7 files, as of M4 T5): `liveSession.test.js`
+  (15 — the session state machine, see §3.3), `bridgeChannel.test.js` (9 — the private channel),
+  `knowledgeStore.test.js` (10 — see §5.1), `useLiveAgent.test.jsx` (8 — the hook and card via
+  Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
+  decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
+  `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
+  returns in M7 (#11).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 621.9 kB,
+  149.5 kB gzip (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
   `/agent-client/agent-client.js`) still returns 200, confirmed by actually hitting each one after
@@ -171,16 +188,23 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   `session.sendRealtimeInput`, `session.sendToolResponse`, the `toolCall.functionCalls` shape) was
   checked against Google's current docs (`ai.google.dev/gemini-api/docs/live-api/*`) via live web
   search/fetch during this build, not recalled from training data alone.
+- **The live loop was run by hand in a real browser with a real key (PR #9, M4).** A multi-step
+  task across a navigation (increment the counter → go to Settings → toggle notifications → save)
+  completed, with the agent reporting DOM state it could only have learned from a live snapshot.
+  Force-closing the WebSocket mid-session fired exactly one reconnect (one token request), the
+  status recovered and tool calls worked again, and neither reconnect nor navigation produced a
+  second greeting.
 
 ### 3.3 What's NOT verified — the honest gap list
 
-- **The session logic is unit-tested; the real Live service still isn't in the loop.** Since M4
+- **The session logic is unit-tested; the real Live service is only checked by hand.** Since M4
   T3, `agent-client/src/__tests__/liveSession.test.js` drives `liveSession.js` against a fake
   `@google/genai/web` client, a stubbed token `fetch` and a fake bridge: the B2 drop collapse
   (`onerror`+`onclose` → one reconnect), a superseded connect, H4's in-order tool batches, a batch
   orphaned by a reconnect, resumption, the loop guard, the status sequence and `dispose()`. That
-  proves the state machine, not the wire protocol: message shapes and timing come from Google's
-  docs, not from observed traffic, so a real-key browser run is still the test that counts.
+  proves the state machine, not the wire protocol. The wire protocol was exercised once, by hand,
+  in PR #9 (§3.2) — before the T2–T4 changes to the channel, status and teardown. An automated
+  real-key run is M5's opt-in live e2e (#13).
 - **Reconnect behaviour (`liveSession.js`).** A drop (`onerror` and/or `onclose`, a failed token
   fetch, or a rejected `live.connect()`) retires the session's generation and schedules a single
   retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
@@ -191,12 +215,11 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   and closes without the server answering keeps climbing the backoff instead of retrying at 0 ms.
   A manual Connect/Retry starts a fresh budget. Unit-tested; not yet exercised against a real
   network drop in this form.
-- **Model name and audio sample rates were re-verified against Google's docs directly (Sept
-  2026)**, not just recalled: `gemini-3.1-flash-live-preview` is confirmed as the current
-  recommended Live model (successor to `gemini-2.5-flash-native-audio-preview`), input is 16kHz
-  PCM mono, output is 24kHz PCM mono — all matching what's in the code. Still worth re-checking
-  `ai.google.dev/gemini-api/docs/models` before assuming this stays current; Google ships new Live
-  models fairly often, and this verification is a point-in-time snapshot, not a guarantee.
+- **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since
+  2026-09-15. The earlier `gemini-3.1-flash-live-preview` is now legacy and shuts down on
+  2026-11-17; nothing in the code uses it. Input is 16 kHz PCM mono, output 24 kHz PCM mono
+  (`pcm.js`). Worth re-checking `ai.google.dev/gemini-api/docs/models` before assuming this stays
+  current; Google ships new Live models often, and this is a point-in-time check.
 - **Audio-only Live sessions hard-cap at 15 minutes**, full stop, independent of network
   reliability — a fact discovered *after* the initial build, not designed around from the start.
   Fixed by wiring up **session resumption**: `sessionResumption: {}` in the connect config starts
@@ -219,18 +242,20 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
   meaningfully more code — a separate worklet module, message-passing to the main thread). Fine
   for a local demo; worth swapping before anything resembling production use.
-- **No test exists for `sandbox/bridge.js`'s validation logic itself** (origin check, token
-  check, allowlist). The logic is simple to read but is tied directly to real DOM elements rather
-  than extracted into pure, testable functions. Good next addition.
+- **No test exists yet for `sandbox/bridge.js`'s side of the channel** (the first-only
+  `ds-bridge-connect` handshake with its origin/source checks, and the action allowlist). The
+  agent's side is unit-tested (`bridgeChannel.test.js`, including forged `window` messages being
+  ignored); the bridge's side needs a real page and iframe and arrives with the M5 Playwright e2e
+  (#13, `e2e/bridge.spec.js`).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`
   in `bridge.js`) is a guess, not tuned against a real page or a real model's context behavior.
   (The keyframe-vs-delta *decision* logic itself, in `domSnapshotContext.js`, is unit-tested — it's
   specifically the real-world tuning of the cap and the 0.6 full-refresh ratio that's unverified.)
-- **No production deployment story exists** (no Dockerfile, no hosting config, no HTTPS setup).
-  Note for later: mic capture (`getUserMedia`) requires a secure context — fine on `localhost`,
-  but will need real HTTPS the moment this is deployed anywhere else.
+- **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
+  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and `crypto.randomUUID`
+  need a secure context — fine on `localhost`, HTTPS anywhere else.
 
 ## 4. Decisions log (fast "why did we do X" reference)
 
@@ -254,8 +279,9 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   the original system's own `token`/`sessionId` pattern almost exactly, just scoped to Gemini Live
   specifically instead of a bespoke backend.
 - **Volume meter bypasses React state entirely** (ref + `requestAnimationFrame`) — the "go
-  further" version of the original's isolate-and-memoize fix, and this time it's backed by a test
-  proving the isolation actually holds, not just a flamegraph glanced at once.
+  further" version of the original's isolate-and-memoize fix, backed by a test proving the
+  isolation actually holds. Built in the first v2 implementation, lost in the from-scratch
+  rebuild; the volume orb and `renderIsolation.test.jsx` return in M7 (#11).
 - **`ScriptProcessorNode` over `AudioWorklet`** — simpler, deprecated-but-functional, a known
   tradeoff (see §3.3), not an oversight.
 - **Session resumption wired up proactively, before ever hitting the 15-minute session cap in
@@ -272,17 +298,21 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. Cost: the built bundle grew from ~837KB/228KB gzip to
-  ~1026KB/282KB gzip (compiler + React 19 runtime overhead) — not yet judged whether that's worth
-  trimming.
-- **Radix UI as the default for new interactive UI elements** (2026-09-15) — codifies what was
-  already true in practice (`Dialog` for the knowledge modal, `Toast` for connection status);
-  existing hand-rolled pieces (`VolumeMeter`, `TranscriptLog`) are custom visualizations outside
-  what Radix's primitives cover and weren't refactored.
+  demonstrably can't cover the case. The current bundle is 149.5 kB gzip (§3.2).
+- **Radix UI as the default for new interactive UI elements** (2026-09-15) — today that is
+  `Dialog` for the knowledge modal. The first build's Radix `Toast` and hand-rolled
+  `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their successors return in M7 (#11).
 - **Hono → Express for `server/`** (2026-09-15) — a direct stack preference. Same responsibilities
   kept (token endpoint + static file serving for all three other packages, not split apart) — see
   §5.3 for the deferred option of shrinking it to token-only. All routes re-verified by hand after
   the migration, not just carried over on faith.
+- **Type checking via `checkJs` + JSDoc, not a TypeScript migration** (2026-10-28) — `tsc
+  --noEmit` over the plain JS, typed first at the seams (bridge protocol, tool args, session
+  callbacks), widening from there; lands in M5. See
+  [ADR 0002](./adr/0002-type-checking-with-checkjs.md).
+- **Host on Render** (2026-10-28) — a web service from a `render.yaml` blueprint: automatic HTTPS
+  (the mic needs a secure context), the key as a dashboard secret, PR previews; free-tier cold
+  starts accepted. Deploy is M8. See [ADR 0003](./adr/0003-hosting-on-render.md).
 
 ## 5. Future planning (not yet built — read before starting on these)
 
@@ -303,11 +333,11 @@ Decisions actually made (the open questions from the plan, resolved):
   comfortably under `localStorage`'s ~5–10MB per-origin ceiling. `addFile` refuses outright with a
   reason string when a new file would exceed it — no silent failure, no truncation.
 - **Injection mechanism: context-stuffing, confirmed as the actual approach, not just proposed.**
-  `useLiveAgent.js`'s `sendKnowledgeContext` dumps the concatenated file text into a
+  `liveSession.js`'s `sendKnowledgeContext` dumps the concatenated file text into a
   `session.sendClientContent(..., turnComplete:false)` turn — once right after connect, and again
   automatically whenever the store changes (a `ds-knowledge-changed` window event fired by every
-  `knowledgeStore` write, listened for in both `KnowledgeModal.jsx` for its own file list and in
-  `useLiveAgent.js` to re-send context mid-session). This is **not real RAG** — no chunking, no
+  `knowledgeStore` write, read through `knowledgeStore.subscribe` by `AgentApp.jsx` for the
+  button's count, and listened for in `liveSession.js` to re-send context mid-session). This is **not real RAG** — no chunking, no
   embeddings, no retrieval — call it "context-stuffing" or "RAG-lite" explicitly if asked, rather
   than letting "RAG" imply more sophistication than it has. A real pipeline (chunk → embed →
   retrieve top-k per turn) is a legitimate future step and a materially bigger project than this.
@@ -318,21 +348,23 @@ Decisions actually made (the open questions from the plan, resolved):
   second plain `<div>` inside the shadow root purely as a portal target, passes it down through
   `AgentApp` as `portalContainer`, and `KnowledgeModal` passes it to `Dialog.Portal container={...}`.
   Anything else built with Radix inside this shadow root needs the same treatment if it uses
-  `Portal` (Toast, notably, does **not** need this — its `Viewport` renders in place, not via a
-  portal, so `Toast.jsx` needed no such wiring).
-- Tested: `knowledgeStore.test.js` (8 tests) covers accept/reject-by-extension, the size cap, add/
+  `Portal`. (Radix Toast's `Viewport` renders in place, not via a portal, so the M7 toast
+  shouldn't need it.)
+- Tested: `knowledgeStore.test.js` (10 tests) covers accept/reject-by-extension, the size cap, add/
   remove/list, the concatenated context blob, byte totals, and that the change event fires exactly
   once per write. Not tested: the modal component itself (drag/drop interaction, Radix wiring) —
   reasonable next addition if this UI gets more complex.
 
-### 5.2 Radix UI for generic components — IMPLEMENTED
+### 5.2 Radix UI for generic components — PARTLY IMPLEMENTED
 
-`@radix-ui/react-dialog` powers the knowledge modal (§5.1); `@radix-ui/react-toast`
-(`Toast.jsx`, a `ToastProvider` + `useToast()` hook) now also drives the connection-status
-messaging — `AgentApp.jsx` fires a real toast ("Connection lost — tap Reconnect to try again.")
-the moment `status` becomes `"failed"`, on top of the existing Reconnect button. That's v1 gap #6
-closed for real, not just with a button: the silent-disconnect problem from the original system
-now has actual user-visible feedback, not only a recovery affordance.
+`@radix-ui/react-dialog` powers the knowledge modal (§5.1); it is the only Radix package in
+`agent-client/package.json`. There is no toast on this branch. Connection status (v1 gap #6) is
+shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
+/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost), one primary button whose
+job follows the status (Connect, Disconnect, Retry — disabled while the session is retrying on its
+own), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload the page to reconnect" after
+a rejected token). The Radix toast for the failed state arrives with the designed card in M7
+(#11).
 
 ### 5.3 The `server/` scope question
 

@@ -29,7 +29,7 @@ as the sandbox (same dev server, a different route). It has a handful of interac
 a nav link, a button, a form field — each carrying a `data-testid` attribute so the agent has a
 stable, meaningful thing to target. That's it. No crawler, no network capture, no persistence
 layer. It's not a simplification that loses the point of the exercise — it *is* the same trust
-model the real system relied on (same-origin clone + sandbard operating on it directly), just with
+model the real system relied on (same-origin clone + sandbox operating on it directly), just with
 "clone" replaced by "author a couple of pages by hand."
 
 This is genuinely worth knowing on its own, independent of this project: **when you need to embed

@@ -1,5 +1,11 @@
 # Code review notes — a senior FE pass over v2
 
+> **Read this first (M4 T5):** the `file:line` references in the original items below
+> (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
+> point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
+> code instead. Status at a glance: B1–B4, H2–H5, M2–M4, L9 and L12 are done; H1 waits for the CSP
+> in M5; the rest are open.
+
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
 > `project-knowledge-handoff.md` §3.3 already owns (live loop never run, resumption field names
@@ -14,8 +20,8 @@
 > `domSnapshotContext.js` — the client now sends a full keyframe or a compact delta, decided
 > explicitly. Point 2 (no `MutationObserver`) was fixed the same way this review independently
 > suggested — a debounced observer, reattached on every iframe load, replacing the fixed
-> post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) is still open. Left the checkbox
-> and severity as this reviewer wrote them; just don't read H5 as fully open anymore.
+> post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) was closed in M4, and H5 is now
+> ticked.
 >
 > **Editorial note (M1 rebuild, GitHub issue #1 / PR #6):** the file paths below (`bridge.js`,
 > `actionTools.js`, a 294-line `useLiveAgent.js`) no longer exist — the whole implementation was
@@ -49,8 +55,8 @@
 >   single-use nonce made every reconnect after the first fail with a 403 — caught while testing
 >   B2's reconnect path in a real browser, not a theoretical concern.
 >
-> B3, B4, and everything else below remain open or not yet applicable (e.g. B3's re-greet-on-
-> navigation bug has no iframe/navigation to trigger it yet in this rebuild).
+> At the time of M1, B3, B4 and everything else were still open; M4 closed B3, B4, H4 and H5 (see
+> each item's "Fixed" note).
 >
 > Severity: **Blocker** = likely broken or conspicuously missing the first time it runs for real ·
 > **High** = correctness / security / core UX · **Medium** = will bite eventually · **Low** = polish.
@@ -59,7 +65,12 @@
 
 ## Blocker
 
-### [ ] B1 — The transcript log will always be empty
+### [x] B1 — The transcript log will always be empty
+
+> **Fixed (M1).** `liveSession.js`'s connect config sets `outputAudioTranscription: {}` and
+> `inputAudioTranscription: {}`; `handleMessage` forwards both as `onTranscript({ role, text })`,
+> and `AgentApp.jsx` renders them as agent/user lines. Fragments are not coalesced yet: each one
+> is its own line until the M7 card (#11).
 
 `useLiveAgent.js:248` connects with `responseModalities: [Modality.AUDIO]` and no transcription
 config. The Live API emits **one** response modality at a time; with audio-only and no
@@ -89,7 +100,15 @@ if (inp) appendTranscript("user", inp);
 Note both transcriptions stream in fragments — you'll want to coalesce consecutive same-role
 fragments into one bubble rather than pushing a new entry per fragment.
 
-### [ ] B2 — Reconnect multiplies the audio pipeline and leaks the old one
+### [x] B2 — Reconnect multiplies the audio pipeline and leaks the old one
+
+> **Fixed (M1 split, M4 T3/T4 tests).** Reconnect lives in `liveSession.js` and never touches the
+> mic: a drop retires the session's `generation`, so `onerror`+`onclose` collapse into one retry,
+> and the single `reconnectTimer` keeps at most one scheduled. Capture and playback (`audioIO.js`)
+> are owned by `useLiveAgent.js`, whose `connect()` stops any previous pipeline before starting
+> one. Covered by `liveSession.test.js` (one drop → exactly one reconnect; superseded connects)
+> and `useLiveAgent.test.jsx` (no stacked mic). PR #9 force-closed the socket in a real browser:
+> one token request, one reconnect.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -134,7 +153,12 @@ const scheduleReconnect = useCallback(() => {
 }, []);
 ```
 
-### [ ] B3 — The agent re-greets on every navigation
+### [x] B3 — The agent re-greets on every navigation
+
+> **Fixed (M4).** `sandbox/bridge.js` sends `navigated` on each new iframe document, and
+> `liveSession.js` only marks the next snapshot as a keyframe for it. The greeting is sent once,
+> from `openSession()`, for a fresh session only — not after navigation and not on a resumed
+> reconnect (`liveSession.test.js` checks the latter).
 
 `bridge.js:108-111` posts `{type:"ds-ready"}` on **every** iframe `load`, and the client's
 `ds-ready` handler (`useLiveAgent.js:93-103`) unconditionally injects
@@ -146,7 +170,12 @@ Fix: latch the greeting on the client (`greetedRef`), or have the bridge send `d
 the first load and a plain `ds-navigated` afterward. Subsequent loads should send only the
 page-context snapshot (which already happens via `diffAndSendSnapshot`).
 
-### [ ] B4 — There is no `systemInstruction` / persona
+### [x] B4 — There is no `systemInstruction` / persona
+
+> **Fixed (M4).** `liveSession.js`'s `SYSTEM_INSTRUCTION` sets the role, "only use a selector given
+> in a snapshot", and the say → act → confirm loop, and is passed as `systemInstruction` on every
+> connect. The greeting itself is still a one-line `sendClientContent` turn, sent once per fresh
+> session (see B3).
 
 The connect config (`useLiveAgent.js:246-258`) has no `systemInstruction`. The "Presenter Agent"
 has no standing guidance about: its role, that it must only use selectors it was explicitly handed,
@@ -209,8 +238,11 @@ Suggested, in rough order of value:
 > ([ADR 0001](./adr/0001-private-bridge-channel.md)): one `ds-bridge-connect` handshake on
 > `window`, accepted first-only, then everything on the port, so co-resident scripts can no
 > longer read snapshots/results or forge them. Residual risk: a hostile script that runs before
-> the handshake can connect first and take the bridge. H1 stays open until the token endpoint
-> and CSP work in M5.
+> the handshake can connect first and take the bridge.
+>
+> **Still open (M4 T5):** the endpoint half is done (`server/index.js`: same-origin check,
+> per-IP rate limit, page nonce — see the editorial note at the top). H1 stays unticked until the
+> CSP on the sandbox page lands in M5 (#13).
 
 ### [x] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
 
@@ -252,7 +284,11 @@ Direction: pull the machinery out of the hook.
 Then a jsdom test with a mock `liveSession` can drive `toolCall → dispatchAction → postMessage →
 (mock bridge) → result → sendToolResponse` and catch B2/H3/H4 regressions.
 
-### [ ] H3 — Barge-in / interruption is not handled
+### [x] H3 — Barge-in / interruption is not handled
+
+> **Fixed (M1).** `audioIO.js`'s `createPlayer()` keeps every scheduled source; `interrupt()` stops
+> them all and resets the timeline. `liveSession.js` calls `onInterrupted` on
+> `serverContent.interrupted`, which `useLiveAgent.js` wires to `player.interrupt()`.
 
 `serverContent.interrupted` is never read, and `playAudioChunk` (`useLiveAgent.js:149-163`)
 schedules `AudioBufferSourceNode`s without keeping references — nothing can stop them. When the
@@ -277,7 +313,12 @@ if (message.serverContent?.interrupted) {
 }
 ```
 
-### [ ] H4 — Tool calls run concurrently, not serialized
+### [x] H4 — Tool calls run concurrently, not serialized
+
+> **Fixed (M4).** `liveSession.js`'s `handleToolCallBatch` awaits each `bridge.dispatchAction` in
+> order and sends each `sendToolResponse` before the next call; a batch from a retired generation
+> stops instead of answering into a new session. `liveSession.test.js` covers the in-order
+> `[navigate, click]` batch and the mid-batch reconnect.
 
 `handleServerMessage` does `for (const fc of message.toolCall.functionCalls) handleToolCall(fc)`
 (`useLiveAgent.js:172-174`) with no `await` — `handleToolCall` is `async`. If the model emits
@@ -292,7 +333,13 @@ if (message.toolCall) {
 }
 ```
 
-### [ ] H5 — The snapshot diff is computed but discarded, and grounding barely refreshes
+### [x] H5 — The snapshot diff is computed but discarded, and grounding barely refreshes
+
+> **Fixed (M4), all three points.** (1) `domSnapshotContext.js` decides keyframe vs. delta and
+> `liveSession.js` sends what it decides (`domSnapshotContext.test.js`). (2) `sandbox/bridge.js`
+> runs a 250 ms-debounced `MutationObserver` on the iframe body, reattached on every new document,
+> so user clicks and async DOM changes re-ground the model too. (3) Each snapshot node carries a
+> `hidden` flag (`el.hidden`, `display: none` or `visibility: hidden`).
 
 Two issues in one area:
 
@@ -474,17 +521,20 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 - [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
-- [ ] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
+- [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.
+  *Fixed (M4): `sandbox/bridge.js`'s `buildSnapshotNodes` names the field `tag`.*
 - [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
 - [ ] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.
-- [ ] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
+- [x] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
   operating on it").
+  *Fixed (M4 T5): `docs/sandbox-simulation.md` §2 now reads "sandbox"; the rewritten README no
+  longer had it.*
 
 ---
 
