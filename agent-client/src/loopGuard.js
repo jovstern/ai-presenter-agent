@@ -1,6 +1,7 @@
-// Caps consecutive identical action signatures. Past the cap, the caller
-// should inject a corrective context turn instead of dispatching again —
-// this only tracks the repeat count, it doesn't decide what to do about it.
+// Caps consecutive identical action signatures. This only tracks the repeat
+// count; liveSession.js decides what to do past the cap (it skips the dispatch
+// and answers the tool call with a failure telling the model to try something
+// else), and calls reset() on every manual connect().
 const DEFAULT_THRESHOLD = 3;
 
 export function createLoopGuard(threshold = DEFAULT_THRESHOLD) {

@@ -12,7 +12,11 @@
   // tuned against a real page yet (docs/project-knowledge-handoff.md §3.3).
   const MAX_SNAPSHOT_NODES = 30;
   const SNAPSHOT_DEBOUNCE_MS = 250;
-  const NAVIGATION_TIMEOUT_MS = 5000;
+  // Kept under agent-client's ACTION_TIMEOUT_MS (4000, bridgeChannel.js) so a
+  // navigate that never loads gets this bridge's own, specific failure back to
+  // the model. Longer than that, the agent side gives up first with a generic
+  // timeout, and this bridge's late reply lands on an id nobody waits for.
+  const NAVIGATION_TIMEOUT_MS = 3500;
 
   const iframe = document.getElementById('target-app-frame');
 
@@ -31,15 +35,26 @@
     return iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
   }
 
-  let pendingLoadResolvers = [];
+  // Navigations waiting for their page: { path, settle(loaded) }.
+  let loadWaiters = [];
 
-  function waitForNextLoad() {
+  // Resolves true once a document at `path` loads in the frame, or false after
+  // NAVIGATION_TIMEOUT_MS. Matched by path, so a load of some other page in
+  // the meantime (the viewer clicking a link in the frame) doesn't count as
+  // this navigate finishing. A load of the same path from another cause can't
+  // be told apart, but it does put the requested page in place all the same.
+  function waitForLoadOf(path) {
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, NAVIGATION_TIMEOUT_MS); // fail open, don't hang forever
-      pendingLoadResolvers.push(() => {
-        clearTimeout(timer);
-        resolve();
-      });
+      const waiter = {
+        path,
+        settle(loaded) {
+          clearTimeout(timer);
+          loadWaiters = loadWaiters.filter((w) => w !== waiter);
+          resolve(loaded);
+        },
+      };
+      const timer = setTimeout(() => waiter.settle(false), NAVIGATION_TIMEOUT_MS);
+      loadWaiters.push(waiter);
     });
   }
 
@@ -60,9 +75,11 @@
       if (!KNOWN_ROUTES.includes(route)) {
         return { success: false, error: `Unknown route "${route}"` };
       }
-      const loaded = waitForNextLoad();
+      const loaded = waitForLoadOf(ROUTE_PATHS[route]);
       iframe.src = ROUTE_PATHS[route];
-      await loaded; // don't report success until the new document is actually in place
+      // Don't report success until the new document is actually in place, and
+      // don't claim it was when it never arrived.
+      if (!(await loaded)) return { success: false, error: 'The page did not finish loading.' };
       return { success: true };
     },
     async fill(selector, value) {
@@ -213,9 +230,8 @@
       diffAndBroadcastSnapshot();
     }
 
-    const resolvers = pendingLoadResolvers;
-    pendingLoadResolvers = [];
-    resolvers.forEach((resolve) => resolve());
+    const path = iframe.contentWindow?.location.pathname;
+    loadWaiters.filter((waiter) => waiter.path === path).forEach((waiter) => waiter.settle(true));
   }
 
   iframe.addEventListener('load', handleFrameLoad);

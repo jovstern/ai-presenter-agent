@@ -19,6 +19,10 @@ const MAX_ATTEMPTS = RECONNECT_DELAYS.length;
 // burning the whole backoff on it would just delay the honest answer. 429 is
 // the exception — the server's rate limit clears on its own.
 const RELOAD_REASON = 'This page can no longer get a connection token. Reload the page to reconnect.';
+// The server marks a failure it can't recover from on its own (no
+// GEMINI_API_KEY) with `retryable: false`: a 500, but retrying won't help and
+// neither will a reload, so the reason points at whoever runs the site.
+const MISCONFIGURED_REASON = "The server isn't configured to connect. Contact the site owner.";
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
 function isRetryableStatus(status) {
@@ -54,6 +58,10 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
   let attempt = 0;
   let manuallyClosed = false;
   let pendingFrames = [];
+  // Per attempt: whether the server has sent anything yet (what `open` and the
+  // backoff reset hang on), and whether the attempt asked to resume a session.
+  let serverAnswered = false;
+  let attemptResumed = false;
 
   function sendFrame(base64Frame) {
     session.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
@@ -109,8 +117,20 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     }
   }
 
-  // details ({ attempt, maxAttempts, reason }) only accompany `reconnecting`
-  // and `failed`; the UI shows "attempt n of maxAttempts" and the reason.
+  // The batch runs detached from onmessage, so a throw inside it (typically
+  // sendToolResponse on a socket that is already closing) would otherwise be an
+  // unhandled rejection. A socket that can't be sent on has failed: route it
+  // through handleFailure, whose generation guard makes it a no-op if the
+  // matching onclose got there first.
+  function runToolCallBatch(functionCalls, gen) {
+    handleToolCallBatch(functionCalls, gen).catch((error) => handleFailure(gen, error));
+  }
+
+  // details ({ attempt, maxAttempts, reason, fatal }) only accompany
+  // `reconnecting` and `failed`; the UI shows "attempt n of maxAttempts" and the
+  // reason. `fatal` marks a `failed` that Retry can't fix (the page's token
+  // request is rejected or the server is misconfigured), so the UI offers a
+  // reload instead.
   function setStatus(status, details) {
     onStatusChange?.(status, details);
   }
@@ -133,7 +153,13 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const error = new Error(body.error || `Token request failed: ${res.status}`);
-      error.retryable = isRetryableStatus(res.status);
+      if (body.retryable === false) {
+        error.retryable = false;
+        error.reason = MISCONFIGURED_REASON;
+      } else {
+        error.retryable = isRetryableStatus(res.status);
+        if (!error.retryable) error.reason = RELOAD_REASON;
+      }
       throw error;
     }
     const { token } = await res.json();
@@ -143,9 +169,15 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
   function handleMessage(message, gen) {
     // The server answering (setupComplete is its first message) is what
     // proves the session healthy — not onopen, which only proves the socket
-    // opened. Resetting on onopen let open-then-immediate-close cycles retry
-    // at delay 0 forever; resetting here keeps them climbing the backoff.
-    attempt = 0;
+    // opened. So both `open` and the backoff reset happen here, together:
+    // resetting on onopen let open-then-immediate-close cycles retry at delay
+    // 0 forever, and reporting `open` there showed "Live" for sockets the
+    // server was about to reject.
+    if (!serverAnswered) {
+      serverAnswered = true;
+      attempt = 0;
+      setStatus('open');
+    }
     if (message.serverContent?.interrupted) {
       onInterrupted?.();
     }
@@ -163,7 +195,7 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     }
 
     if (message.toolCall?.functionCalls?.length) {
-      handleToolCallBatch(message.toolCall.functionCalls, gen); // fire-and-forget; internally serialized
+      runToolCallBatch(message.toolCall.functionCalls, gen); // fire-and-forget; internally serialized
     }
   }
 
@@ -176,8 +208,12 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     if (manuallyClosed || gen !== generation) return;
     generation += 1;
     teardown();
+    // A resumed attempt that dies before the server says anything most likely
+    // had its handle rejected (expired, or from a session the server dropped).
+    // Retrying with it would fail the same way every time, so start fresh.
+    if (attemptResumed && !serverAnswered) resumeHandle = null;
     if (error?.retryable === false) {
-      setStatus('failed', { attempt, maxAttempts: MAX_ATTEMPTS, reason: RELOAD_REASON });
+      setStatus('failed', { attempt, maxAttempts: MAX_ATTEMPTS, reason: error.reason ?? RELOAD_REASON, fatal: true });
       return;
     }
     if (attempt >= MAX_ATTEMPTS) {
@@ -201,6 +237,8 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
   function connect() {
     attempt = 0;
     manuallyClosed = false;
+    // A new conversation shouldn't inherit the last one's repeat streak.
+    loopGuard.reset();
     setStatus('connecting');
     return openSession();
   }
@@ -208,6 +246,8 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
   async function openSession() {
     const gen = ++generation; // invalidates any older in-flight attempt
     teardown();
+    serverAnswered = false;
+    attemptResumed = false;
 
     let token;
     try {
@@ -219,15 +259,14 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     if (gen !== generation) return;
 
     const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: 'v1alpha' } });
+    attemptResumed = Boolean(resumeHandle);
 
     try {
       const newSession = await ai.live.connect({
         model: MODEL,
         callbacks: {
-          onopen: () => {
-            if (gen !== generation) return;
-            setStatus('open');
-          },
+          // No onopen: a socket opening proves nothing about the session;
+          // `open` waits for the first server message (handleMessage).
           onmessage: (message) => {
             if (gen !== generation) return;
             handleMessage(message, gen);

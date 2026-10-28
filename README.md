@@ -61,7 +61,7 @@ in advance; they stay in your browser's `localStorage`.
 
 ```bash
 cd agent-client
-npm test        # vitest: 7 files, 57 tests
+npm test        # vitest: 8 files, 68 tests
 npm run build   # single-file IIFE bundle in agent-client/dist/
 ```
 
@@ -72,6 +72,8 @@ The suite in `agent-client/src/__tests__/`:
   `reconnecting` → `failed` sequence, the loop guard, `dispose()`.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, cleanup on unmount, Retry after `failed`, the status line and alert.
+- `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
+  own page and reports a page that never loads as a failure.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.

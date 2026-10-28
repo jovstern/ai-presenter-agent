@@ -80,10 +80,11 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   commands.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 7 vitest files (57 tests): `bridgeChannel`,
-  `domSnapshotContext`, `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and
-  `useLiveAgent.test.jsx` (Testing Library). `server/` and `sandbox/` have none yet; the bridge's
-  handshake/allowlist test arrives with the M5 e2e. Follow the existing vitest pattern when adding
+- Tests: `agent-client/src/__tests__/` has 8 vitest files (68 tests): `bridge` (runs
+  `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `domSnapshotContext`,
+  `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
+  Library). `server/` has none yet; the bridge's real-browser handshake test arrives with the M5
+  e2e. Follow the existing vitest pattern when adding
   tests to `agent-client`.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.

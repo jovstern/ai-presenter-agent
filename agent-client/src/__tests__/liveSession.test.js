@@ -39,15 +39,18 @@ const fetchMock = vi.fn();
 function fakeBridge() {
   const unsubscribeSnapshot = vi.fn();
   const unsubscribeNavigated = vi.fn();
-  return {
+  const bridge = {
     dispatchAction: vi.fn(async () => ({ success: true })),
     requestSnapshot: vi.fn(),
+    // Lets a test play the bridge pushing a snapshot over the channel.
+    emitSnapshot: (snapshot) => bridge.onSnapshot.mock.calls.forEach(([listener]) => listener(snapshot)),
     onSnapshot: vi.fn(() => unsubscribeSnapshot),
     onNavigated: vi.fn(() => unsubscribeNavigated),
     close: vi.fn(),
     unsubscribeSnapshot,
     unsubscribeNavigated,
   };
+  return bridge;
 }
 
 let created = [];
@@ -66,9 +69,8 @@ function setup() {
 // Runs due timers and drains the promise chains (fetch → live.connect) they start.
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
-// A healthy session: socket opens, connect() resolves, the server confirms setup.
+// A healthy session: connect() resolves (the socket is open), the server confirms setup.
 async function establish(call) {
-  call.params.callbacks.onopen();
   call.resolve();
   await flush();
   call.params.callbacks.onmessage({ setupComplete: {} });
@@ -128,7 +130,6 @@ describe('createLiveSession', () => {
     await flush();
     const [stale, current] = live.calls;
 
-    stale.params.callbacks.onopen();
     stale.resolve();
     await flush();
 
@@ -254,6 +255,7 @@ describe('createLiveSession', () => {
     expect(afterSecondDrop.map((s) => s.status)).toEqual([...Array(MAX_ATTEMPTS).fill('reconnecting'), 'failed']);
     expect(afterSecondDrop.slice(0, MAX_ATTEMPTS).map((s) => s.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(statusNames().filter((s) => s === 'failed')).toHaveLength(1);
+    expect(statuses.at(-1).fatal).toBeFalsy(); // exhausted retries can still be retried by hand
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -320,7 +322,6 @@ describe('createLiveSession', () => {
 
     const openThenClose = async () => {
       const call = live.calls.at(-1);
-      call.params.callbacks.onopen();
       call.resolve();
       await flush();
       call.params.callbacks.onclose({ code: 1011 });
@@ -336,6 +337,7 @@ describe('createLiveSession', () => {
 
     const reconnectAttempts = statuses.filter((s) => s.status === 'reconnecting').map((s) => s.attempt);
     expect(reconnectAttempts).toEqual([1, 2]);
+    expect(statuses.map((s) => s.status)).not.toContain('open'); // the server never answered
   });
 
   it('resets the backoff once the server has answered, so the next drop retries immediately', async () => {
@@ -366,6 +368,7 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1).reason).toMatch(/reload/i);
+    expect(statuses.at(-1).fatal).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -401,5 +404,146 @@ describe('createLiveSession', () => {
     expect(call.session.close).toHaveBeenCalled();
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
+  });
+  it('treats a server response marked retryable:false as fatal, with a contact-the-owner reason', async () => {
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(500, { error: 'GEMINI_API_KEY is not set on the server', retryable: false }),
+    );
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(statusNames()).toEqual(['connecting', 'failed']);
+    expect(statuses.at(-1)).toMatchObject({
+      reason: "The server isn't configured to connect. Contact the site owner.",
+      fatal: true,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports open on the first server message, not when the socket opens', async () => {
+    const { liveSession, statusNames } = setup();
+    liveSession.connect();
+    await flush();
+    const call = live.calls[0];
+
+    call.resolve();
+    await flush();
+    expect(statusNames()).toEqual(['connecting']);
+
+    call.params.callbacks.onmessage({ setupComplete: {} });
+    call.params.callbacks.onmessage({ serverContent: {} });
+    expect(statusNames()).toEqual(['connecting', 'open']);
+  });
+
+  it('a manual disconnect() followed by a late onclose does not reconnect and stays closed', async () => {
+    const { liveSession, statusNames } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    liveSession.disconnect();
+    drop(call);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(statusNames().at(-1)).toBe('closed');
+    expect(statusNames()).not.toContain('reconnecting');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(live.calls).toHaveLength(1);
+  });
+
+  it('asks the bridge for a snapshot on every (re)connect and sends the next one as a keyframe', async () => {
+    const { liveSession, bridge } = setup();
+    const page = [1, 2, 3, 4, 5].map((n) => ({ selector: `n${n}`, tag: 'button', label: `${n}` }));
+    const smallDelta = { full: page, changed: [page[0]], removed: [] };
+    const snapshotTexts = (session) =>
+      session.sendClientContent.mock.calls.map(([arg]) => arg.turns).filter((t) => t.startsWith('Page snapshot'));
+
+    const first = await connectAndEstablish(liveSession);
+    expect(bridge.requestSnapshot).toHaveBeenCalledTimes(1);
+    bridge.emitSnapshot({ full: page, changed: page, removed: [] });
+    bridge.emitSnapshot(smallDelta);
+    expect(snapshotTexts(first.session)).toEqual([
+      expect.stringMatching(/^Page snapshot \(full\)/),
+      expect.stringMatching(/^Page snapshot \(delta\)/),
+    ]);
+
+    drop(first);
+    await flush();
+    const second = live.calls[1];
+    await establish(second);
+    expect(bridge.requestSnapshot).toHaveBeenCalledTimes(2);
+
+    bridge.emitSnapshot(smallDelta); // a small delta, but the reconnect forces a keyframe
+    expect(snapshotTexts(second.session)).toEqual([expect.stringMatching(/^Page snapshot \(full\)/)]);
+  });
+
+  it('buffers audio sent while connecting and flushes the newest 20 frames once connected', async () => {
+    const { liveSession } = setup();
+    liveSession.connect();
+    await flush();
+    const frames = Array.from({ length: 25 }, (_, i) => `frame-${i}`);
+    frames.forEach((frame) => liveSession.sendAudioFrame(frame));
+
+    const call = live.calls[0];
+    expect(call.session.sendRealtimeInput).not.toHaveBeenCalled();
+    call.resolve();
+    await flush();
+
+    const sent = call.session.sendRealtimeInput.mock.calls.map(([arg]) => arg.audio.data);
+    expect(sent).toEqual(frames.slice(5));
+  });
+
+  it('resets the loop guard on a manual connect()', async () => {
+    const { liveSession, bridge } = setup();
+    const sameClick = (id) => ({ id, name: 'click', args: { selector: '#buy' } });
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      toolCall: { functionCalls: [sameClick('1'), sameClick('2'), sameClick('3')] },
+    });
+    await flush();
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+
+    liveSession.disconnect();
+    const second = await connectAndEstablish(liveSession);
+    second.params.callbacks.onmessage({ toolCall: { functionCalls: [sameClick('4')] } });
+    await flush();
+
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(4);
+    expect(second.session.sendToolResponse.mock.calls[0][0].functionResponses.response).toEqual({ success: true });
+  });
+
+  it('drops the resumption handle when a resumed attempt closes before the server answers', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({ sessionResumptionUpdate: { resumable: true, newHandle: 'stale-handle' } });
+    drop(first);
+    await flush();
+
+    const resumed = live.calls[1];
+    expect(resumed.params.config.sessionResumption).toEqual({ handle: 'stale-handle' });
+    resumed.resolve();
+    await flush();
+    resumed.params.callbacks.onclose({ code: 1008 }); // the server rejected the handle
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const fresh = live.calls[2];
+    expect(fresh.params.config.sessionResumption).toEqual({});
+    await establish(fresh);
+    expect(greetings(fresh.session)).toHaveLength(1);
+  });
+
+  it('a sendToolResponse that throws on a closing socket is handled, not an unhandled rejection', async () => {
+    const { liveSession, statusNames } = setup();
+    const call = await connectAndEstablish(liveSession);
+    call.session.sendToolResponse.mockImplementation(() => {
+      throw new Error('WebSocket is already in CLOSING or CLOSED state.');
+    });
+
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [{ id: '1', name: 'click', args: { selector: '#buy' } }] },
+    });
+    await flush();
+
+    expect(statusNames().at(-1)).toBe('reconnecting');
   });
 });

@@ -249,7 +249,7 @@ Suggested, in rough order of value:
 > **Fixed (M1 split + M4 T3 tests).** The hook was split as directed: `audioIO.js` owns capture and
 > playback (M1), `liveSession.js` owns the socket, reconnect, resumption, tool dispatch and
 > context injection, and `useLiveAgent.js` is glue with no `useCallback`s or `exhaustive-deps`
-> escape hatches. Since M4 T3, `agent-client/src/__tests__/liveSession.test.js` (15 tests, fake
+> escape hatches. Since M4 T3, `agent-client/src/__tests__/liveSession.test.js` (23 tests, fake
 > `@google/genai/web` + stubbed token `fetch` + fake bridge, fake timers) covers: `onerror`+`onclose`
 > → exactly one reconnect (B2); a connect superseded during `live.connect()` or the token fetch;
 > a `[navigate, click]` batch dispatched in order (H4); no stale tool response after a mid-batch
@@ -259,6 +259,12 @@ Suggested, in rough order of value:
 > attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
 > server message, not `onopen`); a 4xx token response failing at once with a reload reason while
 > 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
+> The M4 fix wave added: `open` reported on the first server message; a `retryable: false` 500
+> (missing key) failing at once, with `fatal` set for every non-retryable failure; a late
+> `onclose` after a manual disconnect staying `closed`; every (re)connect requesting a snapshot
+> and sending the next one as a keyframe; buffered connect-time audio flushed and capped at 20; the
+> loop guard reset on a manual connect; a rejected resumption handle dropped; and a throwing
+> `sendToolResponse` handled instead of becoming an unhandled rejection.
 > Since M4 T4, the hook has its own Testing Library tests (`useLiveAgent.test.jsx`).
 
 
@@ -403,6 +409,10 @@ both functions.
 ### [x] M3 — Bridge action handlers aren't wrapped in try/catch
 
 > Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
+> The M4 fix wave closed the same class of gap for `navigate`: it used to report success when its
+> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 3.5 s
+> for a load of the requested path only and replies `{success:false, error:'The page did not finish
+> loading.'}` otherwise (`agent-client/src/__tests__/bridge.test.js`).
 
 `bridge.js:188-191` calls `handler(data.args)` directly. A throw inside `fill` / `click` (e.g. the
 `Object.getOwnPropertyDescriptor(...).set` lookup returning `undefined`) skips the

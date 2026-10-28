@@ -164,8 +164,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes (57 tests, 7 files, as of M4 T5): `liveSession.test.js`
-  (15 — the session state machine, see §3.3), `bridgeChannel.test.js` (9 — the private channel),
+- `agent-client`'s test suite passes (68 tests, 8 files, as of the M4 fix wave): `liveSession.test.js`
+  (23 — the session state machine, see §3.3), `bridge.test.js` (3 — `sandbox/bridge.js`'s
+  `navigate` against a stubbed iframe), `bridgeChannel.test.js` (9 — the private channel),
   `knowledgeStore.test.js` (10 — see §5.1), `useLiveAgent.test.jsx` (8 — the hook and card via
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
@@ -210,11 +211,16 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
   `{ attempt, maxAttempts: 6 }`) while a retry is pending, and becomes `failed` only once all six
   are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
-  no longer accepted: the reason tells the user to reload. The attempt count resets on the first
-  server message of a session (normally `setupComplete`), not on `onopen`, so a socket that opens
-  and closes without the server answering keeps climbing the backoff instead of retrying at 0 ms.
-  A manual Connect/Retry starts a fresh budget. Unit-tested; not yet exercised against a real
-  network drop in this form.
+  no longer accepted: the reason tells the user to reload. A 500 the server marks
+  `retryable: false` (no `GEMINI_API_KEY`) also fails at once, with a "contact the site owner"
+  reason. Both of those carry `fatal: true`, and the card offers "Reload page" instead of Retry.
+  The status turns `open` and the attempt count resets on the first server message of a session
+  (normally `setupComplete`), not when the socket opens, so a socket that opens and closes
+  without the server answering never shows "Live" and keeps climbing the backoff instead of
+  retrying at 0 ms. A resumed attempt that closes before the server answers drops its handle, so
+  the next attempt starts a fresh session instead of retrying a rejected handle. A manual
+  Connect/Retry starts a fresh budget and resets the loop guard. Unit-tested; not yet exercised
+  against a real network drop in this form.
 - **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since
   2026-09-15. The earlier `gemini-3.1-flash-live-preview` is now legacy and shuts down on
   2026-11-17; nothing in the code uses it. Input is 16 kHz PCM mono, output 24 kHz PCM mono
