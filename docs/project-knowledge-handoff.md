@@ -161,6 +161,10 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
   `/agent-client/agent-client.js`) still returns 200, confirmed by actually hitting each one after
   the migration, not assumed from the route table alone.
+- The sandbox page is served nonce-templated at both `/` and `/sandbox/` (also `/sandbox` and
+  `/sandbox/index.html`) by one handler registered ahead of the `/sandbox` static mount, so no
+  URL ships the literal `%%DS_NONCE%%`; each was curled and returned a UUID nonce (M4 T1,
+  assessment A1).
 - `/api/live-token` fails **cleanly** with a JSON 500 when `GEMINI_API_KEY` isn't set — confirmed
   by actually hitting it, not assumed.
 - The exact Gemini Live SDK surface used (`ai.live.connect`, `client.authTokens.create`,

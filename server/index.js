@@ -110,17 +110,31 @@ app.get('/api/live-token', async (req, res) => {
     });
     res.json({ token: token.name });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to mint live token', detail: err.message });
+    // A9 (assessment): the SDK's message can carry upstream request details, so it
+    // stays in the server log and the browser gets only the generic error.
+    console.error('[live-token] failed to mint live token:', err);
+    res.status(500).json({ error: 'Failed to mint live token' });
   }
 });
 
+// A1 (assessment): every URL that renders the sandbox page must go through the
+// nonce template, or the page ships the literal %%DS_NONCE%% and every
+// /api/live-token call 403s (see H1 above). Registered before
+// express.static('/sandbox') so static can never serve the untemplated file.
+// Express 5 routing is non-strict, so '/sandbox' matches both '/sandbox' and
+// '/sandbox/'; the page's asset URLs are absolute, so no redirect is needed.
+// Read once at startup: the file only changes on a deploy, which restarts the
+// process anyway.
+const SANDBOX_HTML = fs.readFileSync(SANDBOX_HTML_PATH, 'utf8');
+
+function sendSandbox(req, res) {
+  res.type('html').send(SANDBOX_HTML.replace('%%DS_NONCE%%', issueNonce()));
+}
+
+app.get(['/', '/sandbox', '/sandbox/index.html'], sendSandbox);
 app.use('/agent-client', express.static(path.join(__dirname, '../agent-client/dist')));
 app.use('/sandbox', express.static(path.join(__dirname, '../sandbox')));
 app.use('/target-app', express.static(path.join(__dirname, '../target-app')));
-app.get('/', (req, res) => {
-  const html = fs.readFileSync(SANDBOX_HTML_PATH, 'utf8').replace('%%DS_NONCE%%', issueNonce());
-  res.type('html').send(html);
-});
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);

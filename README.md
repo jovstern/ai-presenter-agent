@@ -44,7 +44,8 @@ npm run watch
 npm start
 ```
 
-Then open **http://localhost:8787/sandbox/** and allow microphone access when prompted. The agent
+Then open **http://localhost:3000/** (or `/sandbox/`, which serves the same page; the port is
+`PORT` if you set one, 3000 otherwise) and allow microphone access when prompted. The agent
 should greet you once the target-app iframe finishes loading; try asking it to deploy a widget or
 go to settings. Click the `📄` button on the agent card to drop in `.txt`/`.md` files it should
 know about in advance.
