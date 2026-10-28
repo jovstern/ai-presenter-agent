@@ -172,8 +172,8 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
   returns in M7 (#11).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 621.9 kB,
-  149.5 kB gzip (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 622.5 kB,
+  149.7 kB gzip, served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
