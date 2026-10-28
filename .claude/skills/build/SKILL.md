@@ -71,7 +71,9 @@ everything else applies. Before any question:
    Decisions already made in the project's docs are not reopened unless the user asks;
    when an ADR folder exists or the docs keep a decisions log, back-fill the important past
    decisions as ADRs only if the user agrees.
-6. **No scaffold:** the starters are for new projects. Missing gates (lint, format, e2e, CI,
+6. **Older branches:** before continuing a branch or PR created before the kit was added,
+   merge `master` into it (so the kit's files are present on it) and push.
+7. **No scaffold:** the starters are for new projects. Missing gates (lint, format, e2e, CI,
    `protect-master.sh`) are added by plan tasks once the user accepts them, matching the
    existing tooling (JavaScript stays JavaScript unless a TypeScript migration is accepted).
 
