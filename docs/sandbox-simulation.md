@@ -52,17 +52,26 @@ pattern: the target posts a message on every client-side route change, and the b
 current state first, then subscribes — the same check-then-listen shape the original system used
 to avoid missing a message that fired before the listener was attached.
 
-## 4. Only one postMessage hop, not two
+## 4. One postMessage handshake, then a MessageChannel
 
 Because the iframe is same-origin with the sandbox, the sandbox's bridge script can read and
 mutate the iframe's DOM **directly** (`iframe.contentDocument.querySelector(...)`, etc.) — it does
 not need to relay a second `postMessage` across the iframe boundary to do so. The one hop that
 matters is between the **agent-client** (mounted in a shadow root, its own deployable bundle) and
 the **sandbox's own bridge script** — two independently-built pieces of code sharing one `window`,
-talking via `window.postMessage` by choice, not by cross-origin necessity. Keep that distinction
-clear when explaining this out loud: same-origin doesn't mean "no postMessage," it means "no
-postMessage *required* — you're choosing it for decoupling, and you still have to secure it like
-you mean it" (origin + token + allowlist, per the rebuild spec's goal #1–#3).
+talking by message by choice, not by cross-origin necessity.
+
+That hop uses `window.postMessage` exactly once: at mount, the agent-client creates a
+`MessageChannel` and posts `{type:'ds-bridge-connect'}` with one port transferred. The bridge
+accepts the first such connect (same origin, `event.source === window`, exactly one port) and
+ignores every later one. From then on all traffic (actions, results, snapshots, `navigated`)
+travels on the private port, because anything on `window` is visible to — and forgeable by —
+every other script in the same window, which an origin check can't tell apart
+([ADR 0001](./adr/0001-private-bridge-channel.md)). Keep that distinction clear when explaining
+this out loud: same-origin doesn't mean "no messaging," it means "no messaging *required* — you're
+choosing it for decoupling, and you still have to secure it like you mean it" (private channel +
+allowlist, per the rebuild spec's goals #1–#3). The residual risk is a hostile script that runs
+before the handshake and connects first; closing it needs the clone on another origin.
 
 ## 5. If you ever want a real external site (deferred, not built here)
 

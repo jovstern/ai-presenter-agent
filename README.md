@@ -20,7 +20,7 @@ performance — see the docs for why.
 ```
 docs/            the two spec docs
 target-app/      static mock "cloned app" (2 pages, a few data-testid elements)
-sandbox/         the host page: iframe + the postMessage bridge + action library
+sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    the React app that gets built into a single script, mounted in a shadow root
 server/          the entire backend: mints a short-lived Gemini Live token, serves everything else
 ```
@@ -64,7 +64,7 @@ have.
 
 ## What's deliberately not here yet
 
-- A test for the bridge's origin/token/allowlist validation itself (the logic is straightforward
+- A test for the bridge's handshake/allowlist validation itself (the logic is straightforward
   to read in `sandbox/bridge.js`, but it's tied directly to real DOM elements rather than
   extracted into a pure, easily-testable function — a good next step).
 - A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the

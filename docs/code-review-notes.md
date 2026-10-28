@@ -205,6 +205,13 @@ Suggested, in rough order of value:
 - Add a short section to the handoff doc: *what the token + allowlist protect against, and what
   they explicitly don't* (a hostile same-origin script).
 
+> **Note (M4 T2):** the agent-client ↔ bridge traffic now runs on a private `MessageChannel`
+> ([ADR 0001](./adr/0001-private-bridge-channel.md)): one `ds-bridge-connect` handshake on
+> `window`, accepted first-only, then everything on the port, so co-resident scripts can no
+> longer read snapshots/results or forge them. Residual risk: a hostile script that runs before
+> the handshake can connect first and take the bridge. H1 stays open until the token endpoint
+> and CSP work in M5.
+
 ### [ ] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
 
 `useLiveAgent.js` (294 lines) owns the socket lifecycle, reconnect + resumption, mic capture,
@@ -323,7 +330,9 @@ list.
 pending gives you two concurrent connects (compounds B2). Store the id, clear it at the top of
 both functions.
 
-### [ ] M3 — Bridge action handlers aren't wrapped in try/catch
+### [x] M3 — Bridge action handlers aren't wrapped in try/catch
+
+> Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
 
 `bridge.js:188-191` calls `handler(data.args)` directly. A throw inside `fill` / `click` (e.g. the
 `Object.getOwnPropertyDescriptor(...).set` lookup returning `undefined`) skips the

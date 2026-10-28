@@ -3,8 +3,8 @@ import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import * as knowledgeStore from './knowledgeStore.js';
 
-export function AgentApp({ portalContainer }) {
-  const { status, transcript, micError, connect, disconnect } = useLiveAgent();
+export function AgentApp({ bridge, portalContainer }) {
+  const { status, transcript, micError, connect, disconnect } = useLiveAgent(bridge);
   const isConnected = status === 'open' || status === 'connecting';
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);

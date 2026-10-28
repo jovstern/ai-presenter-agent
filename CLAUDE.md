@@ -2,7 +2,7 @@
 
 A from-scratch rebuild of the runtime half of Demostack's AI Presenter Agent: a voice avatar
 (Gemini Live API) embedded in an iframe that both talks and acts (click/scroll/navigate/fill) on
-a target web app via a postMessage bridge. Not in scope: agent-creation UI, real RAG
+a target web app via a private MessageChannel bridge (ADR 0001). Not in scope: agent-creation UI, real RAG
 (chunking/embeddings — only a "RAG-lite" localStorage context-stuffing feature exists), the flow
 builder. See `docs/project-knowledge-handoff.md` for the full origin story and what was
 deliberately left out.
@@ -25,7 +25,7 @@ No root package.json, no workspaces — four independent directories, each with 
   endpoint — the real `GEMINI_API_KEY` can't reach the browser — but static-file serving is
   currently kept alongside it rather than split out (see `docs/project-knowledge-handoff.md`
   §5.3 for the alternative of shrinking it to token-only).
-- `sandbox/` — host page: iframe + `bridge.js` (postMessage bridge + action library). No build step.
+- `sandbox/` — host page: iframe + `bridge.js` (MessageChannel bridge + action library). No build step.
 - `target-app/` — static 2-page mock app used as the demo target. No build step.
 
 No lint or typecheck is configured anywhere in the repo.
@@ -66,8 +66,8 @@ are marked IMPLEMENTED — already built, not just planned.
   npm commands.
 - When touching `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Test coverage is thin and uneven: `agent-client/__tests__/` has 4 vitest files
-  (`domSnapshotContext`, `knowledgeStore`, `loopGuard`, `renderIsolation`); `server/` and
+- Test coverage is thin and uneven: `agent-client/src/__tests__/` has 5 vitest files
+  (`bridgeChannel`, `domSnapshotContext`, `knowledgeStore`, `loopGuard`, `pcm`); `server/` and
   `sandbox/` have none. Follow the existing vitest pattern when adding tests to `agent-client`.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.

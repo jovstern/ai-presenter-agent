@@ -228,6 +228,10 @@ server/          Express server: mints a Gemini Live ephemeral token, serves the
   with its own iframe, so it manipulates that DOM directly rather than relaying a second message
   across the iframe boundary. The one hop that exists is a deliberate decoupling between two
   independently-built bundles, not a same-origin-policy requirement. See `sandbox-simulation.md` §4.
+- **That hop runs on a private `MessageChannel`, not `window.postMessage`** (2026-10-28) — one
+  first-only `ds-bridge-connect` handshake, then all traffic on the port, so other same-origin
+  scripts can't read or forge it; chosen over a session token they could read off the broadcast.
+  See [ADR 0001](./adr/0001-private-bridge-channel.md) (the residual first-connect risk is there).
 - **`navigate` tool uses a schema `enum` of known pages** — structurally prevents the exact
   hallucinated-navigation bug seen in the original system, instead of relying on prompting the
   model not to do it.

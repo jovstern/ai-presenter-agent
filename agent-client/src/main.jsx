@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentApp } from './AgentApp.jsx';
+import { connectBridge } from './bridgeChannel.js';
 
 const HOST_ID = 'ai-presenter-agent-host';
 
@@ -67,9 +68,17 @@ function mount() {
   const portalContainer = document.createElement('div');
   shadowRoot.appendChild(portalContainer);
 
+  // Connected once, here, and never closed: sandbox/bridge.js accepts only the
+  // first ds-bridge-connect for the page's lifetime (docs/adr/0001-private-bridge-channel.md),
+  // so a channel closed by session disposal, a StrictMode double effect or a
+  // remount could never be replaced. Connecting at mount rather than on the
+  // Connect click also keeps the window in which another script could claim
+  // the bridge first as small as possible.
+  const bridge = connectBridge();
+
   createRoot(mountPoint).render(
     <StrictMode>
-      <AgentApp portalContainer={portalContainer} />
+      <AgentApp bridge={bridge} portalContainer={portalContainer} />
     </StrictMode>,
   );
 }

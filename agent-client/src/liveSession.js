@@ -13,13 +13,6 @@ const MODEL = 'gemini-3.8-live';
 // original build (docs/project-knowledge-handoff.md §3.3).
 const RECONNECT_DELAYS = [0, 1000, 3000, 7000, 15000, 30000];
 
-// How long to wait for bridge.js to reply to a dispatched action before
-// giving up and reporting failure back to the model — an unresponsive page
-// (or a stale bridge from before a navigation) shouldn't hang the turn
-// forever (docs/code-review-notes.md's own history flags a case where a
-// missing ds-action-result reply left the client waiting the full timeout).
-const ACTION_TIMEOUT_MS = 4000;
-
 // Expanded per docs/code-review-notes.md B4 now that tools exist: role,
 // the selector constraint, and the act -> observe -> narrate loop.
 const SYSTEM_INSTRUCTION =
@@ -41,7 +34,7 @@ const SYSTEM_INSTRUCTION =
 // for that gap so "hears you" doesn't depend on speaking after a fixed delay.
 const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
 
-export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, onInterrupted }) {
+export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTranscript, onInterrupted }) {
   let session = null;
   let generation = 0;
   let resumeHandle = null;
@@ -70,56 +63,22 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
   const snapshotContext = createDomSnapshotContext();
   const loopGuard = createLoopGuard();
 
-  function requestFreshSnapshot() {
-    window.postMessage({ type: 'ds-request-snapshot' }, window.location.origin);
-  }
+  // Traffic with sandbox/bridge.js goes over the private channel main.jsx owns
+  // (docs/adr/0001-private-bridge-channel.md). These unsubscribe functions are
+  // kept so the session can detach without closing the channel itself.
+  const unsubscribeNavigated = bridge.onNavigated(() => {
+    // A fresh page has nothing in common with whatever delta state the
+    // last one left behind — force the next snapshot to be a keyframe.
+    // Deliberately does NOT send anything else (no greeting) — that's
+    // the exact class of bug docs/code-review-notes.md B3 describes.
+    snapshotContext.markNavigated();
+  });
 
-  // sandbox/bridge.js broadcasts these; only 'ds-ready' and 'ds-dom-snapshot'
-  // are handled here — 'ds-action-result' replies are consumed by dispatchAction's
-  // own one-off listener below, not here.
-  function handleBridgeBroadcast(event) {
-    if (event.origin !== window.location.origin) return;
-    const data = event.data;
-    if (!data) return;
-
-    if (data.type === 'ds-ready') {
-      // A fresh page has nothing in common with whatever delta state the
-      // last one left behind — force the next snapshot to be a keyframe.
-      // Deliberately does NOT send anything else (no greeting) — that's
-      // the exact class of bug docs/code-review-notes.md B3 describes.
-      snapshotContext.markNavigated();
-      return;
-    }
-
-    if (data.type === 'ds-dom-snapshot' && session) {
-      const decision = snapshotContext.decide({ full: data.full, changed: data.changed, removed: data.removed });
-      session.sendClientContent({ turns: formatSnapshotMessage(decision), turnComplete: false });
-    }
-  }
-
-  window.addEventListener('message', handleBridgeBroadcast);
-
-  function dispatchAction(name, args) {
-    return new Promise((resolve) => {
-      const id = crypto.randomUUID();
-      const timer = setTimeout(() => {
-        window.removeEventListener('message', handleResult);
-        resolve({ success: false, error: 'Timed out waiting for the page to respond.' });
-      }, ACTION_TIMEOUT_MS);
-
-      function handleResult(event) {
-        if (event.origin !== window.location.origin) return;
-        const data = event.data;
-        if (data?.type !== 'ds-action-result' || data.id !== id) return;
-        clearTimeout(timer);
-        window.removeEventListener('message', handleResult);
-        resolve(data);
-      }
-
-      window.addEventListener('message', handleResult);
-      window.postMessage({ type: 'ds-action', id, action: name, args }, window.location.origin);
-    });
-  }
+  const unsubscribeSnapshot = bridge.onSnapshot((snapshot) => {
+    if (!session) return;
+    const decision = snapshotContext.decide(snapshot);
+    session.sendClientContent({ turns: formatSnapshotMessage(decision), turnComplete: false });
+  });
 
   // Serialized on purpose (docs/code-review-notes.md H4): dispatching a batch
   // concurrently races a navigate against a click that expects the new page,
@@ -130,7 +89,7 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
       const signature = actionSignature(fc.name, fc.args);
       const result = loopGuard.check(signature)
         ? { success: false, error: 'This action has repeated too many times in a row — try something different.' }
-        : await dispatchAction(fc.name, toPositionalArgs(fc.name, fc.args ?? {}));
+        : await bridge.dispatchAction(fc.name, toPositionalArgs(fc.name, fc.args ?? {}));
 
       if (session !== batchSession) return; // superseded by a reconnect mid-batch
       session.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: result } });
@@ -268,7 +227,7 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
       // page, and ask bridge.js for one right away instead of waiting for
       // the next incidental DOM mutation.
       snapshotContext.markNavigated();
-      requestFreshSnapshot();
+      bridge.requestSnapshot();
       // Greet once per fresh session, not on a resumed reconnect — otherwise
       // a mid-conversation resumption would restart the conversation with a
       // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
@@ -301,5 +260,15 @@ export function createLiveSession({ onStatusChange, onAudioChunk, onTranscript, 
     setStatus('closed');
   }
 
-  return { connect, disconnect, sendAudioFrame };
+  // Detaches this session from the page; never closes the bridge channel,
+  // which main.jsx owns for the page's lifetime (the bridge accepts only the
+  // first connect, so a closed channel could never be replaced).
+  function dispose() {
+    unsubscribeNavigated();
+    unsubscribeSnapshot();
+    window.removeEventListener(CHANGE_EVENT, sendKnowledgeContext);
+    disconnect();
+  }
+
+  return { connect, disconnect, dispose, sendAudioFrame };
 }

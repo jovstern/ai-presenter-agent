@@ -3,14 +3,15 @@ import { createLiveSession } from './liveSession.js';
 import { startCapture, createPlayer } from './audioIO.js';
 import { decodeOutputChunk } from './pcm.js';
 
-// Glue: wires liveSession + audioIO into React state. The session is created
+// Glue: wires liveSession + audioIO into React state. `bridge` is the page-
+// lifetime channel from main.jsx; this hook passes it on and never closes it. The session is created
 // once and reused across connect/disconnect cycles; capture and playback are
 // recreated fresh on every connect() and torn down on every disconnect().
 //
 // connect/disconnect are plain functions, not useCallback: they're only used
 // as onClick handlers, not as effect deps or memoized-child props, so there's
 // no referential-stability need the React Compiler doesn't already cover.
-export function useLiveAgent() {
+export function useLiveAgent(bridge) {
   const [status, setStatus] = useState('idle');
   const [transcript, setTranscript] = useState([]);
   const [micError, setMicError] = useState(null);
@@ -21,6 +22,7 @@ export function useLiveAgent() {
   function getSession() {
     if (!sessionRef.current) {
       sessionRef.current = createLiveSession({
+        bridge,
         onStatusChange: setStatus,
         onAudioChunk: (base64) => {
           playerRef.current?.enqueue(decodeOutputChunk(base64));

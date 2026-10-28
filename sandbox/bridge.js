@@ -1,6 +1,7 @@
-// Runs on sandbox/index.html (top-level), not inside the iframe — one
-// postMessage hop between agent-client and this bridge, not two; the bridge
-// manipulates the iframe's DOM directly since both are same-origin.
+// Runs on sandbox/index.html (top-level), not inside the iframe; the bridge
+// manipulates the iframe's DOM directly since both are same-origin. It talks
+// to agent-client over a private MessageChannel: one window.postMessage
+// handshake transfers the port, then all traffic stays on it.
 (function () {
   const KNOWN_ROUTES = ['home', 'settings'];
   // Absolute, not relative to target-app/ — iframe.src resolves against the
@@ -17,14 +18,15 @@
 
   // The action library lives in this closure, never on `window` — a page
   // script reaching `window.dsActions.click(...)` directly would bypass the
-  // origin/allowlist checks below entirely (docs/project-knowledge-handoff.md
+  // channel/allowlist checks below entirely (docs/project-knowledge-handoff.md
   // §1.10, the exact v1 gap this is designed around).
   //
-  // Session-token binding (docs/demostack-ai-presenter-agent.md §5.2) is
-  // deferred to M4/M5: it authenticates a message against a specific live
-  // Gemini session, and no session exists yet at this milestone — adding it
-  // now would mean validating against nothing real. Only origin + allowlist
-  // are enforced here.
+  // Binding to the agent is a private MessageChannel instead of a session
+  // token (docs/adr/0001-private-bridge-channel.md): other scripts on the page
+  // can't read snapshots/results or forge actions on the port. Residual risk,
+  // documented and not closed: a hostile script that runs *before*
+  // agent-client's handshake could connect first and take the bridge; closing
+  // that needs the clone on another origin (docs/code-review-notes.md H1).
   function findByTestId(testId) {
     return iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
   }
@@ -72,37 +74,53 @@
     },
   };
 
-  function isAllowedOrigin(origin) {
-    return origin === window.location.origin;
-  }
-
   function isAllowedAction(action) {
     return Object.prototype.hasOwnProperty.call(actions, action);
   }
 
-  window.addEventListener('message', async (event) => {
-    if (!isAllowedOrigin(event.origin)) return;
+  // The agent's end of the channel; null until the first valid handshake.
+  let agentPort = null;
+
+  function postToAgent(message) {
+    agentPort?.postMessage(message);
+  }
+
+  // Accept the first ds-bridge-connect only: posted by this window itself
+  // (not the target-app iframe or any other frame), same origin, carrying
+  // exactly one port. After that the listener is removed, so later connects
+  // are ignored and nothing else is ever read off `window`.
+  function handleConnect(event) {
+    if (event.origin !== window.location.origin || event.source !== window) return;
+    if (event.data?.type !== 'ds-bridge-connect' || event.ports.length !== 1) return;
+    window.removeEventListener('message', handleConnect);
+    agentPort = event.ports[0];
+    agentPort.onmessage = handleAgentMessage; // starts the port implicitly
+  }
+
+  window.addEventListener('message', handleConnect);
+
+  async function runAction({ id, action, args }) {
+    if (!isAllowedAction(action)) {
+      return { type: 'action-result', id, success: false, error: `Action "${action}" is not allowed` };
+    }
+    // A throwing action must still reply, or the agent waits out its timeout
+    // (docs/code-review-notes.md M3).
+    try {
+      const result = await actions[action](...(Array.isArray(args) ? args : []));
+      return { ...result, type: 'action-result', id };
+    } catch (err) {
+      return { type: 'action-result', id, success: false, error: err?.message || String(err) };
+    }
+  }
+
+  async function handleAgentMessage(event) {
     const data = event.data;
-    if (!data) return;
-
-    if (data.type === 'ds-request-snapshot') {
+    if (data?.type === 'request-snapshot') {
       diffAndBroadcastSnapshot();
-      return;
+    } else if (data?.type === 'action') {
+      postToAgent(await runAction(data));
     }
-
-    if (data.type !== 'ds-action') return;
-
-    if (!isAllowedAction(data.action)) {
-      window.postMessage(
-        { type: 'ds-action-result', id: data.id, success: false, error: `Action "${data.action}" is not allowed` },
-        window.location.origin,
-      );
-      return;
-    }
-
-    const result = await actions[data.action](...(data.args ?? []));
-    window.postMessage({ type: 'ds-action-result', id: data.id, ...result }, window.location.origin);
-  });
+  }
 
   // --- DOM grounding snapshot ---
   // Flattened list of interactive/meaningful nodes only, keyed by their
@@ -137,6 +155,9 @@
   }
 
   function diffAndBroadcastSnapshot() {
+    // Before the handshake there's no one to tell; agent-client asks for a
+    // fresh snapshot once connected, so nothing is lost by dropping this.
+    if (!agentPort) return;
     const full = buildSnapshotNodes();
     const nodesById = new Map(full.map((n) => [n.selector, n]));
 
@@ -147,7 +168,7 @@
     });
 
     lastNodesById = nodesById;
-    window.postMessage({ type: 'ds-dom-snapshot', full, changed, removed }, window.location.origin);
+    postToAgent({ type: 'snapshot', full, changed, removed });
   }
 
   // Debounced and reconnected on every iframe load — this is the completion-
@@ -177,8 +198,10 @@
   iframe.addEventListener('load', () => {
     lastNodesById = new Map(); // a new document has nothing in common with the old diff state
     watchIframeMutations();
+    // `navigated` first, so the agent marks a keyframe before this load's
+    // snapshot arrives rather than after it (which forced a redundant one).
+    postToAgent({ type: 'navigated' });
     diffAndBroadcastSnapshot();
-    window.postMessage({ type: 'ds-ready' }, window.location.origin);
 
     const resolvers = pendingLoadResolvers;
     pendingLoadResolvers = [];
