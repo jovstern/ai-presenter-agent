@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Settings page of the mock app the presenter agent operates." />
     <title>Target App — Settings</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -11,19 +14,21 @@
       <a data-testid="nav-settings" href="settings.html">Settings</a>
     </nav>
 
-    <h1 data-testid="settings-heading">Settings</h1>
+    <main>
+      <h1 data-testid="settings-heading">Settings</h1>
 
-    <p>
-      <label>
-        <input data-testid="notifications-toggle" type="checkbox" />
-        Enable notifications
-      </label>
-    </p>
+      <p>
+        <label>
+          <input data-testid="notifications-toggle" type="checkbox" />
+          Enable notifications
+        </label>
+      </p>
 
-    <p>
-      <button data-testid="save-button">Save</button>
-    </p>
-    <p data-testid="save-confirmation" class="save-confirmation">Saved.</p>
+      <p>
+        <button data-testid="save-button">Save</button>
+      </p>
+      <p data-testid="save-confirmation" class="save-confirmation">Saved.</p>
+    </main>
 
     <script>
       document.querySelector('[data-testid="save-button"]').addEventListener('click', () => {

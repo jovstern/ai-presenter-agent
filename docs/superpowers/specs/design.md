@@ -108,6 +108,7 @@ Language: JS with checkJs (ADR 0002).
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
 | zod | server | nonce query (M5), env config (R22), client-log body (R23) |
 | web-vitals | agent-client | real-user vitals in production (R23) |
+| compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile |
 
 No `useReducer`, context or state library. `useLiveAgent` keeps `useState` and refs. The
 knowledge store keeps `useSyncExternalStore`. `KnowledgeModal` stops mirroring the store

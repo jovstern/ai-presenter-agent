@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Home page of the mock app the presenter agent operates." />
     <title>Target App — Home</title>
+    <link rel="icon" href="data:," />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -11,20 +14,23 @@
       <a data-testid="nav-settings" href="settings.html">Settings</a>
     </nav>
 
-    <h1 data-testid="home-heading">Home</h1>
+    <main>
+      <h1 data-testid="home-heading">Home</h1>
 
-    <p>
-      Counter: <span data-testid="counter-value">0</span>
-      <button data-testid="counter-increment">Increment</button>
-    </p>
+      <p>
+        Counter: <span data-testid="counter-value">0</span>
+        <button data-testid="counter-increment">Increment</button>
+      </p>
 
-    <p>
-      <input data-testid="search-input" type="text" placeholder="Search" />
-      <button data-testid="search-button">Search</button>
-    </p>
+      <p>
+        <label for="search-input" class="visually-hidden">Search</label>
+        <input id="search-input" name="search" data-testid="search-input" type="text" placeholder="Search" />
+        <button data-testid="search-button">Search</button>
+      </p>
 
-    <div class="spacer"></div>
-    <p data-testid="scroll-target">You scrolled to the bottom of Home.</p>
+      <div class="spacer"></div>
+      <p data-testid="scroll-target">You scrolled to the bottom of Home.</p>
+    </main>
 
     <script>
       document.querySelector('[data-testid="counter-increment"]').addEventListener('click', () => {

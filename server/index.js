@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import compression from 'compression';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,11 @@ const PORT = process.env.PORT || 3000;
 const SANDBOX_HTML_PATH = path.join(__dirname, '../sandbox/index.html');
 
 const app = express();
+
+// Before every route: the agent-client bundle is ~620 kB raw and ~150 kB
+// gzipped, and serving it uncompressed made it the page's LCP bottleneck (M4
+// metrics, docs/metrics/m04.md: mobile LCP 4.26 s → 1.86 s with gzip).
+app.use(compression());
 
 // Fix for docs/code-review-notes.md H1 (open token vending machine): gate on
 // same-origin, rate-limit per IP, and require a nonce that sandbox/index.html

@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="A voice presenter agent that talks about and operates a demo web app." />
     <title>AI Presenter Agent — sandbox</title>
     <link rel="icon" href="data:," />
     <style>
@@ -10,9 +12,14 @@
     </style>
   </head>
   <body>
-    <iframe id="target-app-frame" src="/target-app/index.html"></iframe>
+    <main>
+      <iframe id="target-app-frame" title="Target app" src="/target-app/index.html"></iframe>
+    </main>
+    <!-- The nonce script is inline and not deferred, so it runs first. Deferred
+         scripts keep their order and run before DOMContentLoaded: bridge.js
+         (which catches up on an iframe that already loaded) before agent-client.js. -->
     <script>window.__DS_NONCE__ = "%%DS_NONCE%%";</script>
-    <script src="/sandbox/bridge.js"></script>
-    <script src="/agent-client/agent-client.js"></script>
+    <script defer src="/sandbox/bridge.js"></script>
+    <script defer src="/agent-client/agent-client.js"></script>
   </body>
 </html>

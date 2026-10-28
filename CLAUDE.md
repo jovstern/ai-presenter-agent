@@ -32,8 +32,9 @@ on its own:
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`.
 - `server/` (npm) — Node/Express. Mints short-lived Gemini Live tokens (`/api/live-token`, gated
-  on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories.
-  Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port `PORT` or 3000.
+  on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories,
+  gzipped (`compression`). Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port
+  `PORT` or 3000.
   `npm start`. Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots). No build step.
