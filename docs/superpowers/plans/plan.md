@@ -428,6 +428,14 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - Every M and L item left is fixed or ticked "deferred: reason".
 - L2, L3, L4, L5, L7 and L8 are marked "→ M7".
 - L11 is done by the M5 root scripts, `.nvmrc` and `engines`.
+- Accepted from the M4 re-review, fixed here:
+  - a fatal **config** failure (missing server key) shows no Reload button, because a reload
+    can't help (`fatal: 'config'` vs `'token'`);
+  - a setup timeout (about 10 s) when the socket opens but the server never answers;
+  - a resumed attempt that fails on the network keeps a valid resume handle; it is cleared
+    only when the server rejects the handle;
+  - the T3 deferral: setupComplete-then-close resets the backoff each cycle (bounded today
+    by the 429 limit).
 - Issue #5's "done when" is met.
 
 *(small, 6 min)*
