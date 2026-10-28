@@ -233,15 +233,25 @@ describe('AgentApp + useLiveAgent', () => {
     }
   });
 
-  it('shows the blocked-microphone guidance as an alert', async () => {
+  it('ends the session when the microphone is blocked, so the guidance to press Connect is true', async () => {
     const { startCapture } = await import('../audioIO.js');
+    const stop = vi.fn();
+    // getUserMedia rejects after connect() has started, as in a real browser.
     startCapture.mockImplementationOnce(({ onError }) => {
-      onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
-      return { ready: Promise.resolve(), stop: vi.fn() };
+      const ready = Promise.resolve().then(() =>
+        onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
+      );
+      return { ready, stop };
     });
     renderApp();
     await click('Connect');
+    const session = fakes.sessions.at(-1);
+    await act(async () => {});
 
+    expect(session.disconnect).toHaveBeenCalled();
+    expect(stop).toHaveBeenCalled();
+    emitStatus('closed');
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe(
       'Microphone blocked — allow it in the address bar, then press Connect.',
     );

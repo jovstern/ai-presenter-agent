@@ -64,7 +64,13 @@ export function useLiveAgent(bridge) {
     playerRef.current = createPlayer();
     captureRef.current = startCapture({
       onFrame: (frame) => session.sendAudioFrame(frame),
-      onError: (err) => setMicError(err), // AgentApp words it by err.name
+      onError: (err) => {
+        setMicError(err); // AgentApp words it by err.name
+        // A blocked mic means the agent can never hear the user: end the
+        // session instead of showing "Live", so the card offers Connect —
+        // the action its guidance names.
+        if (err?.name === 'NotAllowedError') disconnect();
+      },
     });
     await session.connect();
   }
