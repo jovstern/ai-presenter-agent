@@ -227,7 +227,7 @@ Suggested, in rough order of value:
 > attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
 > server message, not `onopen`); a 4xx token response failing at once with a reload reason while
 > 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
-> The hook itself gets its tests in M4 T4.
+> Since M4 T4, the hook has its own Testing Library tests (`useLiveAgent.test.jsx`).
 
 
 `useLiveAgent.js` (294 lines) owns the socket lifecycle, reconnect + resumption, mic capture,
@@ -339,7 +339,14 @@ leans on. Options: a shared JSON imported by both (the bridge can be a module, o
 inline it), or at minimum a test asserting `actionTools.KNOWN_ROUTES` deep-equals the bridge's
 list.
 
-### [ ] M2 — Pending reconnect timers are never cleared
+### [x] M2 — Pending reconnect timers are never cleared
+
+> Fixed in M4 T4 (timer half landed with M4 T3): `liveSession.js` keeps the one pending retry in
+> `reconnectTimer`, and `teardown()` — run by every `openSession()`, `disconnect()` and `dispose()`
+> — clears it, so at most one retry is ever scheduled. There is no separate "retry now" path: the
+> hook's `retry` *is* `connect()`, which resets the attempts and supersedes any in-flight attempt
+> by generation, and the UI's Retry button is disabled while `reconnecting`, so it can only be
+> pressed once the backoff has given up (`failed`).
 
 `retryNow` (`useLiveAgent.js:279-282`) and `scheduleReconnect` both schedule `connect` via
 `setTimeout` without storing the handle. Tapping "Reconnect" while a backoff retry is already
@@ -362,7 +369,17 @@ catch (err) { result = { success: false, detail: String(err?.message || err) }; 
 post({ type: "ds-action-result", id: data.id, ...result });
 ```
 
-### [ ] M4 — Leaks on unmount, not just on reconnect
+### [x] M4 — Leaks on unmount, not just on reconnect
+
+> Fixed in M4 T4: `useLiveAgent.js` has one unmount effect that calls the session's `dispose()`,
+> stops the capture (mic tracks + its `AudioContext`), closes the player's `AudioContext`, and nulls
+> the session ref so a remount — including StrictMode's mount → cleanup → mount — builds a new
+> session over the same page-lifetime bridge (whose channel is never closed). `connect()` stops any
+> previous capture and player first, so a double press or Retry never stacks a second mic, and
+> `failed` stops both too. `main.jsx` keeps the React root and unmounts it on a non-persisted
+> `pagehide`; there is no custom element any more (the host is a plain div), so no
+> `disconnectedCallback`. The rAF meter loop doesn't exist in this rebuild. Covered by
+> `agent-client/src/__tests__/useLiveAgent.test.jsx`.
 
 The unmount cleanup (`useLiveAgent.js:286-289`) stops mic tracks but never `close()`s the
 `AudioContext` and never cancels the `tickMeter` rAF loop (self-recursing, no handle).

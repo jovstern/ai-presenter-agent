@@ -195,16 +195,37 @@
   // Native iframe `load` event, not a postMessage handshake — simpler and
   // reliable precisely because the target is same-origin static pages
   // (docs/demostack-ai-presenter-agent.md §5.2).
-  iframe.addEventListener('load', () => {
-    lastNodesById = new Map(); // a new document has nothing in common with the old diff state
-    watchIframeMutations();
-    // `navigated` first, so the agent marks a keyframe before this load's
-    // snapshot arrives rather than after it (which forced a redundant one).
-    postToAgent({ type: 'navigated' });
-    diffAndBroadcastSnapshot();
+  //
+  // Runs once per document: `setUpDocument` remembers which one it last set
+  // up, so the init-time catch-up below and a later `load` for the same
+  // document can't both run it.
+  let setUpDocument = null;
+
+  function handleFrameLoad() {
+    const doc = iframe.contentDocument;
+    if (doc && doc !== setUpDocument) {
+      setUpDocument = doc;
+      lastNodesById = new Map(); // a new document has nothing in common with the old diff state
+      watchIframeMutations();
+      // `navigated` first, so the agent marks a keyframe before this load's
+      // snapshot arrives rather than after it (which forced a redundant one).
+      postToAgent({ type: 'navigated' });
+      diffAndBroadcastSnapshot();
+    }
 
     const resolvers = pendingLoadResolvers;
     pendingLoadResolvers = [];
     resolvers.forEach((resolve) => resolve());
-  });
+  }
+
+  iframe.addEventListener('load', handleFrameLoad);
+
+  // This script runs after the <iframe> is parsed, so the first page's `load`
+  // may already have fired (a fast, cached same-origin page): catch up now or
+  // that page never gets a MutationObserver. The initial about:blank document
+  // is also `complete`, so it's excluded; its real load is still to come.
+  const initialDoc = iframe.contentDocument;
+  if (initialDoc?.readyState === 'complete' && initialDoc.URL !== 'about:blank') {
+    handleFrameLoad();
+  }
 })();

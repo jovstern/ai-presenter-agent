@@ -30,7 +30,7 @@ function mount() {
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
     .agent-app__status { margin-left: 8px; color: #666; }
-    .agent-app__mic-error { margin-top: 8px; color: #b3261e; font-size: 0.9em; }
+    .agent-app__mic-error, .agent-app__error { margin-top: 8px; color: #b3261e; font-size: 0.9em; }
     .agent-app__transcript { list-style: none; margin: 8px 0 0; padding: 0; max-height: 200px; overflow-y: auto; }
     .agent-app__line { margin-bottom: 4px; }
     .agent-app__line--agent { color: #1a1a1a; }
@@ -76,11 +76,21 @@ function mount() {
   // the bridge first as small as possible.
   const bridge = connectBridge();
 
-  createRoot(mountPoint).render(
+  // Kept so the tree can be unmounted, which runs useLiveAgent's cleanup
+  // (session disposed, mic stopped, AudioContexts closed — docs/code-review-notes.md M4).
+  const root = createRoot(mountPoint);
+  root.render(
     <StrictMode>
       <AgentApp bridge={bridge} portalContainer={portalContainer} />
     </StrictMode>,
   );
+
+  // The host is a plain div that lives as long as the page, so the one real
+  // end of life is the page going away. Skipped when the page enters the
+  // back/forward cache (persisted), since it may be restored with the tree intact.
+  window.addEventListener('pagehide', (event) => {
+    if (!event.persisted) root.unmount();
+  });
 }
 
 if (document.readyState === 'loading') {
