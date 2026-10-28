@@ -2,3 +2,10 @@ node_modules/
 dist/
 .env
 *.log
+.claude/settings.local.json
+.superpowers/
+.metrics/
+.DS_Store
+.idea/
+test-results/
+playwright-report/

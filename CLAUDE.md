@@ -72,6 +72,30 @@ are marked IMPLEMENTED — already built, not just planned.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
 
+## How work happens
+
+- `/build` runs the work (the kit: Superpowers plus `.claude/skills` and `.claude/agents`,
+  same as `~/Mnt/portfolio`). In this existing repo it starts with an assessment of the code
+  and of every doc (`docs/superpowers/specs/assessment.md`), then questions, then one
+  approval of spec and plan, then one milestone at a time. Each milestone maps to a GitHub
+  issue and ends in a PR (`Closes #N`) with code review, UI review, metrics, docs changes,
+  manual checks and a demo GIF. **The user merges every PR; Claude waits for the merge.**
+- Every agent runs on Opus 5.5.
+- **Docs are part of the work:** the planner keeps this file, `README.md` and `docs/` true —
+  updating them in the same commit as the change that affects them, and proposing new docs
+  (ADRs in `docs/adr/`, a `CONTEXT.md` glossary per `docs/agents/domain.md`) only when they
+  will be read again. `docs/code-review-notes.md` stays the single review checklist.
+- Superpowers preferences (they override the skills' defaults):
+  - Brainstorming: questions in `AskUserQuestion` batches of up to 4, as many rounds as
+    needed; architecture changes are the user's decision; one approval of spec and plan.
+  - No git worktrees: work in place on the milestone branch; one commit per task.
+  - Subagent-driven development runs one milestone's tasks without stopping, then the
+    milestone reviews.
+  - When finishing a milestone, do not show the merge/PR menu: push, open the PR, stop.
+- Hard rules: never push to `master` or merge a PR; never bypass a hook or check; never skip
+  or delete a failing test; ask before changing lint, build or test configuration. Secrets
+  (`server/.env`) are never read or printed.
+
 ## Agent skills
 
 ### Issue tracker
