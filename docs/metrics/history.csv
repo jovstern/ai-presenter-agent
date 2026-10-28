@@ -1,0 +1,5 @@
+milestone,route,perf,a11y,lcp_ms,cls,tbt_ms,js_kb
+m04,/,75,80,4257,0,0,149.5
+m04,/target-app/index.html,100,96,751,0,0,0
+m04-fix,/,100,100,907,0,5,149.7
+m04-fix,/target-app/index.html,100,100,752,0,0,0

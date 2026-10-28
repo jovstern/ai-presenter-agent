@@ -12,7 +12,9 @@
     </style>
   </head>
   <body>
-    <main>
+    <!-- Named: the target app inside the frame has its own <main>, and axe
+         counts both as one tree (landmark-unique). -->
+    <main aria-label="Target app sandbox">
       <iframe id="target-app-frame" title="Target app" src="/target-app/index.html"></iframe>
     </main>
     <!-- The nonce script is inline and not deferred, so it runs first. Deferred
