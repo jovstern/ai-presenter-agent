@@ -64,7 +64,7 @@ export function useLiveAgent(bridge) {
     playerRef.current = createPlayer();
     captureRef.current = startCapture({
       onFrame: (frame) => session.sendAudioFrame(frame),
-      onError: (err) => setMicError(err.message || String(err)),
+      onError: (err) => setMicError(err), // AgentApp words it by err.name
     });
     await session.connect();
   }

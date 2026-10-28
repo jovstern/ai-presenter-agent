@@ -24,8 +24,8 @@ on its own:
     playback, barge-in) into React state; owns teardown on unmount.
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
-  - `AgentApp.jsx` — a minimal card: one Connect/Disconnect/Retry button, a status line, an alert
-    on `failed`, the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
+  - `AgentApp.jsx` — a minimal card: one never-disabled Connect/Cancel/Disconnect/Retry/Reload
+    page button, a status line, an alert on `failed`, the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
     `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
     successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
     with the designed card in M7 (issue #11).
@@ -80,7 +80,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   commands.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 8 vitest files (68 tests): `bridge` (runs
+- Tests: `agent-client/src/__tests__/` has 8 vitest files (74 tests): `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
   Library). `server/` has none yet; the bridge's real-browser handshake test arrives with the M5

@@ -156,7 +156,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   resumption, serialized tool dispatch, knowledge and snapshot injection. The riskiest file.
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown.
-- `AgentApp.jsx` — the minimal card (one Connect / Disconnect / Retry button, status line, alert
+- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Reload page button, status line, alert
   on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`.
@@ -164,10 +164,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 ### 3.2 What's built and actually verified (not just written)
 
 - `npm install` succeeds in both `agent-client/` and `server/`.
-- `agent-client`'s test suite passes (68 tests, 8 files, as of the M4 fix wave): `liveSession.test.js`
+- `agent-client`'s test suite passes (74 tests, 8 files, as of the M4 fix wave): `liveSession.test.js`
   (23 — the session state machine, see §3.3), `bridge.test.js` (3 — `sandbox/bridge.js`'s
   `navigate` against a stubbed iframe), `bridgeChannel.test.js` (9 — the private channel),
-  `knowledgeStore.test.js` (10 — see §5.1), `useLiveAgent.test.jsx` (8 — the hook and card via
+  `knowledgeStore.test.js` (10 — see §5.1), `useLiveAgent.test.jsx` (14 — the hook and card via
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
@@ -367,9 +367,10 @@ Decisions actually made (the open questions from the plan, resolved):
 `agent-client/package.json`. There is no toast on this branch. Connection status (v1 gap #6) is
 shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
 / Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost), one primary button whose
-job follows the status (Connect, Disconnect, Retry — disabled while the session is retrying on its
-own), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload the page to reconnect" after
-a rejected token). The Radix toast for the failed state arrives with the designed card in M7
+job follows the status and is never disabled (Connect; Cancel while connecting; Disconnect while
+live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, or Reload
+page when the failure is fatal), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
+the page to reconnect" after a rejected token). A blocked microphone is a `role="alert"` too. The Radix toast for the failed state arrives with the designed card in M7
 (#11).
 
 ### 5.3 The `server/` scope question

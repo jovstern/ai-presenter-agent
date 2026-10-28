@@ -146,8 +146,8 @@ come from `status`.
 | idle | orb at rest, "Talk to the presenter" button |
 | connecting | pending button, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
-| reconnecting | "Reconnecting (attempt n of 6)…", button disabled |
-| failed | "Connection lost" plus a Retry button, and a Radix toast once |
+| reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
+| failed | "Connection lost" plus a Retry button (or "Reload page" when the failure is fatal), and a Radix toast once |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 

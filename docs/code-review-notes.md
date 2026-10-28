@@ -398,8 +398,8 @@ list.
 > `reconnectTimer`, and `teardown()` — run by every `openSession()`, `disconnect()` and `dispose()`
 > — clears it, so at most one retry is ever scheduled. There is no separate "retry now" path: the
 > hook's `retry` *is* `connect()`, which resets the attempts and supersedes any in-flight attempt
-> by generation, and the UI's Retry button is disabled while `reconnecting`, so it can only be
-> pressed once the backoff has given up (`failed`).
+> by generation, and the UI shows Retry only once the backoff has given up (`failed`); while
+> `reconnecting` the button is Disconnect, which cancels the pending retry.
 
 `retryNow` (`useLiveAgent.js:279-282`) and `scheduleReconnect` both schedule `connect` via
 `setTimeout` without storing the handle. Tapping "Reconnect" while a backoff retry is already

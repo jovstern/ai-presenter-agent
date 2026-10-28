@@ -85,6 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 describe('AgentApp + useLiveAgent', () => {
@@ -168,16 +169,97 @@ describe('AgentApp + useLiveAgent', () => {
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
   });
 
-  it('while reconnecting, the button is disabled and the status shows the attempt', async () => {
+  it('while reconnecting, shows the attempt and an enabled Disconnect that hangs up', async () => {
     renderApp();
     await click('Connect');
     emitStatus('reconnecting', { attempt: 2, maxAttempts: 6, reason: 'closed' });
 
-    const button = screen.getByRole('button', { name: 'Retry' });
-    expect(button.disabled).toBe(true);
+    const button = screen.getByRole('button', { name: 'Disconnect' });
+    expect(button.disabled).toBe(false);
     expect(screen.getByRole('status').textContent).toBe('Reconnecting (attempt 2 of 6)…');
     // Reconnecting keeps the mic: the session will resume onto it.
     expect(fakes.captures[0].stop).not.toHaveBeenCalled();
+
+    await click('Disconnect');
+    expect(fakes.sessions[0].disconnect).toHaveBeenCalled();
+    expect(fakes.captures[0].stop).toHaveBeenCalled();
+  });
+
+  it('while connecting, shows Cancel, which disconnects', async () => {
+    renderApp();
+    await click('Connect');
+    emitStatus('connecting');
+
+    expect(screen.getByRole('status').textContent).toBe('Connecting…');
+    await click('Cancel');
+    expect(fakes.sessions[0].disconnect).toHaveBeenCalled();
+    expect(fakes.captures[0].stop).toHaveBeenCalled();
+  });
+
+  it('on a fatal failure, offers Reload page instead of Retry', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload });
+    renderApp();
+    await click('Connect');
+    emitStatus('failed', {
+      attempt: 0,
+      maxAttempts: 6,
+      reason: "The server isn't configured to connect. Contact the site owner.",
+      fatal: true,
+    });
+
+    expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    await click('Reload page');
+    expect(reload).toHaveBeenCalledTimes(1);
+    expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps focus on the primary button through connecting → reconnecting → failed', async () => {
+    renderApp();
+    const button = screen.getByRole('button', { name: 'Connect' });
+    button.focus();
+    await click('Connect');
+
+    for (const [status, details, label] of [
+      ['connecting', undefined, 'Cancel'],
+      ['reconnecting', { attempt: 1, maxAttempts: 6 }, 'Disconnect'],
+      ['failed', { attempt: 6, maxAttempts: 6 }, 'Retry'],
+    ]) {
+      emitStatus(status, details);
+      expect(document.activeElement).toBe(button);
+      expect(button.textContent).toBe(label);
+      expect(button.disabled).toBe(false);
+    }
+  });
+
+  it('shows the blocked-microphone guidance as an alert', async () => {
+    const { startCapture } = await import('../audioIO.js');
+    startCapture.mockImplementationOnce(({ onError }) => {
+      onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' }));
+      return { ready: Promise.resolve(), stop: vi.fn() };
+    });
+    renderApp();
+    await click('Connect');
+
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Microphone blocked — allow it in the address bar, then press Connect.',
+    );
+  });
+
+  it('renders the transcript list only once it has entries', async () => {
+    const { container } = renderApp();
+    await click('Connect');
+    expect(container.querySelector('ul')).toBeNull();
+
+    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    expect(container.querySelector('ul').textContent).toBe('Hello!');
+  });
+
+  it('names the knowledge button with its file count, hiding the emoji from assistive tech', () => {
+    renderApp();
+    const button = screen.getByRole('button', { name: 'Knowledge files (0)' });
+    expect(button.querySelector('[aria-hidden="true"]').textContent).toBe('📄');
   });
 
   it('shows Disconnect while open, and Disconnect tears the audio down', async () => {
