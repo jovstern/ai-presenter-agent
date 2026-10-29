@@ -565,7 +565,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 **T1 — Config, proxy and blueprint (R22, ADR 0003).**
 - `server/config.js` parses the env with Zod (PORT, GEMINI_API_KEY, NODE_ENV) and fails fast
   with a clear message.
-- `trust proxy` in production.
+- `trust proxy` in production. Without it the same-origin check compares an `https` Referer
+  with `req.protocol` `http` behind Render's TLS proxy and rejects every token request, and
+  every user shares the proxy's rate-limit bucket. A supertest case with
+  `X-Forwarded-Proto: https` covers it.
 - `render.yaml`:
   - build: `npm --prefix agent-client ci --include=dev && npm --prefix agent-client run
     build && npm --prefix server ci --omit=dev`;
