@@ -1,0 +1,25 @@
+name: PR demo
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  # The job id is the status check's name; master's branch protection requires `demo`.
+  # Every milestone PR shows its demo GIF (.claude/skills/pr-demo/SKILL.md).
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a demo image in the PR description
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$BODY" | grep -Eq '!\[[^]]*\]\([^)]+\)|<img [^>]*src='; then
+            echo "Demo image found."
+          else
+            echo "::error::This PR has no demo image or GIF in its description. Run the pr-demo skill and add it under a Demo heading."
+            exit 1
+          fi

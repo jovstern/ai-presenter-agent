@@ -581,9 +581,13 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 - [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
-- [ ] **L11** — No root `package.json`, no single command to install/run the three parts, no
+- [x] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.
+  *Fixed (M5 T1, T6): a thin root `package.json` (no workspaces) runs every package's gate with
+  `npm run check`, builds and starts with `npm run dev`, and runs the e2e; `.nvmrc` pins Node 24
+  and each `package.json` has `engines: { node: ">=24" }`. Installs stay one `npm ci` per
+  package (no workspaces, by design); CI (`.github/workflows/ci.yml`) runs all three.*
 - [x] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
   operating on it").
   *Fixed (M4 T5): `docs/sandbox-simulation.md` §2 now reads "sandbox"; the rewritten README no

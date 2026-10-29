@@ -43,6 +43,9 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       *(M5 T4)*
 - [x] R12 An opt-in live e2e (fake-mic WAV) records the app metrics. *(M5 T5)*
 - [ ] R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
+      *(M5 T6: CI done — `.github/workflows/ci.yml` (job `check`) and `pr-demo-check.yml` (job
+      `demo`). Branch protection pending first run: a check must have run once before
+      `protect-master.sh` can require it.)*
 
 **M6: hardening and tuning (issue #5)**
 - [ ] R14 Every remaining M and L item is closed or deferred with a reason.

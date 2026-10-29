@@ -12,7 +12,8 @@ and [`docs/sandbox-simulation.md`](./docs/sandbox-simulation.md) explains why th
 "cloned app" the way it does instead of embedding a real external site. Architecture decisions are
 in [`docs/adr/`](./docs/adr/); the current build cycle's assessment, spec and milestone plan are in
 [`docs/superpowers/`](./docs/superpowers/); open review items are tracked in
-[`docs/code-review-notes.md`](./docs/code-review-notes.md).
+[`docs/code-review-notes.md`](./docs/code-review-notes.md). The words the code uses (bridge,
+channel, keyframe, nonce, generation…) are defined in [`CONTEXT.md`](./CONTEXT.md).
 
 **Not included on purpose:** the agent-creation UI, the template/demo-agent data model, the flow
 builder, RAG upload. This build is about the runtime — sandbox, grounding, security, resilience,
@@ -35,7 +36,8 @@ cross-package scripts. `e2e/` holds the Playwright suite.
 
 ## Run it
 
-You need a Gemini API key: https://aistudio.google.com/apikey
+You need Node 24 (`.nvmrc`; `nvm use` picks it up) and a Gemini API key:
+https://aistudio.google.com/apikey
 
 ```bash
 # 1. build the agent-client once (or `npm run watch` in its own terminal to rebuild on save)
@@ -76,7 +78,7 @@ npm run format  # Prettier write
 
 cd agent-client
 npm test        # vitest: 10 files, 94 tests
-npm run lint    # ESLint: agent-client plus sandbox/bridge.js and target-app/*.js
+npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
 
@@ -148,6 +150,11 @@ The suite in `server/__tests__/`:
   with a nonce, no inline script on any page, the CSP and other headers (production adds HSTS),
   `/health`, a JSON 404, the nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
+
+CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and every push to
+`master`: `npm ci` in the root, `agent-client/` and `server/`, then `npm run check` and
+`npm run e2e`, with no secrets (the Playwright report is uploaded when it fails). A second
+workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no demo image.
 
 ## What's deliberately not here yet
 

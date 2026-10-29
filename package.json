@@ -2,6 +2,9 @@
   "name": "ai-presenter-agent",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "check": "npm run format:check && npm --prefix agent-client run check && npm --prefix server run check",
     "format": "prettier --write .",

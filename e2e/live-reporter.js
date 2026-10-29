@@ -11,7 +11,7 @@ const OUTPUT = fileURLToPath(new URL('../.metrics/live.json', import.meta.url));
 
 /** @param {string} text Playwright's error text, with its terminal colours removed. */
 function firstLine(text) {
-  // eslint-disable-next-line no-control-regex
+  // eslint-disable-next-line no-control-regex -- the ESC (\u001b) of an ANSI colour code is the match
   return text.replace(/\u001b\[[\d;]*m/g, '').split('\n')[0];
 }
 

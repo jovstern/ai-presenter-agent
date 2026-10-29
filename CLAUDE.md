@@ -61,8 +61,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
 
 ## Commands and gates
 
-From the repo root (run `npm install` there once for Prettier and Playwright, then
-`npx playwright install chromium` once for the e2e):
+Node 24 (`.nvmrc`; every `package.json` has `engines: { node: ">=24" }`). From the repo root
+(run `npm install` there once for Prettier and Playwright, then `npx playwright install
+chromium` once for the e2e):
 
 - `npm run check` — Prettier check, then each package's `check` via `npm --prefix`. The gate
   before every commit.
@@ -84,8 +85,10 @@ From the repo root (run `npm install` there once for Prettier and Playwright, th
 Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
 importing `useMemo`/`useCallback`/`memo`. agent-client's config also lints `sandbox/*.js` and
-`target-app/*.js` as classic browser scripts, so its `lint` script runs from the repo
-root (ESLint 10 ignores files outside the base path).
+`target-app/*.js` as classic browser scripts, and the root Playwright suite (`e2e/`,
+`playwright.config.js`) with node + browser globals (the `page.evaluate` callbacks run in the
+page), so its `lint` script runs from the repo root (ESLint 10 ignores files outside the base
+path).
 
 Typecheck is `checkJs` + `strict` on plain JS with JSDoc types
 ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)): `npm run typecheck` in each package
@@ -96,13 +99,15 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 
 ## Docs map
 
+- `CONTEXT.md` — the glossary: bridge, channel, keyframe / delta, nonce, generation, resume
+  handle, tool batch, loop guard, RAG-lite and the rest, each pointing at the file that owns it.
 - `docs/project-knowledge-handoff.md` — primary onboarding doc: origin story, verified-vs-unverified
   build status, decisions log, open questions.
 - `docs/demostack-ai-presenter-agent.md` — build spec.
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
 - `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Done: B1–B4, H1–H5, M2–M4, L9, L12; the rest are open. Its original
+  M1–M9, L1–L12). Done: B1–B4, H1–H5, M2–M4, L9, L11, L12; the rest are open. Its original
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
@@ -163,6 +168,12 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   approval of spec and plan, then one milestone at a time. Each milestone maps to a GitHub
   issue and ends in a PR (`Closes #N`) with code review, UI review, metrics, docs changes,
   manual checks and a demo GIF. **The user merges every PR; Claude waits for the merge.**
+- **CI** (`.github/workflows/`): `ci.yml`'s job `check` runs on every PR and every push to
+  `master` — Node from `.nvmrc`, `npm ci` in the root, `agent-client/` and `server/`, the root
+  `npm run check`, then `npm run e2e` (deterministic only, no secrets; the Playwright report is
+  uploaded on failure). `pr-demo-check.yml`'s job `demo` fails a PR whose description has no
+  demo image. `master`'s branch protection (`.claude/skills/pr-demo/protect-master.sh`)
+  requires both `check` and `demo`, so a red CI or a missing demo GIF blocks the merge.
 - Every agent runs on Opus 5.5.
 - **Docs are part of the work:** the planner keeps this file, `README.md` and `docs/` true —
   updating them in the same commit as the change that affects them, and proposing new docs
