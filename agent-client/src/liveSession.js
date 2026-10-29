@@ -135,13 +135,25 @@ const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
 // e2e (e2e/live.spec.js, docs/metrics/README.md): `ds:connect-start`,
 // `ds:open`, `ds:first-audio`, `ds:tool-start:<id>` / `ds:tool-end:<id>` and
 // `ds:reconnected`. A mark is a timestamp in a buffer nobody reads in
-// production: no logging, no network.
+// production: no logging, no network. The buffer lasts as long as the page and
+// gets two marks per tool call, so the names are kept and cleared on
+// disconnect() (never mid-session: the live e2e reads them after its scenario,
+// with the session still open).
+/** @type {Set<string>} */
+const markNames = new Set();
+
 /**
  * @param {string} name
  * @param {Record<string, unknown>} [detail]
  */
 function mark(name, detail) {
+  markNames.add(name);
   performance.mark(name, { detail });
+}
+
+function clearMarks() {
+  markNames.forEach((name) => performance.clearMarks(name));
+  markNames.clear();
 }
 
 /**
@@ -506,7 +518,7 @@ export function createLiveSession({
             handleFailure(
               gen,
               new Error('The connection to the voice service closed.'),
-              SESSION_STILL_ATTACHED.test(event.reason),
+              event?.code === 1008 && SESSION_STILL_ATTACHED.test(event.reason ?? ''),
             ),
         },
         config: {
@@ -566,6 +578,7 @@ export function createLiveSession({
     resumeHandle = null;
     pendingFrames = [];
     teardown();
+    clearMarks();
     setStatus('closed');
   }
 

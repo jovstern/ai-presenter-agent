@@ -230,6 +230,113 @@ describe('createLiveSession', () => {
     expect(bridge.dispatchAction).toHaveBeenCalledTimes(1); // the rest of the stale batch is dropped
   });
 
+  describe('a snapshot held by a batch whose session is replaced', () => {
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const page = [node('a', 'A'), node('b', 'B'), node('c', 'C')];
+
+    // Starts a navigate that stays in flight, with a snapshot held behind it.
+    async function holdASnapshotMidBatch(liveSession, bridge) {
+      const first = await connectAndEstablish(liveSession);
+      bridge.emitSnapshot({ full: page, changed: page, removed: [] });
+      let finishNavigate;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishNavigate = resolve)),
+      );
+      first.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'nav', name: 'navigate', args: { route: 'settings' } }] },
+      });
+      await flush();
+      bridge.emitSnapshot({ full: page, changed: [node('a', 'A1')], removed: [] }); // held
+      return { first, finishNavigate: () => finishNavigate({ success: true }) };
+    }
+
+    async function firstToolResponseOn(call) {
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      return call.session.sendToolResponse.mock.calls[0][0].functionResponses;
+    }
+
+    it('after a drop: the old session gets no response and the new one no stale page', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      finishNavigate();
+      await flush();
+
+      expect(first.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(second.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(await firstToolResponseOn(second)).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true },
+      });
+    });
+
+    it('after disconnect() and connect(): the same', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+
+      liveSession.disconnect();
+      const second = await connectAndEstablish(liveSession);
+      finishNavigate();
+      await flush();
+
+      expect(first.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(second.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(await firstToolResponseOn(second)).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true },
+      });
+    });
+
+    it('a snapshot that arrives after the reconnect, during a new batch, does ride along', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      bridge.emitSnapshot({ full: page, changed: page, removed: [] }); // the reconnect's keyframe
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+
+      second.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      finishNavigate(); // the old batch ends while the new one is still running
+      await flush();
+      bridge.emitSnapshot({ full: page, changed: [node('b', 'B1')], removed: [] });
+      finishClick({ success: true });
+      await flush();
+
+      expect(second.session.sendToolResponse.mock.calls).toHaveLength(1);
+      expect(second.session.sendToolResponse.mock.calls[0][0].functionResponses).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(delta\)/) },
+      });
+      expect(
+        second.session.sendToolResponse.mock.calls[0][0].functionResponses.response.page,
+      ).toMatch(/B1/);
+    });
+  });
+
   it('resumes with the stored handle on reconnect and does not greet again', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -646,6 +753,27 @@ describe('createLiveSession', () => {
     expect(greetings(retried.session)).toHaveLength(0);
   });
 
+  it('drops the resumption handle when a close that is not 1008 carries the still-attached text', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+
+    const early = live.calls[1];
+    early.resolve();
+    await flush();
+    early.params.callbacks.onclose({
+      code: 1011,
+      reason: 'BidiGenerateContent session is already connected to an existing client',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(live.calls[2].params.config.sessionResumption).toEqual({});
+  });
+
   it('sends a snapshot that arrives mid-batch inside the next tool response, as a keyframe when several were held', async () => {
     const { liveSession, bridge } = setup();
     const call = await connectAndEstablish(liveSession);
@@ -792,6 +920,31 @@ describe('timing marks', () => {
       { name: 'ds:tool-start:tap', detail: { name: 'click' } },
       { name: 'ds:tool-end:tap', detail: { name: 'click', success: false } },
     ]);
+  });
+
+  // Marks live in a page-lifetime buffer; a tool mark per call would grow it
+  // without bound. They are cleared on disconnect(), never mid-session: the
+  // live e2e reads them after its scenario, while the session is still open.
+  it('clears its marks on disconnect(), and not before', async () => {
+    const clearSpy = vi.spyOn(performance, 'clearMarks');
+    try {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'a' } }] },
+      });
+      await flush();
+      expect(clearSpy).not.toHaveBeenCalled();
+
+      liveSession.disconnect();
+
+      const cleared = clearSpy.mock.calls.map(([name]) => name);
+      expect(cleared.sort()).toEqual(
+        ['ds:connect-start', 'ds:open', 'ds:tool-end:tap', 'ds:tool-start:tap'].sort(),
+      );
+    } finally {
+      clearSpy.mockRestore();
+    }
   });
 
   it('marks reconnected when a dropped session is open again, not on a first or manual connect', async () => {

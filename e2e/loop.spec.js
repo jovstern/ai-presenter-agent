@@ -127,8 +127,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await expect.poll(() => live.toolResponses()).toHaveLength(2);
   // The settings page's keyframe rides in the navigate's own response, so the
   // model continues from the new page (liveSession.js); the toggle is named by
-  // its label and reports its state (bridge.js). The click's snapshot is
-  // debounced, so it comes after the click's response, on its own.
+  // its label and reports its state (bridge.js).
   const [navigateResponse, toggleResponse] = live.toolResponses();
   expect(navigateResponse).toEqual({
     id: 'call-navigate',
@@ -143,7 +142,14 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
     hidden: false,
     checked: false,
   });
-  expect(toggleResponse).toEqual({ id: 'call-toggle', name: 'click', response: { success: true } });
+  // Only id, name and success: whether the click's own snapshot rides along
+  // as `page` depends on the bridge's 250 ms debounce outlasting a port round
+  // trip, which is timing, not behaviour (liveSession.test.js covers both).
+  expect(toggleResponse).toMatchObject({
+    id: 'call-toggle',
+    name: 'click',
+    response: { success: true },
+  });
 
   // The server drops the socket. The reconnect's setupComplete is held back so
   // the page is seen waiting in `reconnecting` before it is Live again.

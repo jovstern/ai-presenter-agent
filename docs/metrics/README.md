@@ -61,7 +61,8 @@ the fake-capture file is a browser launch flag.
 
 `agent-client/src/liveSession.js` puts these on the page's performance timeline with
 `performance.mark`. They are timestamps in a buffer nobody reads in production: no logging, no
-network. Unit-tested in `liveSession.test.js` ("timing marks").
+network. A Disconnect clears them (`performance.clearMarks`), so the buffer stays bounded; read
+them before disconnecting. Unit-tested in `liveSession.test.js` ("timing marks").
 
 | Mark | When |
 |---|---|
