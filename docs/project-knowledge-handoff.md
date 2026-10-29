@@ -229,14 +229,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
   `{ attempt, maxAttempts: 6 }`) while a retry is pending, and becomes `failed` only once all six
   are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
-  no longer accepted: the reason tells the user to reload. A 500 the server marks
-  `retryable: false` (no `GEMINI_API_KEY`) also fails at once, with a "contact the site owner"
-  reason. Both of those carry `fatal: true`, and the card offers "Reload page" instead of Retry.
+  no longer accepted: the reason tells the user to reload. Every server error has one shape,
+  `{ error: { code, message } }`, and a 500 with the code `not_configured` also fails at once,
+  with a "contact the site owner, then reload" reason: the server sends it when it has no
+  `GEMINI_API_KEY` and when Google rejects the key it has (an upstream 400/401/403 from the
+  mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. Both
+  fatal cases carry `fatal: true`, and the card offers "Reload page" instead of Retry.
   The status turns `open` and the attempt count resets on the first server message of a session
   (normally `setupComplete`), not when the socket opens, so a socket that opens and closes
   without the server answering never shows "Live" and keeps climbing the backoff instead of
   retrying at 0 ms. A resumed attempt that closes before the server answers drops its handle, so
-  the next attempt starts a fresh session instead of retrying a rejected handle. A manual
+  the next attempt starts a fresh session instead of retrying a rejected handle, except when the
+  close is code 1008 with "already connected": Gemini still holds the dropped client, the handle
+  is fine, and the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
   Connect/Retry starts a fresh budget and resets the loop guard. Unit-tested; not yet exercised
   against a real network drop in this form.
 - **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since

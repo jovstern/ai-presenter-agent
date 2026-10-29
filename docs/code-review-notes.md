@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9 and L12 are done (H1 with the M5 T3
-> CSP); the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9, L11 and L12 are done (H1 with the
+> M5 T3 CSP); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -231,7 +231,14 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 > out of scope: a hostile script already on this origin can still read the nonce and call the
 > endpoint (see the editorial note at the top and ADR 0001). The two in-memory gate maps are
 > also TTL-pruned and size-capped now (`server/expiringMap.js`), so a flood can't grow them
-> without limit. Tests: `server/__tests__/app.test.js`.
+> without limit, and serving the nonce-templated page is rate-limited per IP (M5 fix wave).
+> Deliberate gap: `style-src` allows `'unsafe-inline'`. The agent-client's shadow root gets its
+> stylesheet as a runtime `<style>` element (`main.jsx`), and Radix Dialog's react-remove-scroll
+> injects a `<style>` and inline style attributes when the knowledge dialog opens; neither can
+> carry a per-response nonce from a prebuilt bundle. Script injection is still blocked
+> (`script-src 'self'`); style injection can restyle the page but not run code. Revisit if the
+> styles move to a constructable stylesheet and Radix stops injecting. Tests:
+> `server/__tests__/app.test.js`.
 
 `server/index.js:35` returns an ephemeral Gemini token to any GET — no origin/referer check, no
 rate limit, no per-page nonce. In the real product the iframe holds a crawled clone of a

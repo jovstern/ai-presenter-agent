@@ -189,7 +189,11 @@ events go directly from the browser to Gemini Live.
 - On a `toolCall` message: dispatch to the bridge over the private channel, await the result
   correlated by id (4 s timeout → failure),
   call `session.sendToolResponse()` with it. This action-result loop is the primary grounding
-  signal — no screenshots.
+  signal — no screenshots. The calls of one batch run one at a time, in order. A snapshot that
+  arrives while a batch runs is held and rides inside the next tool response, as its `page`
+  field (a keyframe when several were held), instead of going out as a separate turn: a
+  navigate's keyframe sent on its own landed between the call and its response, and the model
+  ended its turn without the new page's selectors (M5 T5).
 - Loop guard: caps consecutive identical action/utterance signatures; past the cap, injects a
   corrective context turn instead of dispatching again (v2 goal #5).
 - Reconnect: real backoff (immediate, 1s, 3s, 7s, 15s, 30s — 6 attempts) around `ai.live.connect`;

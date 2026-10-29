@@ -27,8 +27,9 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 
 ## Grounding
 
-- **Snapshot** — the bridge's description of the interactive elements on the current page:
-  the full node list plus its diff against the previous snapshot (`changed`, `removed`). Sent
+- **Snapshot** — the bridge's description of the interactive elements on the current page
+  (each one's name, state, and a text field's `value`): the full node list plus its diff
+  against the previous snapshot (`changed`, `removed`). Sent
   after every load, after a debounced DOM mutation, and on request (`sandbox/bridge.js`).
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
   or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
@@ -55,7 +56,7 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Resume handle** — the id Gemini sends so a reconnect can resume the same conversation
   instead of starting over (`liveSession.js`). A resumed session is not greeted again.
 - **Fatal failure** — a `failed` status that Retry can't fix (the token request is rejected,
-  or the server has no key), so the card offers Reload page instead, with the reason
+  or the server has no key or Google rejects it: `not_configured`), so the card offers Reload page instead, with the reason
   (`fatal` in `liveSession.js`'s `StatusDetails`).
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside

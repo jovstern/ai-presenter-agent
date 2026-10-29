@@ -52,7 +52,9 @@ It widens from there.
   without types needs its `@types` package (`@types/compression`) or fails the check.
 - **`src/__tests__/` is not type-checked yet.** Its fakes stand in loosely for typed values
   (strings for snapshot nodes, partial sessions); typing them is test churn with no bug to
-  find. Widening to the tests is a later task, not a looser setting.
+  find. Widening to the tests is a later task, not a looser setting. The same holds for
+  `server/__tests__/` (the server config includes only `*.js` at its root) and `e2e/`
+  (linted, not type-checked).
 - Typing surfaced three real bugs, fixed with tests: a model-supplied `toString` tool name
   threw in `toPositionalArgs`; a token response without a token threw outside `openSession`'s
   `try` and left the status at `connecting`; `fill` on an element without `value` reported

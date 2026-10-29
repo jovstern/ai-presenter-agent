@@ -144,13 +144,14 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (94 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (110 tests): `actionTools`,
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
-  Library). `server/__tests__/` has 2 vitest files (31 tests): `app` (supertest against
-  `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/200 paths, both
-  sandbox URLs templated, no inline scripts, the CSP and other headers, `/health`, the nonce cap)
+  Library). `server/__tests__/` has 2 vitest files (44 tests): `app` (supertest against
+  `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
+  mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
+  inline scripts, the CSP and other headers, `/health`, the HTML and JSON 404s, the nonce cap)
   and `expiringMap` (expiry, pruning on access, the cap). `e2e/` has 3 Playwright specs (13
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (7: `sandbox/bridge.js` on a fixture page, the test

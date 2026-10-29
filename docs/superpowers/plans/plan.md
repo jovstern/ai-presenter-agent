@@ -200,7 +200,7 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 4. `gh api …/branches/master/protection` shows the required check.
 
 **Acceptance tests:**
-- `server/__tests__/token.test.js`;
+- `server/__tests__/app.test.js`;
 - `e2e/bridge.spec.js`;
 - `e2e/a11y.spec.js`;
 - `e2e/live.spec.js` (opt-in);

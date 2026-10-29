@@ -35,8 +35,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - [ ] R7 Docs are true (assessment §7), and the review checklist is ticked in place.
 
 **M5: quality baseline (new issue)**
-- [ ] R8 ESLint and Prettier, with `npm run check` per package and at a thin root.
-- [ ] R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002).
+- [x] R8 ESLint and Prettier, with `npm run check` per package and at a thin root. *(M5 T1)*
+- [x] R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002). *(M5 T2)*
 - [x] R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
       `/health`. *(M5 T3)*
 - [x] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.

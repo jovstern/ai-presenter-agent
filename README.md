@@ -77,13 +77,13 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 94 tests
+npm test        # vitest: 10 files, 110 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
 
 cd ../server
-npm test        # vitest + supertest: 2 files, 31 tests
+npm test        # vitest + supertest: 2 files, 44 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -120,8 +120,9 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 
 - `bridge.spec.js` — `sandbox/bridge.js` in a real browser on a fixture page (the bridge and the
   iframe, no agent-client, served with the real CSP). The test does the real handshake and port
-  transfer itself, then checks that click / fill / scroll / navigate change the iframe, that an
-  unknown action, an unknown route and `fill` on a non-input are rejected, that a second
+  transfer itself, then checks that click / fill / scroll / navigate change the iframe (the fill's
+  value showing in the next snapshot), that an unknown action, an unknown route and `fill` on a
+  non-input are rejected, that a second
   `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
   snapshot with `hidden` right for `save-confirmation`.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
