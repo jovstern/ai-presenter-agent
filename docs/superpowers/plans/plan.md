@@ -485,6 +485,11 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
     only when the server rejects the handle;
   - the T3 deferral: setupComplete-then-close resets the backoff each cycle (bounded today
     by the 429 limit).
+- Accepted from the M5 re-review (round 2), fixed here:
+  - `bridge.js` `labelFor` puts `aria-labelledby` first, as the accessible-name spec does;
+  - placeholder and title names are capped at 60 characters like every other name source;
+  - `server/app.js` `errorPage` escapes its arguments, so a later dynamic caller can't
+    inject markup.
 - Issue #5's "done when" is met.
 
 *(small, 6 min)*
