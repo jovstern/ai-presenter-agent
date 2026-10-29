@@ -200,9 +200,10 @@ events go directly from the browser to Gemini Live.
   render counts stay flat under a burst of simulated volume updates (v2 goal #9). Lost in the
   rebuild; restored in M7 (#11).
 - A test for the bridge's origin/source/allowlist validation — the exact gap v1 shipped with.
-  The agent side of the private channel is unit-tested today (`bridgeChannel.test.js`); the
-  test of `sandbox/bridge.js`'s handshake and allowlist arrives with the M5 e2e (#13,
-  `e2e/bridge.spec.js`).
+  Done in M5 (#13): `e2e/bridge.spec.js` runs `sandbox/bridge.js` in Chromium on a fixture page
+  and performs the real handshake and port transfer; a second `ds-bridge-connect`, forged
+  `window` messages, an action outside the allowlist and an unknown route are all refused. The
+  agent side of the channel is unit-tested (`bridgeChannel.test.js`).
 
 ## 6. Open questions
 

@@ -332,6 +332,23 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   - the knowledge button's empty state signalled without `opacity:.5`.
 - Docs: README test section; CLAUDE.md test layout.
 
+*Done notes (T4):*
+- The fake Gemini is `page.routeWebSocket` on `wss://generativelanguage.googleapis.com/…`: the
+  SDK's own browser WebSocket is intercepted, so no init-script fake is needed.
+- The e2e server runs `node server/index.js` with `DOTENV_CONFIG_PATH=/dev/null`, so dotenv
+  never loads `server/.env`; port 3971, `reuseExistingServer: false`.
+- The iframe title, viewport metas, the empty state's ring (not opacity) and the search
+  input's id/name were already in place from M4. axe 4.14 found one new violation:
+  `label-content-name-mismatch` on the knowledge button (its `aria-label` "Knowledge files (0)"
+  left out the visible text). It is now named by its content, a visually hidden "Knowledge
+  files:" before the visible count.
+- The CSP fixture listens on `window`, not `document`: an iframe's first document reuses the
+  Window of its initial about:blank, where the init script ran.
+- The bridge fixture page is served with the real `/` response's headers, so it runs under the
+  shipped CSP.
+- `e2e/` is formatted by Prettier but not linted: no root ESLint config, and adding one is a
+  lint-config change left for the user to decide.
+
 *(large, 25 min)*
 
 **T5 — Opt-in live e2e + app metrics (R12).**

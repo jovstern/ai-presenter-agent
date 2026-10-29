@@ -49,6 +49,11 @@ function mount() {
     .agent-app__line--user { color: #555; font-style: italic; }
     .agent-app__knowledge-btn { margin-left: 8px; }
     .agent-app__knowledge-btn--empty { box-shadow: 0 0 0 2px #b3261e inset; }
+    /* Read by screen readers, not shown (the knowledge button's name). */
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+    }
 
     .knowledge-modal__overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); }
     .knowledge-modal__content {

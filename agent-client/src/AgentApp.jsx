@@ -85,12 +85,15 @@ export function AgentApp({ bridge, nonce, portalContainer }) {
   return (
     <div className="agent-app">
       <button onClick={action.onClick}>{action.label}</button>
+      {/* Named by its content, not an aria-label: the visible count has to be
+          part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
+          and the emoji is decoration. The name reads "Knowledge files: 0". */}
       <button
         className={`agent-app__knowledge-btn${hasContent ? '' : ' agent-app__knowledge-btn--empty'}`}
-        aria-label={`Knowledge files (${fileCount})`}
         onClick={() => setKnowledgeOpen(true)}
       >
-        <span aria-hidden="true">📄</span> {fileCount}
+        <span aria-hidden="true">📄</span> <span className="visually-hidden">Knowledge files:</span>{' '}
+        {fileCount}
       </button>
       <span className="agent-app__status" role="status">
         {statusText(status, details)}

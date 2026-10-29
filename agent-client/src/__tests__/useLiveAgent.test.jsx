@@ -272,9 +272,11 @@ describe('AgentApp + useLiveAgent', () => {
     expect(container.querySelector('ul').textContent).toBe('Hello!');
   });
 
-  it('names the knowledge button with its file count, hiding the emoji from assistive tech', () => {
+  it('names the knowledge button with its visible file count, hiding the emoji from assistive tech', () => {
     renderApp();
-    const button = screen.getByRole('button', { name: 'Knowledge files (0)' });
+    // Named by its content, so the visible "0" is part of the name (WCAG 2.5.3).
+    const button = screen.getByRole('button', { name: 'Knowledge files: 0' });
+    expect(button.hasAttribute('aria-label')).toBe(false);
     expect(button.querySelector('[aria-hidden="true"]').textContent).toBe('📄');
   });
 

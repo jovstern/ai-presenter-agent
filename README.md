@@ -30,7 +30,8 @@ server/          npm package: mints a short-lived Gemini Live token, serves ever
 ```
 
 Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
-and a thin root `package.json` (no workspaces) holding Prettier and the cross-package scripts.
+and a thin root `package.json` (no workspaces) holding Prettier, Playwright and the
+cross-package scripts. `e2e/` holds the Playwright suite.
 
 ## Run it
 
@@ -65,9 +66,11 @@ and starts the server in one step.
 ## Test
 
 ```bash
-npm install     # at the repo root, once: Prettier
+npm install     # at the repo root, once: Prettier, Playwright, axe
+npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
+npm run e2e     # Playwright (Chromium): 3 specs, 13 tests, no Gemini key needed
 npm run format  # Prettier write
 
 cd agent-client
@@ -103,6 +106,29 @@ The suite in `agent-client/src/__tests__/`:
   context blob it builds.
 - `loopGuard.test.js`, `pcm.test.js` — the repeat cap and the audio encode/decode helpers.
 
+`npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
+with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
+`server/.env`; the token endpoint and the Gemini Live socket are stubbed inside the tests. It
+is separate from `check`. A failure leaves a trace in `test-results/` (`npx playwright show-trace
+<file>`). Every test fails on a console error, an uncaught page error or a CSP violation in any
+frame (`e2e/fixtures.js`). The suite in `e2e/`:
+
+- `bridge.spec.js` — `sandbox/bridge.js` in a real browser on a fixture page (the bridge and the
+  iframe, no agent-client, served with the real CSP). The test does the real handshake and port
+  transfer itself, then checks that click / fill / scroll / navigate change the iframe, that an
+  unknown action, an unknown route and `fill` on a non-input are rejected, that a second
+  `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
+  snapshot with `hidden` right for `save-confirmation`.
+- `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
+  real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
+  tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
+  `toolResponse`s in order; a server-side close shows `Reconnecting…`, then Live, with exactly
+  one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
+  connected". And a `not_configured` 500 goes straight to "Reload page" with no retries.
+- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle and
+  with the knowledge dialog open, and on both target-app pages: zero violations. axe walks the
+  card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
+
 The suite in `server/__tests__/`:
 
 - `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
@@ -115,9 +141,6 @@ The suite in `server/__tests__/`:
 
 ## What's deliberately not here yet
 
-- A test for the bridge's handshake/allowlist logic in `sandbox/bridge.js` itself — it is tied to
-  a real page and iframe, so it arrives with the Playwright e2e in M5 (issue #13). The agent's
-  side of the channel is unit-tested (`bridgeChannel.test.js`).
 - A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the
   underlying store is tested, the UI isn't yet (M7, issue #11).
 - The designed widget — volume orb, coalesced transcript, connection toast, render-isolation

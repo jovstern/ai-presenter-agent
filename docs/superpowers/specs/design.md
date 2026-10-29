@@ -39,7 +39,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - [ ] R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002).
 - [x] R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
       `/health`. *(M5 T3)*
-- [ ] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
+- [x] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
+      *(M5 T4)*
 - [ ] R12 An opt-in live e2e (fake-mic WAV) records the app metrics.
 - [ ] R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
 
@@ -118,7 +119,7 @@ Language: JS with checkJs (ADR 0002).
 | pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `^10.4.0`, `^11.0.0` |
 | helmet | server | security headers and CSP (H1 remainder) — `^8.3.0` |
 | supertest, vitest | server | token-gate tests (R10) — `^7.3.1`, `^5.0.5` |
-| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12) |
+| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `^1.64.1`, `^4.14.0` |
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
 | zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `^4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |

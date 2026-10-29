@@ -194,6 +194,12 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (`wss://generativelanguage.googleapis.com`) to `Live`. That check caught helmet's default
   `Referrer-Policy: no-referrer` stripping the Referer the same-origin gate needs (Chrome's
   `fetch()` sends no Origin on same-origin GETs); the policy is `same-origin` now.
+- **`sandbox/bridge.js`'s side of the channel is tested in a real browser** (M5 T4,
+  `e2e/bridge.spec.js`, Chromium): the first-only `ds-bridge-connect` handshake with a real port
+  transfer, a second connect and forged `window` messages ignored, the action allowlist, unknown
+  routes, `fill` on a non-input refused, and snapshots after a mutation. axe
+  (`e2e/a11y.spec.js`) finds zero violations on `/` (card idle and knowledge dialog open, inside
+  the shadow root) and on both target-app pages.
 - The exact Gemini Live SDK surface used (`ai.live.connect`, `client.authTokens.create`,
   `session.sendRealtimeInput`, `session.sendToolResponse`, the `toolCall.functionCalls` shape) was
   checked against Google's current docs (`ai.google.dev/gemini-api/docs/live-api/*`) via live web
@@ -213,8 +219,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (`onerror`+`onclose` → one reconnect), a superseded connect, H4's in-order tool batches, a batch
   orphaned by a reconnect, resumption, the loop guard, the status sequence and `dispose()`. That
   proves the state machine, not the wire protocol. The wire protocol was exercised once, by hand,
-  in PR #9 (§3.2) — before the T2–T4 changes to the channel, status and teardown. An automated
-  real-key run is M5's opt-in live e2e (#13).
+  in PR #9 (§3.2) — before the T2–T4 changes to the channel, status and teardown. Since M5 T4,
+  `e2e/loop.spec.js` runs the real page and the real SDK socket code against a scripted fake
+  Live server (`page.routeWebSocket`): a tool batch, a dropped socket and one token per
+  reconnect, in CI with no key. That still isn't Google's server; an automated real-key run is
+  M5's opt-in live e2e (#13).
 - **Reconnect behaviour (`liveSession.js`).** A drop (`onerror` and/or `onclose`, a failed token
   fetch, or a rejected `live.connect()`) retires the session's generation and schedules a single
   retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
@@ -257,11 +266,6 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
   meaningfully more code — a separate worklet module, message-passing to the main thread). Fine
   for a local demo; worth swapping before anything resembling production use.
-- **No test exists yet for `sandbox/bridge.js`'s side of the channel** (the first-only
-  `ds-bridge-connect` handshake with its origin/source checks, and the action allowlist). The
-  agent's side is unit-tested (`bridgeChannel.test.js`, including forged `window` messages being
-  ignored); the bridge's side needs a real page and iframe and arrives with the M5 Playwright e2e
-  (#13, `e2e/bridge.spec.js`).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`

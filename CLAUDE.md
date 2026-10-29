@@ -10,7 +10,7 @@ deliberately left out.
 ## Package layout
 
 Two npm packages and two static directories, plus a thin root `package.json` (no workspaces)
-that holds only Prettier and the cross-package scripts:
+that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-package scripts:
 
 - `agent-client/` (npm) — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`)
   wired into `vite.config.js`'s `@vitejs/plugin-react` babel config — don't add manual
@@ -61,13 +61,18 @@ that holds only Prettier and the cross-package scripts:
 
 ## Commands and gates
 
-From the repo root (run `npm install` there once for Prettier):
+From the repo root (run `npm install` there once for Prettier and Playwright, then
+`npx playwright install chromium` once for the e2e):
 
 - `npm run check` — Prettier check, then each package's `check` via `npm --prefix`. The gate
   before every commit.
 - `npm run format` — Prettier write (`.prettierrc.json`; Markdown, lockfiles and `dist/` are
   ignored in `.prettierignore`).
 - `npm run dev` — build agent-client, then start the server.
+- `npm run e2e` — Playwright, Chromium only (`playwright.config.js`). Not part of `check`; CI runs
+  both. Its `webServer` builds agent-client and runs `node server/index.js` on port 3971 with
+  `GEMINI_API_KEY=e2e-dummy` and `DOTENV_CONFIG_PATH=/dev/null`, so it never loads
+  `server/.env`; the token endpoint and the Live socket are stubbed in the tests. Needs no key.
 
 Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
@@ -117,7 +122,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
 ## Workflow notes
 
 - Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running
-  their npm commands (`npm install` included); the root only runs `check`, `format` and `dev`.
+  their npm commands (`npm install` included); the root only runs `check`, `format`, `dev` and
+  `e2e`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
 - Tests: `agent-client/src/__tests__/` has 10 vitest files (86 tests): `actionTools`,
@@ -127,8 +133,16 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   Library). `server/__tests__/` has 2 vitest files (31 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/200 paths, both
   sandbox URLs templated, no inline scripts, the CSP and other headers, `/health`, the nonce cap)
-  and `expiringMap` (expiry, pruning on access, the cap). The bridge's real-browser handshake
-  test arrives with the M5 e2e. Follow the existing vitest pattern when adding tests.
+  and `expiringMap` (expiry, pruning on access, the cap). `e2e/` has 3 Playwright specs (13
+  tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
+  violation in any frame: `bridge.spec.js` (7: `sandbox/bridge.js` on a fixture page, the test
+  doing the real handshake and port transfer — the actions, the allowlist, unknown routes, a
+  second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (2: the real
+  `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
+  socket, one token per reconnect, the page nonce; and the fatal `not_configured` path) and
+  `a11y.spec.js` (4: axe with zero violations on `/` idle, with the knowledge dialog open —
+  inside the shadow root — and on both target-app pages). Follow the existing vitest pattern
+  when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
 
