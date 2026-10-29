@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 // Collects the `live-metrics` attachment of every live e2e test
 // (e2e/live.spec.js) and appends one run to .metrics/live.json (gitignored).
@@ -11,8 +12,7 @@ const OUTPUT = fileURLToPath(new URL('../.metrics/live.json', import.meta.url));
 
 /** @param {string} text Playwright's error text, with its terminal colours removed. */
 function firstLine(text) {
-  // eslint-disable-next-line no-control-regex -- the ESC (\u001b) of an ANSI colour code is the match
-  return text.replace(/\u001b\[[\d;]*m/g, '').split('\n')[0];
+  return stripVTControlCharacters(text).split('\n')[0];
 }
 
 /** @implements {import('@playwright/test/reporter').Reporter} */

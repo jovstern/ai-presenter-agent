@@ -45,8 +45,18 @@ const server = app.listen(PORT, () => {
 // connections, let in-flight requests (a token mint) finish, then exit. A
 // connection that never ends (a keep-alive the client holds) gets the grace
 // period, then the process exits anyway.
+// One shutdown only: SIGINT then SIGTERM (a Ctrl-C, then the supervisor) would
+// otherwise call server.close twice, and the second call's
+// ERR_SERVER_NOT_RUNNING exited 1 before in-flight requests had finished.
+let shuttingDown = false;
+
 /** @param {NodeJS.Signals} signal */
 function shutdown(signal) {
+  if (shuttingDown) {
+    logger.info({ signal }, 'already shutting down');
+    return;
+  }
+  shuttingDown = true;
   logger.info({ signal }, 'shutting down');
   server.close((err) => {
     if (err) logger.error({ err }, 'error while closing the server');

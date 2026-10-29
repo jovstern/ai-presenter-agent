@@ -40,13 +40,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 const DEFAULT_LIMITS = {
+  // Token requests per IP per window.
   rateLimitMax: 30,
+  // Sandbox page loads per IP per window: each one issues a nonce (see
+  // sendSandbox). Generous, since a viewer may reload often.
+  pageRateLimitMax: 60,
   rateLimitWindowMs: 60_000,
   // 1 hour: long enough for a real demo session (see the H1 note below).
   nonceTtlMs: 60 * 60_000,
-  // Caps for the two in-memory maps (deferred from M4: both grew without
-  // limit). Far above what one small instance sees in an hour; past them the
-  // oldest entry goes, so a flood costs a stale page a reload, not memory.
+  // Caps for the in-memory maps (deferred from M4: they grew without limit).
+  // Far above what one small instance sees in an hour; past them the oldest
+  // entry goes, so a flood costs a stale page a reload, not memory. The page
+  // rate limit (pageRateLimitMax) keeps one address from causing that flood
+  // alone; many addresses still can, which costs only those reloads.
   maxNonces: 10_000,
   maxClients: 10_000,
 };
@@ -155,9 +161,56 @@ function contentSecurityPolicy(production) {
   };
 }
 
+const NOT_FOUND_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Page not found</title>
+    <link rel="icon" href="data:," />
+    <style>
+      body { margin: 0; padding: 48px 16px; font-family: system-ui, sans-serif; color: #1a1a1a; background: #fff; }
+      main { max-width: 32rem; margin: 0 auto; }
+      h1 { font-size: 1.5rem; margin: 0 0 8px; }
+      p { margin: 0 0 16px; color: #555; }
+      a { color: #0b57d0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Page not found</h1>
+      <p>There is nothing at this address.</p>
+      <a href="/">Back to the demo</a>
+    </main>
+  </body>
+</html>
+`;
+
+/**
+ * A fixed window per IP: the entry's TTL is the window, and a hit inside it
+ * mutates the count without restarting it. req.ip is undefined only for a
+ * socket that's already gone; such requests share one bucket.
+ * @param {{ max: number, windowMs: number, maxClients: number, now: () => number }} options
+ * @returns {(req: Request) => boolean} Whether this request is over the limit.
+ */
+function createRateLimiter({ max, windowMs, maxClients, now }) {
+  /** @type {import('./expiringMap.js').ExpiringMap<{ count: number }>} */
+  const requestLog = createExpiringMap({ ttlMs: windowMs, maxSize: maxClients, now });
+  return (req) => {
+    const key = req.ip ?? '';
+    const entry = requestLog.get(key);
+    if (!entry) {
+      requestLog.set(key, { count: 1 });
+      return false;
+    }
+    entry.count += 1;
+    return entry.count > max;
+  };
+}
+
 /** @param {AppOptions} options */
 export function createApp({ mintToken, now = Date.now, logger, production = false, limits }) {
-  const { rateLimitMax, rateLimitWindowMs, nonceTtlMs, maxNonces, maxClients } = {
+  const { rateLimitMax, pageRateLimitMax, rateLimitWindowMs, nonceTtlMs, maxNonces, maxClients } = {
     ...DEFAULT_LIMITS,
     ...limits,
   };
@@ -181,23 +234,18 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
   // that needs a reload, which is an acceptable bar for this project's scope.
   /** @type {import('./expiringMap.js').ExpiringMap<true>} */
   const nonces = createExpiringMap({ ttlMs: nonceTtlMs, maxSize: maxNonces, now });
-  // Fixed window per IP: the entry's TTL is the window, and a hit inside it
-  // mutates the count without restarting it. req.ip is undefined only for a
-  // socket that's already gone; such requests share one bucket.
-  /** @type {import('./expiringMap.js').ExpiringMap<{ count: number }>} */
-  const requestLog = createExpiringMap({ ttlMs: rateLimitWindowMs, maxSize: maxClients, now });
-
-  /** @param {Request} req */
-  function isRateLimited(req) {
-    const key = req.ip ?? '';
-    const entry = requestLog.get(key);
-    if (!entry) {
-      requestLog.set(key, { count: 1 });
-      return false;
-    }
-    entry.count += 1;
-    return entry.count > rateLimitMax;
-  }
+  const isRateLimited = createRateLimiter({
+    max: rateLimitMax,
+    windowMs: rateLimitWindowMs,
+    maxClients,
+    now,
+  });
+  const isPageRateLimited = createRateLimiter({
+    max: pageRateLimitMax,
+    windowMs: rateLimitWindowMs,
+    maxClients,
+    now,
+  });
 
   // A1 (assessment): every URL that renders the sandbox page must go through
   // the nonce template, or the page ships the literal %%DS_NONCE%% and every
@@ -308,6 +356,10 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
    * @param {Response} res
    */
   function sendSandbox(req, res) {
+    if (isPageRateLimited(req)) {
+      sendError(res, 429, 'rate_limited', 'Too many requests');
+      return;
+    }
     const nonce = crypto.randomUUID();
     nonces.set(nonce, true);
     res.type('html').send(sandboxHtml.replace('%%DS_NONCE%%', nonce));
@@ -318,7 +370,13 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
   app.use('/sandbox', express.static(path.join(ROOT, 'sandbox')));
   app.use('/target-app', express.static(path.join(ROOT, 'target-app')));
 
+  // A browser that follows a bad link gets a page with a way back; an API
+  // caller (and anything that doesn't prefer HTML) gets the one error shape.
   app.use((req, res) => {
+    if (!req.path.startsWith('/api/') && req.accepts(['json', 'html']) === 'html') {
+      res.status(404).type('html').send(NOT_FOUND_HTML);
+      return;
+    }
     sendError(res, 404, 'not_found', 'Not found');
   });
 

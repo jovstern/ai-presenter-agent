@@ -71,7 +71,7 @@ function mount() {
     .knowledge-modal__files { list-style: none; margin: 0 0 12px; padding: 0; }
     .knowledge-modal__files li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 0.9em; }
     .knowledge-modal__rules-label { display: block; font-size: 0.9em; color: #444; }
-    .knowledge-modal__rules { width: 100%; min-height: 60px; margin-top: 4px; font-family: inherit; }
+    .knowledge-modal__rules { box-sizing: border-box; width: 100%; min-height: 60px; margin-top: 4px; font-family: inherit; }
     .knowledge-modal__close { margin-top: 12px; }
   `;
   shadowRoot.appendChild(style);

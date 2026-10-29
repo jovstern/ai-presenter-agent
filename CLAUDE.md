@@ -39,14 +39,19 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `app.js` — `createApp({ mintToken, now, logger, production, limits })`, no `listen`, so
     tests drive it with supertest. Mints short-lived Gemini Live tokens (`/api/live-token`,
     gated on same-origin, a per-IP rate limit and a page nonce parsed with Zod), serves the
-    nonce-templated sandbox page at `/` and `/sandbox/`, the other static directories gzipped
-    (`compression`), and `GET /health`. pino-http logs every request with a request id
-    (`x-request-id`); helmet sends the CSP (see below) and the other security headers. Every
-    JSON error is `{ error: { code, message } }`, and a central error handler turns anything
-    unexpected into a 500 without internals.
+    nonce-templated sandbox page at `/` and `/sandbox/` (rate-limited per IP too, since each
+    load issues a nonce), the other static directories gzipped (`compression`), and
+    `GET /health`. pino-http logs every request with a request id (`x-request-id`); helmet
+    sends the CSP (see below) and the other security headers. Every JSON error is
+    `{ error: { code, message } }`. A failed mint is `not_configured` (500) when Google rejects
+    the key and `upstream_error` (502) otherwise, both logged at error. The central error
+    handler keeps only an `expose`d client error's status and turns anything else into a 500
+    without internals. An unknown page a browser asks for gets a small HTML 404 with a link
+    back; `/api/*` and non-HTML callers get the JSON one.
   - `expiringMap.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
   - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the real
-    Gemini mint, `listen`, graceful SIGTERM/SIGINT shutdown.
+    Gemini mint, `listen`, graceful SIGTERM/SIGINT shutdown (once, whichever signal comes
+    first).
   `npm start`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run check` (all three).
   Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
   **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any

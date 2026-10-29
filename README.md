@@ -145,10 +145,13 @@ The suite in `server/__tests__/`:
 
 - `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
   gate (403 cross-origin or with no Origin/Referer, 400 malformed nonce, 403 unknown or expired
-  nonce, 429 past the limit, a JSON `not_configured` 500 with no key, a 500 without internals
-  when the mint throws, 200), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
-  with a nonce, no inline script on any page, the CSP and other headers (production adds HSTS),
-  `/health`, a JSON 404, the nonce cap, and no nonce or token in the logs.
+  nonce, 429 past the limit, a JSON `not_configured` 500 with no key or when Google rejects
+  the key with a 400/401/403, a 502 `upstream_error` for any other mint failure, both logged at
+  error, 200), the error handler (a plain error is a 500 without internals; only an `expose`d
+  client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
+  with a nonce and rate-limited per IP, no inline script on any page, the CSP and other headers
+  (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
+  nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
 
 CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and every push to

@@ -241,6 +241,40 @@ describe('the sandbox page', () => {
     },
   );
 
+  // Every page load issues a nonce (an hour-long map entry), so a flood of
+  // page loads from one address is capped like token requests are.
+  it('returns 429 past the per-IP page limit, and serves again once the window has passed', async () => {
+    const { app, clock: c } = setup({ limits: { pageRateLimitMax: 3 } });
+    const load = () => request(app).get('/').set('Host', HOST);
+
+    const statuses = [];
+    for (let i = 0; i < 4; i += 1) statuses.push((await load()).status);
+    expect(statuses).toEqual([200, 200, 200, 429]);
+    const limited = await load();
+    expect(limited.body).toEqual({ error: { code: 'rate_limited', message: expect.any(String) } });
+    expect(limited.text).not.toMatch(/data-ds-nonce/);
+
+    c.advance(60_001);
+    expect((await load()).status).toBe(200);
+  });
+
+  it('counts page loads and token requests separately', async () => {
+    const { app } = setup({ limits: { pageRateLimitMax: 1, rateLimitMax: 1 } });
+    const nonce = await pageNonce(app);
+
+    expect((await tokenRequest(app, nonce)).status).toBe(200);
+  });
+
+  it('allows 60 page loads a minute by default', async () => {
+    const { app } = setup();
+    const statuses = [];
+    for (let i = 0; i < 61; i += 1) {
+      statuses.push((await request(app).get('/sandbox/').set('Host', HOST)).status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(60);
+    expect(statuses.at(-1)).toBe(429);
+  });
+
   it('issues a different nonce per page load', async () => {
     const { app } = setup();
     expect(await pageNonce(app)).not.toBe(await pageNonce(app));
@@ -331,6 +365,32 @@ describe('other routes', () => {
   it('an unknown path is a JSON 404 in the one error shape', async () => {
     const { app } = setup();
     const res = await request(app).get('/nope');
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: { code: 'not_found', message: expect.any(String) } });
+  });
+
+  it('an unknown page a browser asks for is an accessible HTML 404 with a way back', async () => {
+    const { app } = setup();
+    const res = await request(app)
+      .get('/target-app/missing.html')
+      .set('Host', HOST)
+      .set('Accept', 'text/html,application/xhtml+xml,*/*;q=0.8');
+
+    expect(res.status).toBe(404);
+    expect(res.type).toBe('text/html');
+    expect(res.text).toMatch(/<html lang="en">/);
+    expect(res.text).toMatch(/<title>Page not found<\/title>/);
+    expect(res.text).toMatch(/<meta name="viewport" content="width=device-width, initial-scale=1"/);
+    expect(res.text).toMatch(/<h1>Page not found<\/h1>/);
+    expect(res.text).toMatch(/<a href="\/">Back to the demo<\/a>/);
+    expect(res.text).not.toMatch(/<script/);
+    expect(res.headers['content-security-policy']).toMatch(/script-src 'self'/);
+  });
+
+  it('an unknown /api/ path stays JSON even for a browser', async () => {
+    const { app } = setup();
+    const res = await request(app).get('/api/nope').set('Accept', 'text/html');
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: { code: 'not_found', message: expect.any(String) } });
