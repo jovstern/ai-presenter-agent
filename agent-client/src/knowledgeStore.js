@@ -60,11 +60,19 @@ export async function addFile(file) {
   const files = readFiles();
   const currentTotal = files.reduce((sum, f) => sum + f.size, 0);
   if (currentTotal + file.size > MAX_TOTAL_BYTES) {
-    return fail(`Adding this file would exceed the ${MAX_TOTAL_BYTES / (1024 * 1024)}MB total limit`);
+    return fail(
+      `Adding this file would exceed the ${MAX_TOTAL_BYTES / (1024 * 1024)}MB total limit`,
+    );
   }
 
   const text = await file.text();
-  const entry = { id: crypto.randomUUID(), name: file.name, size: file.size, addedAt: Date.now(), text };
+  const entry = {
+    id: crypto.randomUUID(),
+    name: file.name,
+    size: file.size,
+    addedAt: Date.now(),
+    text,
+  };
   writeFiles([...files, entry]);
   return ok({ file: entry });
 }

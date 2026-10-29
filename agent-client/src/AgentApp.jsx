@@ -97,7 +97,11 @@ export function AgentApp({ bridge, portalContainer }) {
           ))}
         </ul>
       )}
-      <KnowledgeModal open={knowledgeOpen} onOpenChange={setKnowledgeOpen} portalContainer={portalContainer} />
+      <KnowledgeModal
+        open={knowledgeOpen}
+        onOpenChange={setKnowledgeOpen}
+        portalContainer={portalContainer}
+      />
     </div>
   );
 }

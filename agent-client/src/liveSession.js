@@ -18,7 +18,8 @@ const MAX_ATTEMPTS = RECONNECT_DELAYS.length;
 // (expired nonce, wrong origin), so the same request will be rejected again:
 // burning the whole backoff on it would just delay the honest answer. 429 is
 // the exception — the server's rate limit clears on its own.
-const RELOAD_REASON = 'This page can no longer get a connection token. Reload the page to reconnect.';
+const RELOAD_REASON =
+  'This page can no longer get a connection token. Reload the page to reconnect.';
 // The server marks a failure it can't recover from on its own (no
 // GEMINI_API_KEY) with `retryable: false`: a 500, but retrying won't help and
 // neither will a reload, so the reason points at whoever runs the site.
@@ -50,7 +51,13 @@ const SYSTEM_INSTRUCTION =
 // for that gap so "hears you" doesn't depend on speaking after a fixed delay.
 const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
 
-export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTranscript, onInterrupted }) {
+export function createLiveSession({
+  bridge,
+  onStatusChange,
+  onAudioChunk,
+  onTranscript,
+  onInterrupted,
+}) {
   let session = null;
   let generation = 0;
   let resumeHandle = null;
@@ -107,13 +114,18 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     for (const fc of functionCalls) {
       const signature = actionSignature(fc.name, fc.args);
       const result = loopGuard.check(signature)
-        ? { success: false, error: 'This action has repeated too many times in a row — try something different.' }
+        ? {
+            success: false,
+            error: 'This action has repeated too many times in a row — try something different.',
+          }
         : await bridge.dispatchAction(fc.name, toPositionalArgs(fc.name, fc.args ?? {}));
 
       // A drop retires the generation, so a batch from a dead session stops
       // here instead of answering into the dead socket or the replacement one.
       if (gen !== generation || !session) return;
-      session.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: result } });
+      session.sendToolResponse({
+        functionResponses: { id: fc.id, name: fc.name, response: result },
+      });
     }
   }
 
@@ -213,7 +225,12 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
     // Retrying with it would fail the same way every time, so start fresh.
     if (attemptResumed && !serverAnswered) resumeHandle = null;
     if (error?.retryable === false) {
-      setStatus('failed', { attempt, maxAttempts: MAX_ATTEMPTS, reason: error.reason ?? RELOAD_REASON, fatal: true });
+      setStatus('failed', {
+        attempt,
+        maxAttempts: MAX_ATTEMPTS,
+        reason: error.reason ?? RELOAD_REASON,
+        fatal: true,
+      });
       return;
     }
     if (attempt >= MAX_ATTEMPTS) {
@@ -271,8 +288,10 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
             if (gen !== generation) return;
             handleMessage(message, gen);
           },
-          onerror: () => handleFailure(gen, new Error('The connection to the voice service failed.')),
-          onclose: () => handleFailure(gen, new Error('The connection to the voice service closed.')),
+          onerror: () =>
+            handleFailure(gen, new Error('The connection to the voice service failed.')),
+          onclose: () =>
+            handleFailure(gen, new Error('The connection to the voice service closed.')),
         },
         config: {
           responseModalities: [Modality.AUDIO],
@@ -303,7 +322,10 @@ export function createLiveSession({ bridge, onStatusChange, onAudioChunk, onTran
       // a mid-conversation resumption would restart the conversation with a
       // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
       if (!resumeHandle) {
-        session.sendClientContent({ turns: 'Greet the user with a brief hello.', turnComplete: true });
+        session.sendClientContent({
+          turns: 'Greet the user with a brief hello.',
+          turnComplete: true,
+        });
       }
     } catch (error) {
       handleFailure(gen, error);

@@ -39,6 +39,8 @@ describe('loopGuard', () => {
     expect(actionSignature('click', { selector: 'save-button' })).toBe(
       actionSignature('click', { selector: 'save-button' }),
     );
-    expect(actionSignature('click', { selector: 'a' })).not.toBe(actionSignature('click', { selector: 'b' }));
+    expect(actionSignature('click', { selector: 'a' })).not.toBe(
+      actionSignature('click', { selector: 'b' }),
+    );
   });
 });

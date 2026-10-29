@@ -16,7 +16,9 @@ describe('domSnapshotContext', () => {
   it('sends a compact delta when the change is small relative to the page', () => {
     const ctx = createDomSnapshotContext();
     ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'] }));
-    const decision = ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'], changed: ['a'], removed: [] }));
+    const decision = ctx.decide(
+      snapshot({ full: ['a', 'b', 'c', 'd', 'e'], changed: ['a'], removed: [] }),
+    );
     expect(decision.type).toBe('delta');
     expect(decision.changed).toEqual(['a']);
   });
@@ -44,7 +46,9 @@ describe('domSnapshotContext', () => {
     ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'] }));
     ctx.markNavigated();
     ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'] }));
-    const decision = ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'], changed: ['a'], removed: [] }));
+    const decision = ctx.decide(
+      snapshot({ full: ['a', 'b', 'c', 'd', 'e'], changed: ['a'], removed: [] }),
+    );
     expect(decision.type).toBe('delta');
   });
 

@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // run here as the page would run it: a classic script evaluated once against
 // this jsdom window. The iframe is stubbed (jsdom doesn't load frame URLs): a
 // test decides which document the frame holds and when its `load` fires.
-const BRIDGE_SOURCE = readFileSync(path.resolve(import.meta.dirname, '../../../sandbox/bridge.js'), 'utf8');
+const BRIDGE_SOURCE = readFileSync(
+  path.resolve(import.meta.dirname, '../../../sandbox/bridge.js'),
+  'utf8',
+);
 
 let frame;
 let agentPort;
@@ -23,7 +26,10 @@ function stubFrame() {
   };
   Object.defineProperty(iframe, 'contentDocument', { get: () => state.doc });
   Object.defineProperty(iframe, 'contentWindow', {
-    get: () => ({ location: { pathname: state.path }, getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) }),
+    get: () => ({
+      location: { pathname: state.path },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+    }),
   });
   Object.defineProperty(iframe, 'src', {
     get: () => state.srcSets.at(-1) ?? '',

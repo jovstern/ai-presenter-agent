@@ -56,7 +56,8 @@ export function connectBridge({ postConnect = postConnectToWindow } = {}) {
     return new Promise((resolve) => {
       const id = crypto.randomUUID();
       const timer = setTimeout(
-        () => settleAction(id, { success: false, error: 'Timed out waiting for the page to respond.' }),
+        () =>
+          settleAction(id, { success: false, error: 'Timed out waiting for the page to respond.' }),
         ACTION_TIMEOUT_MS,
       );
       pendingActions.set(id, { resolve, timer });

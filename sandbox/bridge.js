@@ -125,7 +125,12 @@
 
   async function runAction({ id, action, args }) {
     if (!isAllowedAction(action)) {
-      return { type: 'action-result', id, success: false, error: `Action "${action}" is not allowed` };
+      return {
+        type: 'action-result',
+        id,
+        success: false,
+        error: `Action "${action}" is not allowed`,
+      };
     }
     // A throwing action must still reply, or the agent waits out its timeout
     // (docs/code-review-notes.md M3).
