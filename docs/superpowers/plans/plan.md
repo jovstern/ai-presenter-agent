@@ -454,6 +454,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 
 **T5 — Measure, then tune the knobs (M9, R16).**
 - Run the live e2e 5× at the current knobs and record the numbers.
+- Baseline from M5 T5 (11 live runs): task success 8/11 (budget ≥ 80 %; the 3 misses end the
+  turn right after navigate), and reconnect worst 3.37 s (budget ≤ 3 s; a resume refused with
+  1008 "already connected" waits the full 1 s backoff). Candidate knobs: a short retry for
+  that refusal, and the system instruction's multi-step wording.
 - Then decide from the data:
   - `MAX_SNAPSHOT_NODES`;
   - `FULL_REFRESH_RATIO`;
