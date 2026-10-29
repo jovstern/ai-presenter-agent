@@ -413,6 +413,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   - An e2e asserts that the bridge accepts exactly the enum's routes.
 - `fill` picks the native value setter per element type (`input` / `textarea` / `select`)
   and fires `input` + `change`. The target app gets a textarea and a select to prove it.
+- A select is reported and matched by its options' visible text, not only their `value`
+  (the snapshot lists the option texts; `fill` matches the text, then the value), and a
+  `fill` that matches no option fails with the options named, rather than setting `value`
+  to nothing and clearing the select (today's behaviour, found in the M5 fix-wave review).
 - e2e cases are added.
 
 *(medium, 10 min)*
@@ -588,8 +592,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   with a clear message.
 - `trust proxy` in production. Without it the same-origin check compares an `https` Referer
   with `req.protocol` `http` behind Render's TLS proxy and rejects every token request, and
-  every user shares the proxy's rate-limit bucket. A supertest case with
-  `X-Forwarded-Proto: https` covers it.
+  every user shares the proxy's IP in both rate limiters: the token route's and the sandbox
+  page-load limit (M5 fix wave), so one busy proxy IP would 429 every viewer's page. A
+  supertest case with `X-Forwarded-Proto: https` covers the origin check, and one with
+  `X-Forwarded-For` shows two client IPs get separate buckets in both limiters.
 - `render.yaml`:
   - build: `npm --prefix agent-client ci --include=dev && npm --prefix agent-client run
     build && npm --prefix server ci --omit=dev`;
