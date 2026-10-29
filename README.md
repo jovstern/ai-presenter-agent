@@ -83,7 +83,7 @@ npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js i
 npm run build   # single-file IIFE bundle in agent-client/dist/
 
 cd ../server
-npm test        # vitest + supertest: 2 files, 44 tests
+npm test        # vitest + supertest: 2 files, 46 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -150,7 +150,8 @@ The suite in `server/__tests__/`:
   the key with a 400/401/403, a 502 `upstream_error` for any other mint failure, both logged at
   error, 200), the error handler (a plain error is a 500 without internals; only an `expose`d
   client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
-  with a nonce and rate-limited per IP, no inline script on any page, the CSP and other headers
+  with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
+  otherwise), no inline script on any page, the CSP and other headers
   (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
   nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.

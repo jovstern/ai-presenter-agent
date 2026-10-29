@@ -40,7 +40,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     tests drive it with supertest. Mints short-lived Gemini Live tokens (`/api/live-token`,
     gated on same-origin, a per-IP rate limit and a page nonce parsed with Zod), serves the
     nonce-templated sandbox page at `/` and `/sandbox/` (rate-limited per IP too, since each
-    load issues a nonce), the other static directories gzipped (`compression`), and
+    load issues a nonce; past the limit a browser gets a "Too many reloads" page and
+    `Retry-After`), the other static directories gzipped (`compression`), and
     `GET /health`. pino-http logs every request with a request id (`x-request-id`); helmet
     sends the CSP (see below) and the other security headers. Every JSON error is
     `{ error: { code, message } }`. A failed mint is `not_configured` (500) when Google rejects
@@ -148,7 +149,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
-  Library). `server/__tests__/` has 2 vitest files (44 tests): `app` (supertest against
+  Library). `server/__tests__/` has 2 vitest files (46 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts, the CSP and other headers, `/health`, the HTML and JSON 404s, the nonce cap)

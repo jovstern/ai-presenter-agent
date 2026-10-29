@@ -258,6 +258,35 @@ describe('the sandbox page', () => {
     expect((await load()).status).toBe(200);
   });
 
+  it('answers a browser past the page limit with an HTML page that says to wait, and Retry-After', async () => {
+    const { app } = setup({ limits: { pageRateLimitMax: 1 } });
+    const load = () => request(app).get('/').set('Host', HOST).set('Accept', 'text/html,*/*;q=0.8');
+    await load();
+
+    const res = await load();
+
+    expect(res.status).toBe(429);
+    expect(res.headers['retry-after']).toBe('60');
+    expect(res.type).toBe('text/html');
+    expect(res.text).toMatch(/<title>Too many reloads<\/title>/);
+    expect(res.text).toMatch(/<h1>Too many reloads<\/h1>/);
+    expect(res.text).toMatch(/Wait a minute, then reload this page\./);
+    expect(res.text).toMatch(/<a href="\/">Try again<\/a>/);
+    expect(res.text).not.toMatch(/<script/);
+    expect(res.text).not.toMatch(/data-ds-nonce/);
+  });
+
+  it('answers a non-HTML caller past the page limit in the JSON error shape, with Retry-After', async () => {
+    const { app } = setup({ limits: { pageRateLimitMax: 1 } });
+    await request(app).get('/').set('Host', HOST);
+
+    const res = await request(app).get('/').set('Host', HOST).set('Accept', 'application/json');
+
+    expect(res.status).toBe(429);
+    expect(res.headers['retry-after']).toBe('60');
+    expect(res.body).toEqual({ error: { code: 'rate_limited', message: expect.any(String) } });
+  });
+
   it('counts page loads and token requests separately', async () => {
     const { app } = setup({ limits: { pageRateLimitMax: 1, rateLimitMax: 1 } });
     const nonce = await pageNonce(app);

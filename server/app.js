@@ -161,12 +161,22 @@ function contentSecurityPolicy(production) {
   };
 }
 
-const NOT_FOUND_HTML = `<!doctype html>
+/**
+ * The one look for the server's own HTML pages (the 404 and the page-load
+ * 429), so they match: a heading, a line of text and a link back to the
+ * demo. Static text only (callers pass constants), no script, under the same
+ * CSP as everything else.
+ * @param {string} title
+ * @param {string} text
+ * @param {string} linkText
+ */
+function errorPage(title, text, linkText) {
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Page not found</title>
+    <title>${title}</title>
     <link rel="icon" href="data:," />
     <style>
       body { margin: 0; padding: 48px 16px; font-family: system-ui, sans-serif; color: #1a1a1a; background: #fff; }
@@ -178,13 +188,30 @@ const NOT_FOUND_HTML = `<!doctype html>
   </head>
   <body>
     <main>
-      <h1>Page not found</h1>
-      <p>There is nothing at this address.</p>
-      <a href="/">Back to the demo</a>
+      <h1>${title}</h1>
+      <p>${text}</p>
+      <a href="/">${linkText}</a>
     </main>
   </body>
 </html>
 `;
+}
+
+const NOT_FOUND_HTML = errorPage(
+  'Page not found',
+  'There is nothing at this address.',
+  'Back to the demo',
+);
+const TOO_MANY_RELOADS_HTML = errorPage(
+  'Too many reloads',
+  'Wait a minute, then reload this page.',
+  'Try again',
+);
+
+/** @param {Request} req */
+function prefersHtml(req) {
+  return req.accepts(['json', 'html']) === 'html';
+}
 
 /**
  * A fixed window per IP: the entry's TTL is the window, and a hit inside it
@@ -357,7 +384,14 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
    */
   function sendSandbox(req, res) {
     if (isPageRateLimited(req)) {
-      sendError(res, 429, 'rate_limited', 'Too many requests');
+      // A viewer who reloads too fast gets a page that says what to do; the
+      // fixed window resets within rateLimitWindowMs, so that's the wait.
+      res.set('Retry-After', String(Math.ceil(rateLimitWindowMs / 1000)));
+      if (prefersHtml(req)) {
+        res.status(429).type('html').send(TOO_MANY_RELOADS_HTML);
+      } else {
+        sendError(res, 429, 'rate_limited', 'Too many requests');
+      }
       return;
     }
     const nonce = crypto.randomUUID();
@@ -373,7 +407,7 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
   // A browser that follows a bad link gets a page with a way back; an API
   // caller (and anything that doesn't prefer HTML) gets the one error shape.
   app.use((req, res) => {
-    if (!req.path.startsWith('/api/') && req.accepts(['json', 'html']) === 'html') {
+    if (!req.path.startsWith('/api/') && prefersHtml(req)) {
       res.status(404).type('html').send(NOT_FOUND_HTML);
       return;
     }
