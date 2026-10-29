@@ -210,7 +210,8 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('failed', {
       attempt: 0,
       maxAttempts: 6,
-      reason: "The server isn't configured to connect. Contact the site owner.",
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then reload this page.",
       fatal: true,
     });
 

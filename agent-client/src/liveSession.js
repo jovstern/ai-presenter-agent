@@ -61,9 +61,12 @@ const RELOAD_REASON =
   'This page can no longer get a connection token. Reload the page to reconnect.';
 // The server marks a failure it can't recover from on its own (no
 // GEMINI_API_KEY) with the code `not_configured`: a 500, but retrying won't
-// help and neither will a reload, so the reason points at whoever runs the site.
-// Every server error has one shape, { error: { code, message } } (server/app.js).
-const MISCONFIGURED_REASON = "The server isn't configured to connect. Contact the site owner.";
+// help and a reload only helps once the key is fixed, so the reason points at
+// whoever runs the site first. server/app.js sends it for a missing key and for
+// a key Google rejects (an upstream 400/401/403); a mint that merely failed is
+// a retryable 502. Every server error has one shape, { error: { code, message } }.
+const MISCONFIGURED_REASON =
+  "The server isn't configured to connect. Contact the site owner, then reload this page.";
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
 // What Gemini closes a resume with (code 1008) when the reconnect arrives

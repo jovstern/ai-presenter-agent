@@ -75,6 +75,30 @@ function sendError(res, status, code, message) {
   res.status(status).json({ error: { code, message } });
 }
 
+const NOT_CONFIGURED_MESSAGE = "The server isn't configured to connect";
+
+// The upstream statuses that mean the server's own key is bad or revoked.
+const MISCONFIGURED_UPSTREAM_STATUSES = new Set([400, 401, 403]);
+
+/**
+ * @param {unknown} err
+ * @returns {number | undefined} The error's numeric `status`, if it has one.
+ */
+function statusOf(err) {
+  return typeof err === 'object' &&
+    err !== null &&
+    'status' in err &&
+    typeof err.status === 'number'
+    ? err.status
+    : undefined;
+}
+
+/** @param {unknown} err A mint rejection. */
+function isMisconfiguredUpstream(err) {
+  const status = statusOf(err);
+  return status !== undefined && MISCONFIGURED_UPSTREAM_STATUSES.has(status);
+}
+
 /** @param {Request} req */
 function isSameOrigin(req) {
   const expected = `${req.protocol}://${req.get('host')}`;
@@ -245,14 +269,32 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
     if (!mintToken) {
       // `not_configured` tells the client not to burn its reconnect backoff on
       // this: no amount of retrying (or reloading) sets the key.
-      sendError(res, 500, 'not_configured', "The server isn't configured to connect");
+      sendError(res, 500, 'not_configured', NOT_CONFIGURED_MESSAGE);
       return;
     }
 
-    // A rejection goes to the error handler below: the SDK's message can carry
-    // upstream request details (A9, assessment), so it is logged there and the
-    // browser gets only the generic 500.
-    const token = await mintToken({ expiresAt: new Date(now() + TOKEN_SESSION_WINDOW_MS) });
+    const expiresAt = new Date(now() + TOKEN_SESSION_WINDOW_MS);
+    /** @type {string} */
+    let token;
+    try {
+      token = await mintToken({ expiresAt });
+    } catch (err) {
+      // The SDK's ApiError carries Google's own status, and its message can
+      // carry upstream request details (A9, assessment): both stay in the log.
+      // An upstream 400/401/403 (API_KEY_INVALID, a revoked key) is this
+      // server's misconfiguration, not the caller's fault, and no retry or
+      // reload fixes it: `not_configured`, which the client shows as fatal.
+      // Anything else (5xx, quota, network) may pass: 502, which it retries.
+      // Both are error-level, so a broken key shows up as a 5xx and an error
+      // line (docs/metrics/m05.md finding 1).
+      req.log.error({ err }, 'live token mint failed');
+      if (isMisconfiguredUpstream(err)) {
+        sendError(res, 500, 'not_configured', NOT_CONFIGURED_MESSAGE);
+      } else {
+        sendError(res, 502, 'upstream_error', 'The voice service did not answer');
+      }
+      return;
+    }
     req.log.info('live token minted');
     res.json({ token });
   });
@@ -281,10 +323,11 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
   });
 
   /**
-   * The central error handler (node-api.md): a known client error (one with a
-   * 4xx status, e.g. a malformed URL from the static middleware) keeps its
-   * status; anything else is logged with the request id and becomes a 500
-   * with no internals.
+   * The central error handler (node-api.md): a client error that Express or
+   * http-errors marked `expose` (a 4xx, e.g. a malformed URL) keeps its
+   * status; anything else, including an upstream SDK error that merely
+   * carries a status, is logged with the request id and becomes a 500 with no
+   * internals.
    * @param {unknown} err
    * @param {Request} req
    * @param {Response} res
@@ -295,10 +338,9 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
       next(err);
       return;
     }
-    const status =
-      typeof err === 'object' && err !== null && 'status' in err && typeof err.status === 'number'
-        ? err.status
-        : 500;
+    const exposed =
+      typeof err === 'object' && err !== null && 'expose' in err && err.expose === true;
+    const status = (exposed && statusOf(err)) || 500;
     if (status >= 400 && status < 500) {
       req.log.warn({ err }, 'request rejected');
       sendError(res, status, 'bad_request', http.STATUS_CODES[status] ?? 'Bad request');

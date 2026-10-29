@@ -158,23 +158,51 @@ describe('GET /api/live-token', () => {
     expect(res.text).not.toMatch(/GEMINI_API_KEY/);
   });
 
-  it('turns a failed mint into a 500 without internals, logged with the request id', async () => {
+  // The SDK's ApiError carries Google's own status: 400 API_KEY_INVALID for a
+  // bad key. That is the server's fault, not the caller's, and no reload or
+  // retry fixes it (docs/metrics/m05.md finding 1).
+  it.each([400, 401, 403])(
+    'answers an upstream %i from the mint as 500 not_configured, logged at error with the request id',
+    async (upstreamStatus) => {
+      const mintToken = vi.fn(async () => {
+        throw Object.assign(new Error('API key not valid: AIza-secret-detail'), {
+          status: upstreamStatus,
+        });
+      });
+      const { app, lines } = setup({ mintToken });
+      const nonce = await pageNonce(app);
+
+      const res = await tokenRequest(app, nonce);
+
+      expect(res.status).toBe(500);
+      expect(res.body).toEqual({
+        error: { code: 'not_configured', message: "The server isn't configured to connect" },
+      });
+      expect(res.text).not.toMatch(/secret/);
+      const failure = lines.find((line) => line.msg === 'live token mint failed');
+      expect(failure).toMatchObject({ level: 50, reqId: res.headers['x-request-id'] });
+      expect(JSON.stringify(failure)).toMatch(/secret-detail/); // the detail stays server-side
+      expect(lines.some((line) => line.level === 40)).toBe(false);
+    },
+  );
+
+  it.each([
+    ['an upstream 503', Object.assign(new Error('unavailable'), { status: 503 })],
+    ['an upstream 429', Object.assign(new Error('quota'), { status: 429 })],
+    ['a network error with no status', new TypeError('fetch failed')],
+  ])('answers %s from the mint as 502 upstream_error, logged at error', async (_name, error) => {
     const mintToken = vi.fn(async () => {
-      throw new Error('upstream said: key AIza-secret-detail is suspended');
+      throw error;
     });
     const { app, lines } = setup({ mintToken });
     const nonce = await pageNonce(app);
 
     const res = await tokenRequest(app, nonce);
 
-    expect(res.status).toBe(500);
-    expect(res.body).toEqual({ error: { code: 'internal', message: 'Internal server error' } });
-    expect(res.text).not.toMatch(/secret/);
-    const requestId = res.headers['x-request-id'];
-    expect(requestId).toBeTruthy();
-    const errorLine = lines.find((line) => line.msg === 'request failed');
-    expect(errorLine).toMatchObject({ reqId: requestId });
-    expect(JSON.stringify(errorLine)).toMatch(/secret-detail/); // the detail stays server-side
+    expect(res.status).toBe(502);
+    expect(res.body).toEqual({ error: { code: 'upstream_error', message: expect.any(String) } });
+    const failure = lines.find((line) => line.msg === 'live token mint failed');
+    expect(failure).toMatchObject({ level: 50, reqId: res.headers['x-request-id'] });
   });
 
   it('never logs the nonce or the token', async () => {
@@ -306,6 +334,65 @@ describe('other routes', () => {
 
     expect(res.status).toBe(404);
     expect(res.body).toEqual({ error: { code: 'not_found', message: expect.any(String) } });
+  });
+
+  // The error handler, reached through a route that throws: the injected
+  // clock is the token route's first dependency, so a throwing one stands in
+  // for any unexpected failure.
+  function throwingClock(error) {
+    const c = clock();
+    let broken = false;
+    return {
+      now: () => {
+        if (broken) throw error;
+        return c.now();
+      },
+      breakNow: () => {
+        broken = true;
+      },
+    };
+  }
+
+  it('turns a plain thrown error into a 500 internal, logged at error with the request id', async () => {
+    const c = throwingClock(new Error('boom: internal-detail'));
+    const { app, lines } = setup({ now: c.now });
+    const nonce = await pageNonce(app);
+    c.breakNow();
+
+    const res = await tokenRequest(app, nonce);
+
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: { code: 'internal', message: 'Internal server error' } });
+    expect(res.text).not.toMatch(/internal-detail/);
+    expect(lines.find((line) => line.msg === 'request failed')).toMatchObject({
+      level: 50,
+      reqId: res.headers['x-request-id'],
+    });
+  });
+
+  it('ignores the status of an error that does not set expose (not a client error)', async () => {
+    const c = throwingClock(Object.assign(new Error('upstream'), { status: 400 }));
+    const { app } = setup({ now: c.now });
+    const nonce = await pageNonce(app);
+    c.breakNow();
+
+    const res = await tokenRequest(app, nonce);
+
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('internal');
+  });
+
+  it('keeps the status of an exposed client error (http-errors), logged at warn', async () => {
+    const c = throwingClock(Object.assign(new Error('Bad Request'), { status: 400, expose: true }));
+    const { app, lines } = setup({ now: c.now });
+    const nonce = await pageNonce(app);
+    c.breakNow();
+
+    const res = await tokenRequest(app, nonce);
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: { code: 'bad_request', message: 'Bad Request' } });
+    expect(lines.find((line) => line.msg === 'request rejected')).toMatchObject({ level: 40 });
   });
 
   it('serves the static directories', async () => {

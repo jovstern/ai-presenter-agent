@@ -436,6 +436,24 @@ describe('createLiveSession', () => {
     expect(live.calls).toHaveLength(1);
   });
 
+  // server/app.js answers a mint the voice service didn't answer (a 5xx,
+  // quota, network) with 502 upstream_error: worth retrying.
+  it('retries a 502 upstream_error token response', async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(502, apiError('upstream_error', 'The voice service did not answer')),
+    );
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(statusNames()).toEqual(['connecting', 'reconnecting']);
+    expect(statuses.at(-1).fatal).toBeFalsy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await establish(live.calls[0]);
+    expect(statusNames().at(-1)).toBe('open');
+  });
+
   // Found by the checkJs pass: the token went unchecked into `new GoogleGenAI`,
   // which sits outside openSession's try, so a throw there left the status at
   // `connecting` with an unhandled rejection instead of retrying.
@@ -478,7 +496,8 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
-      reason: "The server isn't configured to connect. Contact the site owner.",
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then reload this page.",
       fatal: true,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);

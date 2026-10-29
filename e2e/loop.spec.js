@@ -187,7 +187,7 @@ test.describe('when the server has no API key', () => {
 
     await expect(status).toHaveText('Connection lost');
     await expect(alert).toHaveText(
-      "The server isn't configured to connect. Contact the site owner.",
+      "The server isn't configured to connect. Contact the site owner, then reload this page.",
     );
     await expect(button('Reload page')).toBeVisible();
     // The backoff's first retry is immediate; give it room to (wrongly) happen.
