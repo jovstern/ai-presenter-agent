@@ -607,7 +607,7 @@ What pushes it to the worst case:
 
 | Milestone | Estimated | Actual | Why it differed |
 |---|---|---|---|
-| M4 | ~110 min | | |
+| M4 | ~110 min | ~127 min (1.15×) | Real-browser checks in every task; a larger fix wave (6 Important, 2 Must fix, the LCP miss); two re-review rounds. Remaining milestones re-scaled by 1.15×: M5 ~175, M6 ~150, M7 ~115, M8 ~80 (~8.7 h). |
 | M5 | ~150 min | | |
 | M6 | ~130 min | | |
 | M7 | ~100 min | | |
