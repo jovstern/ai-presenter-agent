@@ -147,8 +147,11 @@ mount. The bridge accepts the first one only. After that, everything travels on 
 
 Snapshot node: `{selector, tag, label, disabled, hidden, checked?, value?}`. `label` is a form
 control's `<label>` text; `checked` is set on checkboxes and radios only (M5 T5); `value` is set
-on text inputs, textareas and selects, never on a password, cut to 60 characters plus `…` (M5 fix
-wave), so the model sees what a `fill` typed. `fill` accepts only those text controls.
+on text inputs, textareas and selects, never on a hidden input, a password or a field whose
+`autocomplete` is `cc-*`, `one-time-code`, `current-password` or `new-password`, cut to 60
+characters plus `…` (M5 fix wave), so the model sees what a `fill` typed. `fill` accepts only
+those text controls. A control with no `<label>` falls back to its text, then (for a button-like
+input) its value, then `aria-labelledby`'s text, its placeholder and its title.
 
 Local storage stays as it is in `knowledgeStore.js`.
 

@@ -169,6 +169,7 @@ describe('sandbox/bridge.js fill', () => {
     ['a button', '<button data-testid="target">Save</button>'],
     ['a checkbox', '<input data-testid="target" type="checkbox" />'],
     ['a submit input', '<input data-testid="target" type="submit" value="Go" />'],
+    ['a hidden input', '<input data-testid="target" type="hidden" />'],
   ])('reports failure for %s, which has a value but is no text input', async (_name, html) => {
     frame.doc.body.innerHTML = html;
     const result = nextMessage(agentPort, 'action-result');
@@ -326,6 +327,41 @@ describe('sandbox/bridge.js snapshots', () => {
 
     expect(full).toEqual([
       { selector: 'send', tag: 'input', label: 'Send', disabled: false, hidden: false },
+    ]);
+  });
+
+  it('never reports a hidden input’s value', async () => {
+    const { full } = await loadPage(
+      '<input data-testid="csrf" type="hidden" value="secret-token" /><button data-testid="b">B</button>',
+    );
+
+    expect(full[0]).not.toHaveProperty('value');
+    expect(JSON.stringify(full)).not.toContain('secret-token');
+  });
+
+  it.each(['cc-number', 'cc-csc', 'one-time-code', 'current-password', 'new-password'])(
+    'never reports the value of a field with autocomplete="%s"',
+    async (autocomplete) => {
+      const { full } = await loadPage(
+        `<input data-testid="f" type="text" autocomplete="${autocomplete}" value="4111111111111111" />`,
+      );
+
+      expect(full[0]).not.toHaveProperty('value');
+      expect(JSON.stringify(full)).not.toContain('4111');
+    },
+  );
+
+  it('names an unlabelled field by aria-labelledby, then placeholder, then title', async () => {
+    const { full } = await loadPage(`
+      <span id="cap">Promo code</span>
+      <input data-testid="by-ref" aria-labelledby="cap" />
+      <input data-testid="by-placeholder" placeholder="Search" />
+      <input data-testid="by-title" title="Your email" />`);
+
+    expect(full.map((node) => [node.selector, node.label])).toEqual([
+      ['by-ref', 'Promo code'],
+      ['by-placeholder', 'Search'],
+      ['by-title', 'Your email'],
     ]);
   });
 });

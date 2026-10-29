@@ -16,8 +16,9 @@
 /**
  * One interactive element of the target app, keyed by its data-testid.
  * `checked` is set for checkboxes and radio buttons only. `value` is set
- * for text inputs, textareas and selects (never a password), cut to 60
- * characters plus an ellipsis.
+ * for text inputs, textareas and selects (never a hidden input, a password
+ * or a card-number / one-time-code field), cut to 60 characters plus an
+ * ellipsis.
  * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
  */
 /**

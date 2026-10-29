@@ -19,8 +19,9 @@
   /**
    * One interactive element of the target app, keyed by its data-testid.
    * `checked` is set for checkboxes and radio buttons only. `value` is set
-   * for text inputs, textareas and selects (never a password), cut to 60
-   * characters plus an ellipsis.
+   * for text inputs, textareas and selects (never a hidden input, a password
+   * or a card-number / one-time-code field), cut to 60 characters plus an
+   * ellipsis.
    * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
    */
   /**
@@ -303,7 +304,11 @@
     'image',
     'range',
     'color',
+    // Not shown to the user, and often a CSRF token: never filled or reported.
+    'hidden',
   ]);
+  // Fields whose content is a secret even though the input type is text.
+  const SECRET_AUTOCOMPLETE = /^(cc-|one-time-code$|current-password$|new-password$)/;
   // An input whose value is its caption, so it names the button.
   const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
   const MAX_VALUE_LENGTH = 60;
@@ -316,13 +321,19 @@
   }
 
   // A text control's content, so the model can see what a fill (or the
-  // viewer) typed. Never a password's.
+  // viewer) typed. Never a password's, a card number's or a one-time code's.
+  /** @param {Element} el */
+  function isSecret(el) {
+    const tokens = (el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/);
+    return inputType(el) === 'password' || tokens.some((token) => SECRET_AUTOCOMPLETE.test(token));
+  }
+
   /**
    * @param {Element} el
    * @returns {string | undefined}
    */
   function valueOf(el) {
-    if (!isTextControl(el) || inputType(el) === 'password') return undefined;
+    if (!isTextControl(el) || isSecret(el)) return undefined;
     const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
     return value.length > MAX_VALUE_LENGTH ? `${value.slice(0, MAX_VALUE_LENGTH)}…` : value;
   }
@@ -331,7 +342,18 @@
   // (it is "on" by default), and naming the notifications toggle "on" let the
   // model report it as already on without clicking it (the live e2e, M5 T5).
   // A text field's value is its content, reported as `value`, not its name;
-  // only a button-like input is named by its value (its caption).
+  // only a button-like input is named by its value (its caption). Past those,
+  // aria-labelledby's text, then the placeholder, then the title, so a field
+  // with only a placeholder isn't named ''.
+  /** @param {Element} el */
+  function labelledByText(el) {
+    const ids = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
+    return ids
+      .map((id) => el.ownerDocument.getElementById(id)?.textContent?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
+  }
+
   /** @param {Element} el */
   function labelFor(el) {
     const { labels } = /** @type {{ labels?: NodeListOf<HTMLLabelElement> | null }} */ (el);
@@ -347,6 +369,9 @@
       labelText.slice(0, 60) ||
       el.textContent?.trim().slice(0, 60) ||
       value ||
+      labelledByText(el).slice(0, 60) ||
+      el.getAttribute('placeholder') ||
+      el.getAttribute('title') ||
       ''
     );
   }

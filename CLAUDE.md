@@ -144,7 +144,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (110 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (118 tests): `actionTools`,
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
