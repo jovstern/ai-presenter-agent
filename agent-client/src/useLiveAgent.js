@@ -32,9 +32,10 @@ import { decodeOutputChunk } from './pcm.js';
 // covers memoization.
 /**
  * @param {LiveSessionOptions['bridge']} bridge
+ * @param {LiveSessionOptions['nonce']} nonce The page nonce, read once by main.jsx.
  * @returns {LiveAgent}
  */
-export function useLiveAgent(bridge) {
+export function useLiveAgent(bridge, nonce) {
   // details come with `reconnecting` and `failed`; kept with the status so
   // the two can never disagree.
   const [connection, setConnection] = useState(
@@ -60,6 +61,7 @@ export function useLiveAgent(bridge) {
     if (!sessionRef.current) {
       sessionRef.current = createLiveSession({
         bridge,
+        nonce,
         onStatusChange: (status, details) => {
           // `failed` means no more retries are coming: release the mic now
           // rather than leave it live behind a dead session. `reconnecting`

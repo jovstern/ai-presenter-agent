@@ -33,12 +33,6 @@
       <p data-testid="save-confirmation" class="save-confirmation">Saved.</p>
     </main>
 
-    <script>
-      document.querySelector('[data-testid="save-button"]').addEventListener('click', () => {
-        document
-          .querySelector('[data-testid="save-confirmation"]')
-          .classList.add('save-confirmation--visible');
-      });
-    </script>
+    <script defer src="settings.js"></script>
   </body>
 </html>

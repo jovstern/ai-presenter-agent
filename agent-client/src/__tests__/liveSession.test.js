@@ -33,6 +33,8 @@ function tokenResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 const okToken = () => tokenResponse(200, { token: 'ephemeral-token' });
+// The server's one error shape (server/app.js).
+const apiError = (code, message) => ({ error: { code, message } });
 
 const fetchMock = vi.fn();
 
@@ -61,6 +63,7 @@ function setup() {
   const statuses = [];
   const liveSession = createLiveSession({
     bridge,
+    nonce: 'page-nonce',
     onStatusChange: (status, details) => statuses.push({ status, ...details }),
   });
   created.push(liveSession);
@@ -256,7 +259,9 @@ describe('createLiveSession', () => {
     expect(statuses[2]).toMatchObject({ attempt: 1, maxAttempts: MAX_ATTEMPTS });
 
     // Now every token request fails with a retryable 503.
-    fetchMock.mockImplementation(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     drop(live.calls[1]);
     await vi.advanceTimersByTimeAsync(120_000);
 
@@ -274,7 +279,9 @@ describe('createLiveSession', () => {
   });
 
   it('shows reconnecting, not failed, while a retry is scheduled after an error', async () => {
-    fetchMock.mockImplementationOnce(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     const { liveSession, statusNames } = setup();
 
     liveSession.connect();
@@ -304,7 +311,9 @@ describe('createLiveSession', () => {
   });
 
   it('a manual connect() after failed resets the attempts and really retries', async () => {
-    fetchMock.mockImplementation(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     const { liveSession, statuses, statusNames } = setup();
     liveSession.connect();
     await vi.advanceTimersByTimeAsync(120_000);
@@ -379,9 +388,22 @@ describe('createLiveSession', () => {
     expect(reconnectAttempts).toEqual([1, 1]);
   });
 
+  it("echoes the page nonce on the token request, and reports the server's error message", async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(503, apiError('internal', 'Internal server error')),
+    );
+    const { liveSession, statuses } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/live-token?nonce=page-nonce');
+    expect(statuses.find((s) => s.status === 'reconnecting').reason).toBe('Internal server error');
+  });
+
   it('fails immediately on a 4xx token response, tells the user to reload, and schedules no retry', async () => {
     fetchMock.mockImplementation(async () =>
-      tokenResponse(403, { error: 'Invalid or expired nonce' }),
+      tokenResponse(403, apiError('invalid_nonce', 'Unknown or expired nonce')),
     );
     const { liveSession, statuses, statusNames } = setup();
 
@@ -398,7 +420,9 @@ describe('createLiveSession', () => {
 
   it('still retries 5xx and network errors', async () => {
     fetchMock
-      .mockImplementationOnce(async () => tokenResponse(500, { error: 'Server misconfigured' }))
+      .mockImplementationOnce(async () =>
+        tokenResponse(500, apiError('internal', 'Internal server error')),
+      )
       .mockImplementationOnce(async () => {
         throw new TypeError('Failed to fetch');
       });
@@ -443,9 +467,9 @@ describe('createLiveSession', () => {
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
   });
-  it('treats a server response marked retryable:false as fatal, with a contact-the-owner reason', async () => {
+  it('treats a not_configured server error as fatal, with a contact-the-owner reason', async () => {
     fetchMock.mockImplementation(async () =>
-      tokenResponse(500, { error: 'GEMINI_API_KEY is not set on the server', retryable: false }),
+      tokenResponse(500, apiError('not_configured', "The server isn't configured to connect")),
     );
     const { liveSession, statuses, statusNames } = setup();
 

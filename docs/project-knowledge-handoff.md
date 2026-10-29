@@ -139,10 +139,10 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 
 ```
 docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/
-target-app/      2 static pages (Home, Settings), a handful of data-testid elements
+target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
 agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
-server/          Express server: mints a Gemini Live ephemeral token, serves the static bundles
+server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)
 ```
 
 Two npm packages (`agent-client`, `server`) and two static directories (`sandbox`,
@@ -184,7 +184,16 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   URL ships the literal `%%DS_NONCE%%`; each was curled and returned a UUID nonce (M4 T1,
   assessment A1).
 - `/api/live-token` fails **cleanly** with a JSON 500 when `GEMINI_API_KEY` isn't set — confirmed
-  by actually hitting it, not assumed.
+  by actually hitting it, not assumed. Since M5 T3 every server error has one shape,
+  `{ error: { code, message } }` (this one is `not_configured`), and the token gate, the
+  templating and the CSP are covered by `server/__tests__/app.test.js` (supertest).
+- **The M5 T3 CSP was checked in a real browser** (Playwright/Chromium against `npm start`): `/`
+  and `/sandbox/` load with zero CSP violations and zero console errors, the knowledge dialog
+  opens styled, the target app's counter and Save still work from their moved script files, the
+  page's own `/api/live-token` call returns 200, and a real Connect opened the Gemini Live socket
+  (`wss://generativelanguage.googleapis.com`) to `Live`. That check caught helmet's default
+  `Referrer-Policy: no-referrer` stripping the Referer the same-origin gate needs (Chrome's
+  `fetch()` sends no Origin on same-origin GETs); the policy is `same-origin` now.
 - The exact Gemini Live SDK surface used (`ai.live.connect`, `client.authTokens.create`,
   `session.sendRealtimeInput`, `session.sendToolResponse`, the `toolCall.functionCalls` shape) was
   checked against Google's current docs (`ai.google.dev/gemini-api/docs/live-api/*`) via live web
@@ -386,3 +395,11 @@ other architecture change. What *can* legitimately shrink: `server/`'s job of se
 any static host (Vite's own preview server, a CDN, `npx serve`) could do it instead, leaving
 `server/` to do exactly one thing: mint tokens. Worth doing for clarity of purpose, not framed as
 "getting rid of the server," which isn't achievable while Gemini access needs to stay secured.
+
+Since M5 T3 the split costs more than moving files: the server also templates the page nonce
+into `sandbox/index.html` (a `data-ds-nonce` attribute on the agent script tag) and sends the
+CSP and security headers on every page (helmet, `server/app.js`). A static host would need to
+send the same CSP (`script-src 'self'`, the Gemini origins in `connect-src`, …) and still get
+the nonce from the token server, e.g. by a first fetch, which reopens the question H1's nonce
+answers. Until there is a reason to split, the one Express app stays, now as `app.js` (testable,
+supertest) + `index.js` (env, listen, SIGTERM shutdown), with pino request logs and `/health`.

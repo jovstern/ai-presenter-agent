@@ -35,15 +35,29 @@ that holds only Prettier and the cross-package scripts:
   - `bridgeProtocol.js` — types only: the bridge messages as JSDoc `@typedef`s. `sandbox/bridge.js`
     holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
     they drift, so edit both together.
-- `server/` (npm) — Node/Express. Mints short-lived Gemini Live tokens (`/api/live-token`, gated
-  on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories,
-  gzipped (`compression`). Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port
-  `PORT` or 3000.
-  `npm start`, `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck; tests
-  arrive in M5 T3). Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
+- `server/` (npm) — Node/Express, split in two:
+  - `app.js` — `createApp({ mintToken, now, logger, production, limits })`, no `listen`, so
+    tests drive it with supertest. Mints short-lived Gemini Live tokens (`/api/live-token`,
+    gated on same-origin, a per-IP rate limit and a page nonce parsed with Zod), serves the
+    nonce-templated sandbox page at `/` and `/sandbox/`, the other static directories gzipped
+    (`compression`), and `GET /health`. pino-http logs every request with a request id
+    (`x-request-id`); helmet sends the CSP (see below) and the other security headers. Every
+    JSON error is `{ error: { code, message } }`, and a central error handler turns anything
+    unexpected into a 500 without internals.
+  - `expiringMap.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
+  - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the real
+    Gemini mint, `listen`, graceful SIGTERM/SIGINT shutdown.
+  `npm start`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run check` (all three).
+  Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
+  **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any
+  page), `style-src 'self' 'unsafe-inline'` (runtime `<style>` from the shadow root and Radix),
+  `connect-src` adds the Gemini `wss:`/`https:` origins, `frame-src 'self'`, `img-src 'self'
+  data:`; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
+  adds a resource type updates the CSP in the same commit.
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots). No build step.
-- `target-app/` (static) — 2-page mock app used as the demo target. No build step.
+- `target-app/` (static) — 2-page mock app used as the demo target: `index.html` + `home.js`
+  (counter), `settings.html` + `settings.js` (Save confirmation), `style.css`. No build step.
 
 ## Commands and gates
 
@@ -58,15 +72,15 @@ From the repo root (run `npm install` there once for Prettier):
 Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
 importing `useMemo`/`useCallback`/`memo`. agent-client's config also lints `sandbox/*.js` and
-any `target-app/**/*.js` as classic browser scripts, so its `lint` script runs from the repo
+`target-app/*.js` as classic browser scripts, so its `lint` script runs from the repo
 root (ESLint 10 ignores files outside the base path).
 
 Typecheck is `checkJs` + `strict` on plain JS with JSDoc types
 ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)): `npm run typecheck` in each package
 runs `tsc -p jsconfig.json` (TypeScript 7; plain `tsc` ignores `jsconfig.json`).
-agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`) and
-`src/globals.d.ts` (window globals such as `__DS_NONCE__`); it excludes `src/__tests__/` for
-now. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
+agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`); it excludes
+`src/__tests__/` for now. The page nonce is no longer a window global: `main.jsx` reads it off
+its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
 
 ## Docs map
 
@@ -76,8 +90,8 @@ now. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment s
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
 - `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Done: B1–B4, H2–H5, M2–M4, L9, L12. H1 waits for the CSP in M5; the rest are
-  open. Its original `file:line` references point at pre-rebuild code; each "Fixed" note names
+  M1–M9, L1–L12). Done: B1–B4, H1–H5, M2–M4, L9, L12; the rest are open. Its original
+  `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
   checking, 0003 hosting on Render.
@@ -106,13 +120,15 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   their npm commands (`npm install` included); the root only runs `check`, `format` and `dev`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (84 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (86 tests): `actionTools`,
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
-  Library). `server/` has none yet; the bridge's real-browser handshake test arrives with the M5
-  e2e. Follow the existing vitest pattern when adding
-  tests to `agent-client`.
+  Library). `server/__tests__/` has 2 vitest files (31 tests): `app` (supertest against
+  `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/200 paths, both
+  sandbox URLs templated, no inline scripts, the CSP and other headers, `/health`, the nonce cap)
+  and `expiringMap` (expiry, pruning on access, the cap). The bridge's real-browser handshake
+  test arrives with the M5 e2e. Follow the existing vitest pattern when adding tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
 

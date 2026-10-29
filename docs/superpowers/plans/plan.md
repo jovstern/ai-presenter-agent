@@ -25,6 +25,10 @@ ADRs: `docs/adr/0001–0003`.
 - Do not commit or push to `master`. One commit per task. `cd` into the package before npm.
 - Every task touching `liveSession.js`, `useLiveAgent.js` or `bridge.js` is checked in a
   real browser at milestone end. Unit tests alone are not enough.
+- **CSP rule (from M5 T3):** any task that adds a resource type (a worklet, a stylesheet, a
+  font, a beacon, another origin) updates the CSP in `server/app.js` (`contentSecurityPolicy()`)
+  and its test in `server/__tests__/app.test.js` in the same commit. No inline script on any
+  served page.
 
 ---
 
@@ -277,6 +281,22 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - `check` = lint + tsc + test.
 - `zod` moves from M8 into this task.
 - Docs: checklist H1 ticked (CSP point); handoff §5.3; target-app file list.
+
+*Done notes (T3):*
+- The services/routes tree from `node-api.md` is a recorded deviation (spec, Assumptions).
+- The error shape changed the client contract: `retryable: false` became
+  `code: 'not_configured'`, and `liveSession.js` reads `error.message`.
+- The nonce is threaded `main.jsx` → `AgentApp` → `useLiveAgent` → `createLiveSession({ nonce })`
+  rather than read from the DOM inside `liveSession.js`, so it is testable; `globals.d.ts` is gone.
+- Beyond the listed directives the CSP also sets `object-src 'none'`, `base-uri 'self'`,
+  `form-action 'self'` and `frame-ancestors 'self'`. `Referrer-Policy` is `same-origin`, not
+  helmet's `no-referrer`, which the real-browser check showed breaks the Referer fallback of
+  the same-origin gate.
+- A malformed or missing nonce is a 400 (`invalid_request`, Zod); a well-formed unknown or
+  expired one is a 403 (`invalid_nonce`). The client treats both as "reload".
+- Map pruning is on access (no interval to clear on shutdown): `server/expiringMap.js`.
+- `audioIO.js` still uses `ScriptProcessorNode` (no worklet, no `blob:`), so the CSP needs no
+  `worker-src`; M6 T3's worklet is served from `'self'`.
 
 *(medium, 20 min)*
 

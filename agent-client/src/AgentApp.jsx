@@ -67,11 +67,12 @@ function micErrorText(error) {
 }
 
 /**
- * @param {{ bridge: BridgeChannel, portalContainer: HTMLElement }} props
- *   `portalContainer` keeps Radix portals inside the shadow root (main.jsx).
+ * @param {{ bridge: BridgeChannel, nonce: string, portalContainer: HTMLElement }} props
+ *   `nonce` is the page nonce for the token request; `portalContainer` keeps
+ *   Radix portals inside the shadow root (both from main.jsx).
  */
-export function AgentApp({ bridge, portalContainer }) {
-  const agent = useLiveAgent(bridge);
+export function AgentApp({ bridge, nonce, portalContainer }) {
+  const agent = useLiveAgent(bridge, nonce);
   const { status, details, transcript, micError } = agent;
   const action = primaryAction(status, details, agent);
 

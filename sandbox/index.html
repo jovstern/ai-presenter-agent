@@ -27,13 +27,12 @@
     <main aria-label="Target app sandbox">
       <iframe id="target-app-frame" title="Target app" src="/target-app/index.html"></iframe>
     </main>
-    <!-- The nonce script is inline and not deferred, so it runs first. Deferred
-         scripts keep their order and run before DOMContentLoaded: bridge.js
-         (which catches up on an iframe that already loaded) before agent-client.js. -->
-    <script>
-      window.__DS_NONCE__ = '%%DS_NONCE%%';
-    </script>
+    <!-- No inline script: the CSP is script-src 'self' (server/app.js). The server
+         templates the page nonce into data-ds-nonce, and agent-client.js reads it off
+         its own tag (document.currentScript) while it runs. Deferred scripts keep their
+         order and run before DOMContentLoaded: bridge.js (which catches up on an iframe
+         that already loaded) before agent-client.js. -->
     <script defer src="/sandbox/bridge.js"></script>
-    <script defer src="/agent-client/agent-client.js"></script>
+    <script defer src="/agent-client/agent-client.js" data-ds-nonce="%%DS_NONCE%%"></script>
   </body>
 </html>

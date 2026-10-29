@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H2–H5, M2–M4, L9 and L12 are done; H1 waits for the CSP
-> in M5; the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9 and L12 are done (H1 with the M5 T3
+> CSP); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -36,14 +36,16 @@
 >   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
 > - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
 >   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
-> - **H1** (open token-vending endpoint) — partly mitigated; open until the M5 CSP (#13). `server/
->   index.js` gates `/api/live-token` on same-origin (`Origin`, falling back to `Referer` since
->   Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per IP, and now (M4)
->   also requires a nonce that `sandbox/index.html` embeds at serve time (`window.__DS_NONCE__`,
->   templated in by the server) and `liveSession.js` echoes back as a query param. This closes the
+> - **H1** (open token-vending endpoint) — closed in M5 T3 (see H1's "Fixed" note). `server/
+>   app.js` (was `index.js`) gates `/api/live-token` on same-origin (`Origin`, falling back to
+>   `Referer` since Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per
+>   IP, and since M4 also requires a nonce that `sandbox/index.html` carries at serve time (since
+>   M5 T3 a `data-ds-nonce` attribute on the agent-client script tag, templated in by the server;
+>   in M4 an inline `window.__DS_NONCE__` script) and `liveSession.js` echoes back as a query
+>   param. This closes the
 >   cross-origin-frame/other-window vector cleanly. It does **not** close the co-resident-script
 >   vector H1 actually describes — a hostile script already running on this origin can read
->   `window.__DS_NONCE__` off the page exactly like `agent-client` does. What the nonce actually
+>   the nonce off the page (now the `data-ds-nonce` attribute) exactly like `agent-client` does. What the nonce actually
 >   buys against that script: a request must come from a script that loaded on this exact page, not
 >   an arbitrary cross-origin/cross-frame caller. This residual gap is inherent to the "hostile
 >   script running on the same origin" threat model, not a missing implementation step — closing it
@@ -209,7 +211,20 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 
 ## High
 
-### [ ] H1 — `/api/live-token` is an open token vending machine on the origin that hosts the "clone"
+### [x] H1 — `/api/live-token` is an open token vending machine on the origin that hosts the "clone"
+
+> **Fixed (M4 endpoint half + M5 T3 CSP).** `server/app.js`: same-origin check, per-IP rate
+> limit, page nonce (validated with Zod), all in `GET /api/live-token`; and helmet now sends a
+> CSP on every response (`contentSecurityPolicy()` in `server/app.js`): `default-src 'self'`,
+> `script-src 'self'` (no inline script remains on any served page — the target app's scripts
+> moved to `target-app/home.js` / `settings.js`, and the nonce moved from an inline script to a
+> `data-ds-nonce` attribute that `main.jsx` reads), `connect-src` limited to `'self'` and the
+> Gemini Live origins, `frame-src 'self'`, `object-src 'none'`, plus HSTS in production. This
+> narrows what a compromised clone can load or reach, as suggested. Residual, documented and
+> out of scope: a hostile script already on this origin can still read the nonce and call the
+> endpoint (see the editorial note at the top and ADR 0001). The two in-memory gate maps are
+> also TTL-pruned and size-capped now (`server/expiringMap.js`), so a flood can't grow them
+> without limit. Tests: `server/__tests__/app.test.js`.
 
 `server/index.js:35` returns an ephemeral Gemini token to any GET — no origin/referer check, no
 rate limit, no per-page nonce. In the real product the iframe holds a crawled clone of a
@@ -243,9 +258,8 @@ Suggested, in rough order of value:
 > ends capture that method at load, which closes tampering after load. Residual risks: tampering
 > before load, and a hostile script that runs before the handshake and connects first.
 >
-> **Still open (M4 T5):** the endpoint half is done (`server/index.js`: same-origin check,
-> per-IP rate limit, page nonce — see the editorial note at the top). H1 stays unticked until the
-> CSP on the sandbox page lands in M5 (#13).
+> **Was open (M4 T5):** the endpoint half was done in M4; H1 stayed unticked until the CSP
+> landed in M5 T3 (see the "Fixed" note above).
 
 ### [x] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
 

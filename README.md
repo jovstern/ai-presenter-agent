@@ -22,10 +22,11 @@ performance — see the docs for why.
 
 ```
 docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/)
-target-app/      static mock "cloned app" (2 pages, a few data-testid elements)
+target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
+                 with a CSP and security headers (helmet), JSON request logs (pino), /health
 ```
 
 Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
@@ -66,14 +67,17 @@ and starts the server in one step.
 ```bash
 npm install     # at the repo root, once: Prettier
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
-                # lint + typecheck in server
+                # lint + typecheck + tests in server
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 84 tests
-npm run lint    # ESLint: agent-client plus sandbox/bridge.js
+npm test        # vitest: 10 files, 86 tests
+npm run lint    # ESLint: agent-client plus sandbox/bridge.js and target-app/*.js
 npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
+
+cd ../server
+npm test        # vitest + supertest: 2 files, 31 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -98,6 +102,16 @@ The suite in `agent-client/src/__tests__/`:
 - `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, the
   context blob it builds.
 - `loopGuard.test.js`, `pcm.test.js` — the repeat cap and the audio encode/decode helpers.
+
+The suite in `server/__tests__/`:
+
+- `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
+  gate (403 cross-origin or with no Origin/Referer, 400 malformed nonce, 403 unknown or expired
+  nonce, 429 past the limit, a JSON `not_configured` 500 with no key, a 500 without internals
+  when the mint throws, 200), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
+  with a nonce, no inline script on any page, the CSP and other headers (production adds HSTS),
+  `/health`, a JSON 404, the nonce cap, and no nonce or token in the logs.
+- `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
 
 ## What's deliberately not here yet
 

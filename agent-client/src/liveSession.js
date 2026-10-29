@@ -27,6 +27,8 @@ import { createLoopGuard, actionSignature } from './loopGuard.js';
  * @typedef {object} LiveSessionOptions
  * @property {Omit<BridgeChannel, 'close'>} bridge The page's channel; the
  *   session subscribes to it and never closes it.
+ * @property {string} nonce The page nonce main.jsx read off its script tag;
+ *   echoed on every token request (docs/code-review-notes.md H1).
  * @property {(status: SessionStatus, details?: StatusDetails) => void} [onStatusChange]
  * @property {(base64Pcm: string) => void} [onAudioChunk] 24 kHz 16-bit PCM from the model.
  * @property {(entry: TranscriptEntry) => void} [onTranscript]
@@ -58,8 +60,9 @@ const MAX_ATTEMPTS = RECONNECT_DELAYS.length;
 const RELOAD_REASON =
   'This page can no longer get a connection token. Reload the page to reconnect.';
 // The server marks a failure it can't recover from on its own (no
-// GEMINI_API_KEY) with `retryable: false`: a 500, but retrying won't help and
-// neither will a reload, so the reason points at whoever runs the site.
+// GEMINI_API_KEY) with the code `not_configured`: a 500, but retrying won't
+// help and neither will a reload, so the reason points at whoever runs the site.
+// Every server error has one shape, { error: { code, message } } (server/app.js).
 const MISCONFIGURED_REASON = "The server isn't configured to connect. Contact the site owner.";
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
@@ -123,6 +126,7 @@ const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
  */
 export function createLiveSession({
   bridge,
+  nonce,
   onStatusChange,
   onAudioChunk,
   onTranscript,
@@ -245,18 +249,17 @@ export function createLiveSession({
 
   /** @returns {Promise<string>} */
   async function fetchToken() {
-    // Echoes the single-use nonce server/index.js embedded when it served
-    // this page (docs/code-review-notes.md H1) — window.__DS_NONCE__ is set
-    // by an inline script in sandbox/index.html, before this script runs.
-    const nonce = window.__DS_NONCE__ ?? '';
+    // Echoes the nonce server/app.js templated into this page's script tag
+    // (docs/code-review-notes.md H1); main.jsx reads it and passes it down.
     const res = await fetch(`/api/live-token?nonce=${encodeURIComponent(nonce)}`);
     if (!res.ok) {
       /** @type {unknown} */
       const body = await res.json().catch(() => ({}));
-      const message = isRecord(body) && typeof body.error === 'string' ? body.error : '';
+      const apiError = isRecord(body) && isRecord(body.error) ? body.error : {};
+      const message = typeof apiError.message === 'string' ? apiError.message : '';
       /** @type {TokenError} */
       let error;
-      if (isRecord(body) && body.retryable === false) {
+      if (apiError.code === 'not_configured') {
         error = tokenError(message, res.status, false, MISCONFIGURED_REASON);
       } else {
         const retryable = isRetryableStatus(res.status);

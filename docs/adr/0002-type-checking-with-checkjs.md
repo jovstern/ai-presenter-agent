@@ -41,7 +41,8 @@ It widens from there.
   JS under `checkJs` + `strict`. No 6.x pin was needed.
 - One `jsconfig.json` per package (`checkJs`, `strict`, `noEmit`; `npm run typecheck`, part
   of `check`). agent-client: `jsx: react-jsx`, `types: ["vite/client"]`, `resolveJsonModule`,
-  `src/globals.d.ts` for `window.__DS_NONCE__`, and `../sandbox/bridge.js` included. Server:
+  `src/globals.d.ts` for `window.__DS_NONCE__` (removed in M5 T3, when the nonce moved to a
+  `data-ds-nonce` attribute for the CSP), and `../sandbox/bridge.js` included. Server:
   `types: ["node"]`, NodeNext resolution.
 - The bridge protocol lives in `agent-client/src/bridgeProtocol.js`. `sandbox/bridge.js` is an
   unbundled classic script, so it carries a verbatim copy inside its IIFE (where the typedefs

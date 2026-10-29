@@ -5,6 +5,16 @@ import { connectBridge } from './bridgeChannel.js';
 
 const HOST_ID = 'ai-presenter-agent-host';
 
+// The page nonce for /api/live-token (docs/code-review-notes.md H1). server/app.js
+// templates it into this script tag's data-ds-nonce: the CSP (script-src 'self')
+// rules out the inline script that used to set a window global. Read here, at the
+// bundle's top level, because document.currentScript points at this tag only
+// while it executes; mount() may run later, from DOMContentLoaded. This hides
+// nothing from a hostile same-origin script — it can read the attribute just as
+// easily — which is the residual H1 gap, not a regression.
+const script = document.currentScript;
+const NONCE = script instanceof HTMLScriptElement ? (script.dataset.dsNonce ?? '') : '';
+
 function mount() {
   if (document.getElementById(HOST_ID)) return; // already mounted
 
@@ -84,7 +94,7 @@ function mount() {
   const root = createRoot(mountPoint);
   root.render(
     <StrictMode>
-      <AgentApp bridge={bridge} portalContainer={portalContainer} />
+      <AgentApp bridge={bridge} nonce={NONCE} portalContainer={portalContainer} />
     </StrictMode>,
   );
 

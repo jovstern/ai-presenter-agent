@@ -37,8 +37,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 **M5: quality baseline (new issue)**
 - [ ] R8 ESLint and Prettier, with `npm run check` per package and at a thin root.
 - [ ] R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002).
-- [ ] R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
-      `/health`.
+- [x] R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
+      `/health`. *(M5 T3)*
 - [ ] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
 - [ ] R12 An opt-in live e2e (fake-mic WAV) records the app metrics.
 - [ ] R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
@@ -68,7 +68,16 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 
 - The server stays one Express app. It is split into `app.js` (testable, no `listen`) and
   `index.js` (config + listen) — a scaled-down `node-api.md`, not the full
-  routes/services tree.
+  routes/services tree. **Recorded deviation (M5 T3):** one route does real work, so there is
+  no `routes/` / `services/` / `schemas/` tree and no `config.ts`; `app.js` keeps the route,
+  its Zod query schema and the central error handler together, and `expiringMap.js` is the
+  one extracted module. Kept from `node-api.md`: Zod at the route, one error shape
+  `{ error: { code, message } }`, a central error handler, pino + pino-http with a request id,
+  helmet, `/health`, graceful SIGTERM shutdown, supertest tests against `app.js`. Not taken:
+  `/ready` (no database), CORS config (same-origin only), a body size limit (no route reads a
+  body), `tsx`/TypeScript (JS + checkJs, ADR 0002). The client contract changed with the error
+  shape: `liveSession.js` reads `error.message`, and `error.code === 'not_configured'` replaces
+  the old `retryable: false` flag.
 - There is no ADR back-fill: the handoff's §4 decisions log stays the record for earlier
   decisions. New decisions go in `docs/adr/`.
 - A thin root `package.json` holds only the `check` / `e2e` / `dev` scripts that call into
@@ -105,13 +114,13 @@ Language: JS with checkJs (ADR 0002).
 | @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies |
 | @types/node, @types/express | server | Node and Express types for checkJs (R9) |
 | @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) |
-| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) |
-| pino, pino-http | server | structured logs (metrics skill) |
-| helmet | server | security headers and CSP (H1 remainder) |
-| supertest, vitest | server | token-gate tests (R10) |
+| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) — `^7.2.1` |
+| pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `^10.4.0`, `^11.0.0` |
+| helmet | server | security headers and CSP (H1 remainder) — `^8.3.0` |
+| supertest, vitest | server | token-gate tests (R10) — `^7.3.1`, `^5.0.5` |
 | @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12) |
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
-| zod | server | nonce query (M5), env config (R22), client-log body (R23) |
+| zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `^4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |
 | compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile |
 

@@ -59,7 +59,7 @@ function fakeBridge() {
 function renderApp(bridge = fakeBridge()) {
   const utils = render(
     <StrictMode>
-      <AgentApp bridge={bridge} />
+      <AgentApp bridge={bridge} nonce="page-nonce" />
     </StrictMode>,
   );
   return { bridge, ...utils };
@@ -92,6 +92,12 @@ describe('AgentApp + useLiveAgent', () => {
   it('starts idle with an enabled Connect button', () => {
     renderApp();
     expect(screen.getByRole('button', { name: 'Connect' }).disabled).toBe(false);
+  });
+
+  it('hands the page nonce from main.jsx to the live session', async () => {
+    renderApp();
+    await click('Connect');
+    expect(fakes.sessions[0].options.nonce).toBe('page-nonce');
   });
 
   it('pressing Connect twice stops the first capture and closes the first player before the second capture starts', async () => {
