@@ -91,6 +91,23 @@ test('click, fill, scroll and navigate change the iframe', async ({ page }) => {
 
   expect(await act(page, 'fill', ['search-input', 'pricing'])).toEqual({ success: true });
   await expect(frame(page).getByTestId('search-input')).toHaveValue('pricing');
+  // The fill's input event schedules a snapshot whose delta shows the field,
+  // named by its <label>, with what was typed (bridge.js).
+  await expect
+    .poll(async () =>
+      (await received(page))
+        .filter((message) => message.type === 'snapshot')
+        .flatMap((snapshot) => snapshot.changed)
+        .find((node) => node.selector === 'search-input' && node.value === 'pricing'),
+    )
+    .toEqual({
+      selector: 'search-input',
+      tag: 'input',
+      label: 'Search',
+      disabled: false,
+      hidden: false,
+      value: 'pricing',
+    });
 
   expect(await act(page, 'scroll', ['scroll-target'])).toEqual({ success: true });
   await expect

@@ -145,8 +145,10 @@ mount. The bridge accepts the first one only. After that, everything travels on 
 | bridge → agent | `{type:'snapshot', full, changed, removed}` |
 | bridge → agent | `{type:'navigated'}` (sent before the load snapshot) |
 
-Snapshot node: `{selector, tag, label, disabled, hidden, checked?}`. `label` is a form control's
-`<label>` text; `checked` is set on checkboxes and radios only (M5 T5).
+Snapshot node: `{selector, tag, label, disabled, hidden, checked?, value?}`. `label` is a form
+control's `<label>` text; `checked` is set on checkboxes and radios only (M5 T5); `value` is set
+on text inputs, textareas and selects, never on a password, cut to 60 characters plus `…` (M5 fix
+wave), so the model sees what a `fill` typed. `fill` accepts only those text controls.
 
 Local storage stays as it is in `knowledgeStore.js`.
 

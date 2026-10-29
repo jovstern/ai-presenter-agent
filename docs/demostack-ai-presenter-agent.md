@@ -159,8 +159,12 @@ needed; this is intentionally the simplest piece.
 
 ### 5.3 DOM grounding snapshot
 
-- Flattened list of interactive/meaningful nodes only: role/tag, accessible name/label, the
-  `data-testid`-based selector, visibility/enabled flag.
+- Flattened list of interactive/meaningful nodes only: tag, name, the `data-testid`-based
+  selector, visibility/enabled flags. A form control is named by its `<label>` (never by a
+  checkbox's `value`, which is "on"); a checkbox or radio carries `checked`; a text input,
+  textarea or select carries its `value` (never a password's, cut to 60 characters), so a `fill`
+  shows up in the next snapshot. `fill` itself accepts only those text controls and refuses a
+  button, checkbox or other non-text input.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
 - The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
   (changed/removed) against its last snapshot — cheap, same-process port message regardless of page

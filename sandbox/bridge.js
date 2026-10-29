@@ -18,8 +18,10 @@
    */
   /**
    * One interactive element of the target app, keyed by its data-testid.
-   * `checked` is set for checkboxes and radio buttons only.
-   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean }} SnapshotNode
+   * `checked` is set for checkboxes and radio buttons only. `value` is set
+   * for text inputs, textareas and selects (never a password), cut to 60
+   * characters plus an ellipsis.
+   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
    */
   /**
    * The full node list plus its diff against the bridge's previous snapshot.
@@ -178,8 +180,10 @@
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
       // An element with no `value` used to get an expando set and a success
-      // reply while nothing visible changed; the model should hear the truth.
-      if (!('value' in el)) {
+      // reply while nothing visible changed, and a button or checkbox has a
+      // `value` that isn't what the user sees: setting it changed nothing
+      // visible either. The model should hear the truth.
+      if (!isTextControl(el) || !('value' in el)) {
         return { success: false, error: `data-testid="${selector}" is not a text input` };
       }
       el.value = value;
@@ -282,16 +286,62 @@
     return 'type' in el && (el.type === 'checkbox' || el.type === 'radio');
   }
 
+  /** @param {Element} el */
+  function inputType(el) {
+    return el.tagName === 'INPUT' && 'type' in el && typeof el.type === 'string' ? el.type : '';
+  }
+
+  // The input types whose `value` is not text the user types or sees in the
+  // field: `fill` refuses them and snapshots report no value for them.
+  const NON_TEXT_INPUT_TYPES = new Set([
+    'checkbox',
+    'radio',
+    'button',
+    'submit',
+    'reset',
+    'file',
+    'image',
+    'range',
+    'color',
+  ]);
+  // An input whose value is its caption, so it names the button.
+  const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
+  const MAX_VALUE_LENGTH = 60;
+
+  // What `fill` may type into, and what a snapshot reports a value for.
+  /** @param {Element} el */
+  function isTextControl(el) {
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true;
+    return el.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has(inputType(el));
+  }
+
+  // A text control's content, so the model can see what a fill (or the
+  // viewer) typed. Never a password's.
+  /**
+   * @param {Element} el
+   * @returns {string | undefined}
+   */
+  function valueOf(el) {
+    if (!isTextControl(el) || inputType(el) === 'password') return undefined;
+    const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
+    return value.length > MAX_VALUE_LENGTH ? `${value.slice(0, MAX_VALUE_LENGTH)}…` : value;
+  }
+
   // A form control is named by its <label>. A checkbox's `value` is no name
   // (it is "on" by default), and naming the notifications toggle "on" let the
   // model report it as already on without clicking it (the live e2e, M5 T5).
+  // A text field's value is its content, reported as `value`, not its name;
+  // only a button-like input is named by its value (its caption).
   /** @param {Element} el */
   function labelFor(el) {
     const { labels } = /** @type {{ labels?: NodeListOf<HTMLLabelElement> | null }} */ (el);
     const labelText = labels
       ? [...labels].map((label) => label.textContent?.trim() ?? '').join(' ')
       : '';
-    const value = !isCheckable(el) && 'value' in el && typeof el.value === 'string' ? el.value : '';
+    const value =
+      BUTTON_INPUT_TYPES.has(inputType(el)) && 'value' in el && typeof el.value === 'string'
+        ? el.value
+        : '';
     return (
       el.getAttribute('aria-label') ||
       labelText.slice(0, 60) ||
@@ -330,6 +380,8 @@
         hidden: isHidden(el, computedStyle),
       };
       if (isCheckable(el)) node.checked = 'checked' in el && el.checked === true;
+      const value = valueOf(el);
+      if (value !== undefined) node.value = value;
       return node;
     });
   }

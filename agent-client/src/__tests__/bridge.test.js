@@ -164,6 +164,42 @@ describe('sandbox/bridge.js fill', () => {
       error: 'data-testid="card" is not a text input',
     });
   });
+
+  it.each([
+    ['a button', '<button data-testid="target">Save</button>'],
+    ['a checkbox', '<input data-testid="target" type="checkbox" />'],
+    ['a submit input', '<input data-testid="target" type="submit" value="Go" />'],
+  ])('reports failure for %s, which has a value but is no text input', async (_name, html) => {
+    frame.doc.body.innerHTML = html;
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f4', action: 'fill', args: ['target', 'Ada'] });
+
+    expect(await result).toEqual({
+      type: 'action-result',
+      id: 'f4',
+      success: false,
+      error: 'data-testid="target" is not a text input',
+    });
+    const target = frame.doc.querySelector('[data-testid="target"]');
+    expect(target.value === 'Ada').toBe(false);
+  });
+
+  it.each([
+    ['a textarea', '<textarea data-testid="target"></textarea>', 'Ada'],
+    ['an email input', '<input data-testid="target" type="email" />', 'ada@example.com'],
+    [
+      'a select',
+      '<select data-testid="target"><option>Bob</option><option>Ada</option></select>',
+      'Ada',
+    ],
+  ])('fills %s', async (_name, html, value) => {
+    frame.doc.body.innerHTML = html;
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f5', action: 'fill', args: ['target', value] });
+
+    expect(await result).toMatchObject({ id: 'f5', success: true });
+    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe(value);
+  });
 });
 
 describe('sandbox/bridge.js channel', () => {
@@ -217,7 +253,8 @@ describe('sandbox/bridge.js snapshots', () => {
         hidden: false,
         checked: false,
       },
-      { selector: 'name', tag: 'input', label: 'Ada', disabled: false, hidden: false },
+      // A text field's content is its value, not its name.
+      { selector: 'name', tag: 'input', label: '', disabled: false, hidden: false, value: 'Ada' },
       { selector: 'save', tag: 'button', label: 'Save', disabled: false, hidden: false },
     ]);
   });
@@ -233,5 +270,62 @@ describe('sandbox/bridge.js snapshots', () => {
 
     const { changed } = await next;
     expect(changed).toEqual([expect.objectContaining({ selector: 'toggle', checked: true })]);
+  });
+
+  it('reports a filled value in the next snapshot, under the field’s label', async () => {
+    await loadPage(`
+      <label for="q">Search</label><input id="q" data-testid="search" type="text" />
+      <button data-testid="go">Go</button>`);
+    const next = nextMessage(agentPort, 'snapshot');
+
+    agentPort.postMessage({
+      type: 'action',
+      id: 'f6',
+      action: 'fill',
+      args: ['search', 'pricing'],
+    });
+
+    const { changed } = await next;
+    expect(changed).toEqual([
+      {
+        selector: 'search',
+        tag: 'input',
+        label: 'Search',
+        disabled: false,
+        hidden: false,
+        value: 'pricing',
+      },
+    ]);
+  });
+
+  it('never reports a password’s value, even as its name', async () => {
+    const { full } = await loadPage(
+      '<input data-testid="pw" type="password" value="hunter2" /><button data-testid="b">B</button>',
+    );
+
+    expect(full[0]).toEqual({
+      selector: 'pw',
+      tag: 'input',
+      label: '',
+      disabled: false,
+      hidden: false,
+    });
+  });
+
+  it('reports a textarea’s and a select’s value, a long one cut to 60 characters', async () => {
+    const long = 'x'.repeat(100);
+    const { full } = await loadPage(`
+      <textarea data-testid="notes">${long}</textarea>
+      <select data-testid="plan"><option>Free</option><option selected>Pro</option></select>`);
+
+    expect(full.map((node) => node.value)).toEqual([`${'x'.repeat(60)}…`, 'Pro']);
+  });
+
+  it('names a submit input by its value, which is its caption', async () => {
+    const { full } = await loadPage('<input data-testid="send" type="submit" value="Send" />');
+
+    expect(full).toEqual([
+      { selector: 'send', tag: 'input', label: 'Send', disabled: false, hidden: false },
+    ]);
   });
 });
