@@ -1,16 +1,82 @@
+// @ts-check
 // Runs on sandbox/index.html (top-level), not inside the iframe; the bridge
 // manipulates the iframe's DOM directly since both are same-origin. It talks
 // to agent-client over a private MessageChannel: one window.postMessage
 // handshake transfers the port, then all traffic stays on it.
 (function () {
+  // Type-checked by agent-client's `npm run typecheck` (docs/adr/0002). An
+  // unbundled script can't import, so the protocol types are copied in; the
+  // agent-client test bridgeProtocol.test.js fails if the copies drift.
+  // #region bridge protocol: a verbatim copy of agent-client/src/bridgeProtocol.js
+  /**
+   * The actions the bridge's allowlist runs on the target app.
+   * @typedef {'click' | 'scroll' | 'fill' | 'navigate'} ActionName
+   */
+  /**
+   * What one action did: `error` says why when `success` is false.
+   * @typedef {{ success: boolean, error?: string }} ActionResult
+   */
+  /**
+   * One interactive element of the target app, keyed by its data-testid.
+   * `checked` is set for checkboxes and radio buttons only. `value` is set
+   * for text inputs, textareas and selects (never a hidden input, a password
+   * or a card-number / one-time-code field), cut to 60 characters plus an
+   * ellipsis.
+   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
+   */
+  /**
+   * The full node list plus its diff against the bridge's previous snapshot.
+   * `removed` holds selectors.
+   * @typedef {{ full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} Snapshot
+   */
+  /**
+   * The handshake, posted to `window` with the bridge's MessagePort as its one
+   * transfer. Everything after it travels on the port.
+   * @typedef {{ type: 'ds-bridge-connect' }} ConnectMessage
+   */
+  /**
+   * agent -> bridge. `action` is the model's function name, unchecked on the
+   * agent side: the bridge's allowlist is the authority. `args` are the model's
+   * values in actionTools' positional order, unvalidated for the same reason.
+   * @typedef {{ type: 'action', id: string, action: string, args: unknown[] }} ActionMessage
+   */
+  /**
+   * agent -> bridge: send a snapshot now rather than on the next DOM mutation.
+   * @typedef {{ type: 'request-snapshot' }} RequestSnapshotMessage
+   */
+  /**
+   * bridge -> agent: the reply to the ActionMessage with the same `id`.
+   * @typedef {{ type: 'action-result', id: string, success: boolean, error?: string }} ActionResultMessage
+   */
+  /**
+   * bridge -> agent: after every load and debounced DOM mutation, and on request.
+   * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} SnapshotMessage
+   */
+  /**
+   * bridge -> agent: a new document loaded in the frame. Sent before that
+   * load's snapshot.
+   * @typedef {{ type: 'navigated' }} NavigatedMessage
+   */
+  /**
+   * Everything the agent posts on the port.
+   * @typedef {ActionMessage | RequestSnapshotMessage} AgentMessage
+   */
+  /**
+   * Everything the bridge posts on the port.
+   * @typedef {ActionResultMessage | SnapshotMessage | NavigatedMessage} BridgeMessage
+   */
+  // #endregion
+
   // Captured at load, so a script that patches MessagePort.prototype.postMessage
   // later can't read or alter replies (a patch made before load still can;
   // see the residual risks below and docs/adr/0001-private-bridge-channel.md).
   const send = MessagePort.prototype.postMessage;
 
+  /** @type {string[]} */
   const KNOWN_ROUTES = ['home', 'settings'];
   // Absolute, not relative to target-app/ — iframe.src resolves against the
   // parent (sandbox) page's URL, not the iframe's current document.
+  /** @type {Record<string, string>} */
   const ROUTE_PATHS = { home: '/target-app/index.html', settings: '/target-app/settings.html' };
 
   // Size cap so a larger page can't blow the model's context — a guess, not
@@ -23,7 +89,13 @@
   // timeout, and this bridge's late reply lands on an id nobody waits for.
   const NAVIGATION_TIMEOUT_MS = 3500;
 
-  const iframe = document.getElementById('target-app-frame');
+  const frameElement = document.getElementById('target-app-frame');
+  // sandbox/index.html puts the frame before this deferred script; without it
+  // the bridge can do nothing, so fail loudly here rather than on first use.
+  if (!(frameElement instanceof HTMLIFrameElement)) {
+    throw new Error('bridge.js: no <iframe id="target-app-frame"> on the page');
+  }
+  const iframe = frameElement; // narrowed once, for the hoisted functions below
 
   // The action library lives in this closure, never on `window` — a page
   // script reaching `window.dsActions.click(...)` directly would bypass the
@@ -38,11 +110,20 @@
   // take the bridge, and one that patches MessagePort.prototype.postMessage
   // before this script loads sees the traffic; closing both needs the clone on
   // another origin (docs/code-review-notes.md H1).
+  // The cast: the target app's data-testid elements are HTML, and the frame's
+  // realm makes `instanceof HTMLElement` false even for those. Should one ever
+  // be SVG, its missing click() throws inside runAction and becomes a failure.
+  /**
+   * @param {string} testId
+   * @returns {HTMLElement | null}
+   */
   function findByTestId(testId) {
-    return iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
+    const el = iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
+    return /** @type {HTMLElement | null} */ (el);
   }
 
-  // Navigations waiting for their page: { path, settle(loaded) }.
+  // Navigations waiting for their page.
+  /** @type {{ path: string, settle: (loaded: boolean) => void }[]} */
   let loadWaiters = [];
 
   // Resolves true once a document at `path` loads in the frame, or false after
@@ -50,10 +131,15 @@
   // the meantime (the viewer clicking a link in the frame) doesn't count as
   // this navigate finishing. A load of the same path from another cause can't
   // be told apart, but it does put the requested page in place all the same.
+  /**
+   * @param {string} path
+   * @returns {Promise<boolean>}
+   */
   function waitForLoadOf(path) {
     return new Promise((resolve) => {
       const waiter = {
         path,
+        /** @param {boolean} loaded */
         settle(loaded) {
           clearTimeout(timer);
           loadWaiters = loadWaiters.filter((w) => w !== waiter);
@@ -65,6 +151,8 @@
     });
   }
 
+  // Each action takes the positional args actionTools.js orders for it.
+  /** @type {Record<ActionName, (...args: string[]) => Promise<ActionResult>>} */
   const actions = {
     async click(selector) {
       const el = findByTestId(selector);
@@ -92,19 +180,32 @@
     async fill(selector, value) {
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
+      // An element with no `value` used to get an expando set and a success
+      // reply while nothing visible changed, and a button or checkbox has a
+      // `value` that isn't what the user sees: setting it changed nothing
+      // visible either. The model should hear the truth.
+      if (!isTextControl(el) || !('value' in el)) {
+        return { success: false, error: `data-testid="${selector}" is not a text input` };
+      }
       el.value = value;
       el.dispatchEvent(new Event('input', { bubbles: true }));
       return { success: true };
     },
   };
 
+  /**
+   * @param {string} action
+   * @returns {action is ActionName}
+   */
   function isAllowedAction(action) {
     return Object.prototype.hasOwnProperty.call(actions, action);
   }
 
   // The agent's end of the channel; null until the first valid handshake.
+  /** @type {MessagePort | null} */
   let agentPort = null;
 
+  /** @param {BridgeMessage} message */
   function postToAgent(message) {
     if (agentPort) send.call(agentPort, message);
   }
@@ -113,9 +214,16 @@
   // (not the target-app iframe or any other frame), same origin, carrying
   // exactly one port. After that the listener is removed, so later connects
   // are ignored and nothing else is ever read off `window`.
+  /** @param {MessageEvent<unknown>} event Any page script can post to `window`. */
   function handleConnect(event) {
     if (event.origin !== window.location.origin || event.source !== window) return;
-    if (event.data?.type !== 'ds-bridge-connect' || event.ports.length !== 1) return;
+    const { data } = event;
+    const isConnect =
+      typeof data === 'object' &&
+      data !== null &&
+      'type' in data &&
+      data.type === 'ds-bridge-connect';
+    if (!isConnect || event.ports.length !== 1) return;
     window.removeEventListener('message', handleConnect);
     agentPort = event.ports[0];
     agentPort.onmessage = handleAgentMessage; // starts the port implicitly
@@ -123,20 +231,37 @@
 
   window.addEventListener('message', handleConnect);
 
+  /**
+   * @param {ActionMessage} message
+   * @returns {Promise<ActionResultMessage>}
+   */
   async function runAction({ id, action, args }) {
     if (!isAllowedAction(action)) {
-      return { type: 'action-result', id, success: false, error: `Action "${action}" is not allowed` };
+      return {
+        type: 'action-result',
+        id,
+        success: false,
+        error: `Action "${action}" is not allowed`,
+      };
     }
     // A throwing action must still reply, or the agent waits out its timeout
     // (docs/code-review-notes.md M3).
     try {
-      const result = await actions[action](...(Array.isArray(args) ? args : []));
+      // The agent forwards the model's values unchecked, and the actions take
+      // them as they come: a non-string selector matches nothing, a non-string
+      // fill value is stringified by the input. Hence the cast, not a check.
+      const positional = /** @type {string[]} */ (Array.isArray(args) ? args : []);
+      const result = await actions[action](...positional);
       return { ...result, type: 'action-result', id };
     } catch (err) {
-      return { type: 'action-result', id, success: false, error: err?.message || String(err) };
+      const message = err instanceof Error ? err.message : '';
+      return { type: 'action-result', id, success: false, error: message || String(err) };
     }
   }
 
+  // The port is private to agent-client (ADR 0001), so its messages are
+  // taken at the protocol's word; runAction still guards the action and args.
+  /** @param {MessageEvent<AgentMessage | null>} event */
   async function handleAgentMessage(event) {
     const data = event.data;
     if (data?.type === 'request-snapshot') {
@@ -152,29 +277,137 @@
   // against the last one — cheap, same-process, regardless of page size. The
   // decision that costs tokens (whether to tell the *model* the whole page or
   // just the diff) is made downstream in agent-client/src/domSnapshotContext.js.
+  /** @type {Map<string, SnapshotNode>} */
   let lastNodesById = new Map();
 
+  // Elements come from the frame's realm, so `instanceof HTMLElement` (this
+  // realm's) would be false for all of them: properties are probed with `in`.
+  /** @param {Element} el */
+  function isCheckable(el) {
+    return 'type' in el && (el.type === 'checkbox' || el.type === 'radio');
+  }
+
+  /** @param {Element} el */
+  function inputType(el) {
+    return el.tagName === 'INPUT' && 'type' in el && typeof el.type === 'string' ? el.type : '';
+  }
+
+  // The input types whose `value` is not text the user types or sees in the
+  // field: `fill` refuses them and snapshots report no value for them.
+  const NON_TEXT_INPUT_TYPES = new Set([
+    'checkbox',
+    'radio',
+    'button',
+    'submit',
+    'reset',
+    'file',
+    'image',
+    'range',
+    'color',
+    // Not shown to the user, and often a CSRF token: never filled or reported.
+    'hidden',
+  ]);
+  // Fields whose content is a secret even though the input type is text.
+  const SECRET_AUTOCOMPLETE = /^(cc-|one-time-code$|current-password$|new-password$)/;
+  // An input whose value is its caption, so it names the button.
+  const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
+  const MAX_VALUE_LENGTH = 60;
+
+  // What `fill` may type into, and what a snapshot reports a value for.
+  /** @param {Element} el */
+  function isTextControl(el) {
+    if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') return true;
+    return el.tagName === 'INPUT' && !NON_TEXT_INPUT_TYPES.has(inputType(el));
+  }
+
+  // A text control's content, so the model can see what a fill (or the
+  // viewer) typed. Never a password's, a card number's or a one-time code's.
+  /** @param {Element} el */
+  function isSecret(el) {
+    const tokens = (el.getAttribute('autocomplete') ?? '').toLowerCase().split(/\s+/);
+    return inputType(el) === 'password' || tokens.some((token) => SECRET_AUTOCOMPLETE.test(token));
+  }
+
+  /**
+   * @param {Element} el
+   * @returns {string | undefined}
+   */
+  function valueOf(el) {
+    if (!isTextControl(el) || isSecret(el)) return undefined;
+    const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
+    return value.length > MAX_VALUE_LENGTH ? `${value.slice(0, MAX_VALUE_LENGTH)}…` : value;
+  }
+
+  // A form control is named by its <label>. A checkbox's `value` is no name
+  // (it is "on" by default), and naming the notifications toggle "on" let the
+  // model report it as already on without clicking it (the live e2e, M5 T5).
+  // A text field's value is its content, reported as `value`, not its name;
+  // only a button-like input is named by its value (its caption). Past those,
+  // aria-labelledby's text, then the placeholder, then the title, so a field
+  // with only a placeholder isn't named ''.
+  /** @param {Element} el */
+  function labelledByText(el) {
+    const ids = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
+    return ids
+      .map((id) => el.ownerDocument.getElementById(id)?.textContent?.trim() ?? '')
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  /** @param {Element} el */
   function labelFor(el) {
-    return el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 60) || el.value || '';
+    const { labels } = /** @type {{ labels?: NodeListOf<HTMLLabelElement> | null }} */ (el);
+    const labelText = labels
+      ? [...labels].map((label) => label.textContent?.trim() ?? '').join(' ')
+      : '';
+    const value =
+      BUTTON_INPUT_TYPES.has(inputType(el)) && 'value' in el && typeof el.value === 'string'
+        ? el.value
+        : '';
+    return (
+      el.getAttribute('aria-label') ||
+      labelText.slice(0, 60) ||
+      el.textContent?.trim().slice(0, 60) ||
+      value ||
+      labelledByText(el).slice(0, 60) ||
+      el.getAttribute('placeholder') ||
+      el.getAttribute('title') ||
+      ''
+    );
   }
 
+  /**
+   * @param {Element} el
+   * @param {CSSStyleDeclaration} computedStyle
+   */
   function isHidden(el, computedStyle) {
-    return el.hidden || computedStyle.display === 'none' || computedStyle.visibility === 'hidden';
+    return (
+      ('hidden' in el && el.hidden === true) ||
+      computedStyle.display === 'none' ||
+      computedStyle.visibility === 'hidden'
+    );
   }
 
+  /** @returns {SnapshotNode[]} */
   function buildSnapshotNodes() {
     const doc = iframe.contentDocument;
-    if (!doc) return [];
+    const win = iframe.contentWindow;
+    if (!doc || !win) return [];
     const elements = [...doc.querySelectorAll('[data-testid]')].slice(0, MAX_SNAPSHOT_NODES);
     return elements.map((el) => {
-      const computedStyle = iframe.contentWindow.getComputedStyle(el);
-      return {
-        selector: el.getAttribute('data-testid'),
+      const computedStyle = win.getComputedStyle(el);
+      /** @type {SnapshotNode} */
+      const node = {
+        selector: el.getAttribute('data-testid') ?? '', // always set: the query requires it
         tag: el.tagName.toLowerCase(),
         label: labelFor(el),
-        disabled: !!el.disabled,
+        disabled: 'disabled' in el && el.disabled === true,
         hidden: isHidden(el, computedStyle),
       };
+      if (isCheckable(el)) node.checked = 'checked' in el && el.checked === true;
+      const value = valueOf(el);
+      if (value !== undefined) node.value = value;
+      return node;
     });
   }
 
@@ -200,7 +433,9 @@
   // post-action timeout, the model gets a fresh grounding snapshot once the
   // DOM actually settles, from whatever caused the change (agent action,
   // user click, or async page JS alike).
-  let debounceTimer = null;
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let debounceTimer;
+  /** @type {MutationObserver | null} */
   let observer = null;
 
   function scheduleSnapshot() {
@@ -214,6 +449,10 @@
     if (!doc) return;
     observer = new MutationObserver(scheduleSnapshot);
     observer.observe(doc.body, { subtree: true, childList: true, attributes: true });
+    // Form state (a checkbox's `checked`, a typed value) changes no attribute,
+    // so the observer alone never sees it. The listeners go with the document.
+    doc.addEventListener('input', scheduleSnapshot, true);
+    doc.addEventListener('change', scheduleSnapshot, true);
   }
 
   // Native iframe `load` event, not a postMessage handshake — simpler and
@@ -223,6 +462,7 @@
   // Runs once per document: `setUpDocument` remembers which one it last set
   // up, so the init-time catch-up below and a later `load` for the same
   // document can't both run it.
+  /** @type {Document | null} */
   let setUpDocument = null;
 
   function handleFrameLoad() {

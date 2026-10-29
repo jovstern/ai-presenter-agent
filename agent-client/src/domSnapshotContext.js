@@ -5,6 +5,14 @@
 // navigation, when nothing's been sent yet, or when the delta covers most of
 // the page anyway; a compact delta otherwise. Same tradeoff a video codec
 // makes between keyframes and delta frames.
+/** @import { Snapshot, SnapshotNode } from './bridgeProtocol.js' */
+
+/**
+ * What to tell the model about one snapshot.
+ * @typedef {{ type: 'keyframe', nodes: SnapshotNode[] }
+ *   | { type: 'delta', changed: SnapshotNode[], removed: string[] }} SnapshotDecision
+ */
+
 const FULL_REFRESH_RATIO = 0.6;
 
 export function createDomSnapshotContext() {
@@ -17,7 +25,10 @@ export function createDomSnapshotContext() {
     forceKeyframe = true;
   }
 
-  // snapshot: { full, changed, removed } as broadcast by bridge.js.
+  /**
+   * @param {Snapshot} snapshot As broadcast by bridge.js.
+   * @returns {SnapshotDecision}
+   */
   function decide({ full, changed, removed }) {
     const totalDelta = changed.length + removed.length;
     const deltaCoversMost = full.length > 0 && totalDelta / full.length >= FULL_REFRESH_RATIO;
@@ -32,6 +43,7 @@ export function createDomSnapshotContext() {
   return { decide, markNavigated };
 }
 
+/** @param {SnapshotDecision} decision */
 export function formatSnapshotMessage(decision) {
   if (decision.type === 'keyframe') {
     return `Page snapshot (full):\n${JSON.stringify(decision.nodes)}`;

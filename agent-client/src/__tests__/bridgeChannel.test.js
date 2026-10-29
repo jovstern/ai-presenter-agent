@@ -70,7 +70,12 @@ describe('connectBridge', () => {
 
     // Reply out of order: each promise still gets its own result.
     bridgePort.postMessage({ type: 'action-result', id: secondMsg.id, success: true });
-    bridgePort.postMessage({ type: 'action-result', id: firstMsg.id, success: false, error: 'nope' });
+    bridgePort.postMessage({
+      type: 'action-result',
+      id: firstMsg.id,
+      success: false,
+      error: 'nope',
+    });
 
     await expect(first).resolves.toEqual({ success: false, error: 'nope' });
     await expect(second).resolves.toEqual({ success: true });
@@ -155,10 +160,27 @@ describe('connectBridge', () => {
 
     // A co-resident page script that guessed the id still can't answer for the bridge.
     const origin = window.location.origin;
-    window.dispatchEvent(new MessageEvent('message', { origin, data: { type: 'ds-action-result', id, success: true } }));
-    window.dispatchEvent(new MessageEvent('message', { origin, data: { type: 'action-result', id, success: true } }));
-    window.dispatchEvent(new MessageEvent('message', { origin, data: { type: 'ds-dom-snapshot', full: [], changed: [], removed: [] } }));
-    window.dispatchEvent(new MessageEvent('message', { origin, data: { type: 'snapshot', full: [], changed: [], removed: [] } }));
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin,
+        data: { type: 'ds-action-result', id, success: true },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent('message', { origin, data: { type: 'action-result', id, success: true } }),
+    );
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin,
+        data: { type: 'ds-dom-snapshot', full: [], changed: [], removed: [] },
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent('message', {
+        origin,
+        data: { type: 'snapshot', full: [], changed: [], removed: [] },
+      }),
+    );
 
     expect(addListener).not.toHaveBeenCalledWith('message', expect.anything());
     expect(onSnapshot).not.toHaveBeenCalled();

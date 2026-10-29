@@ -159,8 +159,14 @@ needed; this is intentionally the simplest piece.
 
 ### 5.3 DOM grounding snapshot
 
-- Flattened list of interactive/meaningful nodes only: role/tag, accessible name/label, the
-  `data-testid`-based selector, visibility/enabled flag.
+- Flattened list of interactive/meaningful nodes only: tag, name, the `data-testid`-based
+  selector, visibility/enabled flags. A form control is named by its `aria-label` or `<label>`
+  (never by a checkbox's `value`, which is "on"), falling back to its text, a button-like
+  input's value, `aria-labelledby`'s text, its placeholder and its title; a checkbox or radio
+  carries `checked`; a text input, textarea or select carries its `value` (never a hidden
+  input's, a password's or a card-number / one-time-code field's; cut to 60 characters), so a
+  `fill` shows up in the next snapshot. `fill` itself accepts only those text controls and
+  refuses a button, checkbox, hidden or other non-text input.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
 - The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
   (changed/removed) against its last snapshot — cheap, same-process port message regardless of page
@@ -185,7 +191,11 @@ events go directly from the browser to Gemini Live.
 - On a `toolCall` message: dispatch to the bridge over the private channel, await the result
   correlated by id (4 s timeout → failure),
   call `session.sendToolResponse()` with it. This action-result loop is the primary grounding
-  signal — no screenshots.
+  signal — no screenshots. The calls of one batch run one at a time, in order. A snapshot that
+  arrives while a batch runs is held and rides inside the next tool response, as its `page`
+  field (a keyframe when several were held), instead of going out as a separate turn: a
+  navigate's keyframe sent on its own landed between the call and its response, and the model
+  ended its turn without the new page's selectors (M5 T5).
 - Loop guard: caps consecutive identical action/utterance signatures; past the cap, injects a
   corrective context turn instead of dispatching again (v2 goal #5).
 - Reconnect: real backoff (immediate, 1s, 3s, 7s, 15s, 30s — 6 attempts) around `ai.live.connect`;
@@ -200,9 +210,10 @@ events go directly from the browser to Gemini Live.
   render counts stay flat under a burst of simulated volume updates (v2 goal #9). Lost in the
   rebuild; restored in M7 (#11).
 - A test for the bridge's origin/source/allowlist validation — the exact gap v1 shipped with.
-  The agent side of the private channel is unit-tested today (`bridgeChannel.test.js`); the
-  test of `sandbox/bridge.js`'s handshake and allowlist arrives with the M5 e2e (#13,
-  `e2e/bridge.spec.js`).
+  Done in M5 (#13): `e2e/bridge.spec.js` runs `sandbox/bridge.js` in Chromium on a fixture page
+  and performs the real handshake and port transfer; a second `ds-bridge-connect`, forged
+  `window` messages, an action outside the allowlist and an unknown route are all refused. The
+  agent side of the channel is unit-tested (`bridgeChannel.test.js`).
 
 ## 6. Open questions
 

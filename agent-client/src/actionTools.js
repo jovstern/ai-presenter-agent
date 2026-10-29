@@ -1,3 +1,6 @@
+/** @import { FunctionDeclaration } from '@google/genai/web' */
+/** @import { ActionName } from './bridgeProtocol.js' */
+
 // Mirrors sandbox/bridge.js's KNOWN_ROUTES. The two can't literally share an
 // import (bridge.js is a plain unbundled script, this is bundled separately)
 // — kept as a hand-duplicated pair rather than a shared module, matching the
@@ -6,9 +9,12 @@
 // rejects unknown routes), not open.
 export const KNOWN_ROUTES = ['home', 'settings'];
 
+/** @typedef {{ name: ActionName } & FunctionDeclaration} ActionDeclaration */
+
 // Function declarations for Gemini's tool-calling. `navigate`'s enum of known
 // routes structurally prevents hallucinated navigation targets — the model
 // literally cannot emit a route that isn't in this list (v2 goal #4).
+/** @type {ActionDeclaration[]} */
 export const TOOL_DECLARATIONS = [
   {
     name: 'click',
@@ -60,6 +66,7 @@ export const TOOL_DECLARATIONS = [
 // Gemini's functionCall.args arrives as a named record ({selector: "..."});
 // sandbox/bridge.js's action functions take positional params. This is the
 // one place that translation happens.
+/** @type {Record<ActionName, string[]>} */
 const ARG_ORDER = {
   click: ['selector'],
   scroll: ['selector'],
@@ -67,6 +74,23 @@ const ARG_ORDER = {
   navigate: ['route'],
 };
 
+/**
+ * @param {string} name
+ * @returns {name is ActionName}
+ */
+function isActionName(name) {
+  return Object.hasOwn(ARG_ORDER, name);
+}
+
+/**
+ * An unknown `name` gets no args; the bridge's allowlist rejects it anyway.
+ * Own keys only: a model-supplied "toString" used to index the prototype and
+ * throw on `.map`.
+ * @param {string} name The model's function name.
+ * @param {Record<string, unknown>} args The model's named arguments.
+ * @returns {unknown[]}
+ */
 export function toPositionalArgs(name, args) {
-  return (ARG_ORDER[name] ?? []).map((key) => args[key]);
+  const order = isActionName(name) ? ARG_ORDER[name] : [];
+  return order.map((key) => args[key]);
 }

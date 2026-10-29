@@ -5,10 +5,12 @@
 const DEFAULT_THRESHOLD = 3;
 
 export function createLoopGuard(threshold = DEFAULT_THRESHOLD) {
+  /** @type {string | null} */
   let lastSignature = null;
   let count = 0;
 
   // Returns true once `signature` has repeated past the threshold.
+  /** @param {string} signature */
   function check(signature) {
     if (signature === lastSignature) {
       count += 1;
@@ -27,6 +29,10 @@ export function createLoopGuard(threshold = DEFAULT_THRESHOLD) {
   return { check, reset };
 }
 
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} [args]
+ */
 export function actionSignature(name, args) {
   return `${name}:${JSON.stringify(args ?? {})}`;
 }

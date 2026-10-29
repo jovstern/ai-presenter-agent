@@ -1,0 +1,16 @@
+# Generated or vendored
+**/node_modules/
+**/dist/
+**/package-lock.json
+package-lock.json
+
+# Local tooling state (git-ignored)
+.claude/
+.superpowers/
+.metrics/
+.idea/
+test-results/
+playwright-report/
+
+# Prose: reflowing hand-wrapped Markdown would churn every doc for no gain
+*.md

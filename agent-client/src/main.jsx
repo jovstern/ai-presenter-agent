@@ -5,6 +5,16 @@ import { connectBridge } from './bridgeChannel.js';
 
 const HOST_ID = 'ai-presenter-agent-host';
 
+// The page nonce for /api/live-token (docs/code-review-notes.md H1). server/app.js
+// templates it into this script tag's data-ds-nonce: the CSP (script-src 'self')
+// rules out the inline script that used to set a window global. Read here, at the
+// bundle's top level, because document.currentScript points at this tag only
+// while it executes; mount() may run later, from DOMContentLoaded. This hides
+// nothing from a hostile same-origin script — it can read the attribute just as
+// easily — which is the residual H1 gap, not a regression.
+const script = document.currentScript;
+const NONCE = script instanceof HTMLScriptElement ? (script.dataset.dsNonce ?? '') : '';
+
 function mount() {
   if (document.getElementById(HOST_ID)) return; // already mounted
 
@@ -39,6 +49,11 @@ function mount() {
     .agent-app__line--user { color: #555; font-style: italic; }
     .agent-app__knowledge-btn { margin-left: 8px; }
     .agent-app__knowledge-btn--empty { box-shadow: 0 0 0 2px #b3261e inset; }
+    /* Read by screen readers, not shown (the knowledge button's name). */
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+      overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0;
+    }
 
     .knowledge-modal__overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); }
     .knowledge-modal__content {
@@ -56,7 +71,7 @@ function mount() {
     .knowledge-modal__files { list-style: none; margin: 0 0 12px; padding: 0; }
     .knowledge-modal__files li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 0.9em; }
     .knowledge-modal__rules-label { display: block; font-size: 0.9em; color: #444; }
-    .knowledge-modal__rules { width: 100%; min-height: 60px; margin-top: 4px; font-family: inherit; }
+    .knowledge-modal__rules { box-sizing: border-box; width: 100%; min-height: 60px; margin-top: 4px; font-family: inherit; }
     .knowledge-modal__close { margin-top: 12px; }
   `;
   shadowRoot.appendChild(style);
@@ -84,7 +99,7 @@ function mount() {
   const root = createRoot(mountPoint);
   root.render(
     <StrictMode>
-      <AgentApp bridge={bridge} portalContainer={portalContainer} />
+      <AgentApp bridge={bridge} nonce={NONCE} portalContainer={portalContainer} />
     </StrictMode>,
   );
 

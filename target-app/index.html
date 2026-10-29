@@ -24,7 +24,13 @@
 
       <p>
         <label for="search-input" class="visually-hidden">Search</label>
-        <input id="search-input" name="search" data-testid="search-input" type="text" placeholder="Search" />
+        <input
+          id="search-input"
+          name="search"
+          data-testid="search-input"
+          type="text"
+          placeholder="Search"
+        />
         <button data-testid="search-button">Search</button>
       </p>
 
@@ -32,11 +38,6 @@
       <p data-testid="scroll-target">You scrolled to the bottom of Home.</p>
     </main>
 
-    <script>
-      document.querySelector('[data-testid="counter-increment"]').addEventListener('click', () => {
-        const el = document.querySelector('[data-testid="counter-value"]');
-        el.textContent = String(Number(el.textContent) + 1);
-      });
-    </script>
+    <script defer src="home.js"></script>
   </body>
 </html>

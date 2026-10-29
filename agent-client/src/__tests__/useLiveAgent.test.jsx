@@ -59,7 +59,7 @@ function fakeBridge() {
 function renderApp(bridge = fakeBridge()) {
   const utils = render(
     <StrictMode>
-      <AgentApp bridge={bridge} />
+      <AgentApp bridge={bridge} nonce="page-nonce" />
     </StrictMode>,
   );
   return { bridge, ...utils };
@@ -92,6 +92,12 @@ describe('AgentApp + useLiveAgent', () => {
   it('starts idle with an enabled Connect button', () => {
     renderApp();
     expect(screen.getByRole('button', { name: 'Connect' }).disabled).toBe(false);
+  });
+
+  it('hands the page nonce from main.jsx to the live session', async () => {
+    renderApp();
+    await click('Connect');
+    expect(fakes.sessions[0].options.nonce).toBe('page-nonce');
   });
 
   it('pressing Connect twice stops the first capture and closes the first player before the second capture starts', async () => {
@@ -204,7 +210,8 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('failed', {
       attempt: 0,
       maxAttempts: 6,
-      reason: "The server isn't configured to connect. Contact the site owner.",
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then reload this page.",
       fatal: true,
     });
 
@@ -266,9 +273,11 @@ describe('AgentApp + useLiveAgent', () => {
     expect(container.querySelector('ul').textContent).toBe('Hello!');
   });
 
-  it('names the knowledge button with its file count, hiding the emoji from assistive tech', () => {
+  it('names the knowledge button with its visible file count, hiding the emoji from assistive tech', () => {
     renderApp();
-    const button = screen.getByRole('button', { name: 'Knowledge files (0)' });
+    // Named by its content, so the visible "0" is part of the name (WCAG 2.5.3).
+    const button = screen.getByRole('button', { name: 'Knowledge files: 0' });
+    expect(button.hasAttribute('aria-label')).toBe(false);
     expect(button.querySelector('[aria-hidden="true"]').textContent).toBe('📄');
   });
 
