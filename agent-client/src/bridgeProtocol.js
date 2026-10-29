@@ -15,7 +15,8 @@
  */
 /**
  * One interactive element of the target app, keyed by its data-testid.
- * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean }} SnapshotNode
+ * `checked` is set for checkboxes and radio buttons only.
+ * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean }} SnapshotNode
  */
 /**
  * The full node list plus its diff against the bridge's previous snapshot.

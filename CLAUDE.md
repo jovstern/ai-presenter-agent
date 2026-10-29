@@ -73,6 +73,13 @@ From the repo root (run `npm install` there once for Prettier and Playwright, th
   both. Its `webServer` builds agent-client and runs `node server/index.js` on port 3971 with
   `GEMINI_API_KEY=e2e-dummy` and `DOTENV_CONFIG_PATH=/dev/null`, so it never loads
   `server/.env`; the token endpoint and the Live socket are stubbed in the tests. Needs no key.
+- `npm run e2e:live` — the opt-in live e2e (`e2e/live.spec.js`, R12), never in `check` or CI.
+  macOS only: it first runs `e2e/make-prompts.sh` (`say`, WAVs gitignored), then
+  `GEMINI_LIVE_E2E=1 playwright test`, which defines only the three live projects (one fake-mic
+  WAV each) and starts the server from `server/` on port 3972, so the key comes from the
+  server's own env — the config never passes one. It reads the agent-client's `ds:*`
+  `performance.mark`s and appends the app metrics to `.metrics/live.json` (gitignored). See
+  `docs/metrics/README.md`.
 
 Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
@@ -106,7 +113,8 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 ## Active work area
 
 Recent work concentrates in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
-grounding (keyframe vs. delta snapshots, a debounced `MutationObserver`), the private bridge
+grounding (keyframe vs. delta snapshots, a debounced `MutationObserver`, a snapshot that arrives
+during a tool batch sent inside its tool response), the private bridge
 channel, and Live session robustness (one reconnect per drop, `reconnecting`/`failed` status,
 session resumption, serialized tool calls). `liveSession.js` is the riskiest file and is covered
 by `liveSession.test.js`; `useLiveAgent.js` is thin glue with its own Testing Library tests.
@@ -122,11 +130,11 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
 ## Workflow notes
 
 - Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running
-  their npm commands (`npm install` included); the root only runs `check`, `format`, `dev` and
-  `e2e`.
+  their npm commands (`npm install` included); the root only runs `check`, `format`, `dev`,
+  `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (86 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (94 tests): `actionTools`,
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
@@ -141,8 +149,9 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; and the fatal `not_configured` path) and
   `a11y.spec.js` (4: axe with zero violations on `/` idle, with the knowledge dialog open —
-  inside the shadow root — and on both target-app pages). Follow the existing vitest pattern
-  when adding unit tests.
+  inside the shadow root — and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
+  Gemini: greeting, the five-step task, a forced close → recovery) runs only under
+  `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
 

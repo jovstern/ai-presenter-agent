@@ -8,7 +8,7 @@ import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotCo
 import { createLoopGuard, actionSignature } from './loopGuard.js';
 
 /** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
-/** @import { ActionResult } from './bridgeProtocol.js' */
+/** @import { ActionResult, Snapshot } from './bridgeProtocol.js' */
 /** @import { BridgeChannel } from './bridgeChannel.js' */
 
 /**
@@ -66,6 +66,11 @@ const RELOAD_REASON =
 const MISCONFIGURED_REASON = "The server isn't configured to connect. Contact the site owner.";
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
+// What Gemini closes a resume with (code 1008) when the reconnect arrives
+// before it has let go of the dropped client. The handle is fine, just early:
+// the backoff's next attempt resumes with it (seen in the live e2e, M5 T5).
+const SESSION_STILL_ATTACHED = /already connected/i;
+
 /** @param {number} status */
 function isRetryableStatus(status) {
   return status >= 500 || status === 429;
@@ -107,7 +112,10 @@ const SYSTEM_INSTRUCTION =
   'on it using the click, scroll, fill, and navigate tools. Only ever use a ' +
   'selector that was given to you in a snapshot — never invent or guess one. ' +
   'Speak concisely: briefly say what you are about to do just before you do it, ' +
-  'act, then confirm the result once you see it reflected in the next snapshot. ' +
+  'then act. A tool result may include the page as it is after the action, in ' +
+  'its `page` field; use it to choose your next step. When the user asks for ' +
+  'several steps, carry out every one of them in order without waiting to be ' +
+  'asked again, then confirm what you did. ' +
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
@@ -119,6 +127,19 @@ const SYSTEM_INSTRUCTION =
 // ai.live.connect() takes a beat to resolve — bound how much audio queues up
 // for that gap so "hears you" doesn't depend on speaking after a fixed delay.
 const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
+
+// Timing marks on the page's performance timeline, read by the opt-in live
+// e2e (e2e/live.spec.js, docs/metrics/README.md): `ds:connect-start`,
+// `ds:open`, `ds:first-audio`, `ds:tool-start:<id>` / `ds:tool-end:<id>` and
+// `ds:reconnected`. A mark is a timestamp in a buffer nobody reads in
+// production: no logging, no network.
+/**
+ * @param {string} name
+ * @param {Record<string, unknown>} [detail]
+ */
+function mark(name, detail) {
+  performance.mark(name, { detail });
+}
 
 /**
  * @param {LiveSessionOptions} options
@@ -147,6 +168,10 @@ export function createLiveSession({
   // backoff reset hang on), and whether the attempt asked to resume a session.
   let serverAnswered = false;
   let attemptResumed = false;
+  // For the timing marks: whether this conversation has had its first audio
+  // chunk yet, and whether a drop is being recovered from.
+  let awaitingFirstAudio = false;
+  let recovering = false;
 
   /** @param {string} base64Frame */
   function sendFrame(base64Frame) {
@@ -180,10 +205,47 @@ export function createLiveSession({
     snapshotContext.markNavigated();
   });
 
-  const unsubscribeSnapshot = bridge.onSnapshot((snapshot) => {
+  // A snapshot that arrives while a tool batch runs is held, then sent inside
+  // the batch's next tool response, as `page`.
+  // A navigate's keyframe lands before its own result: sent on its own, it was
+  // a user turn between a function call and its response, and with
+  // turnComplete false it never prompted a turn, so the model ended its turn
+  // on "navigated" with no selectors for the new page and the task stalled
+  // (seen in the live e2e, M5 T5). In the function result, the model
+  // continues from it.
+  /** @type {Set<symbol>} */
+  const runningBatches = new Set();
+  /** @type {Snapshot | null} */
+  let heldSnapshot = null;
+  let heldCount = 0;
+
+  /** @param {Snapshot} snapshot */
+  function sendSnapshot(snapshot) {
     if (!session) return;
     const decision = snapshotContext.decide(snapshot);
     session.sendClientContent({ turns: formatSnapshotMessage(decision), turnComplete: false });
+  }
+
+  /** @returns {string | undefined} The held snapshot as a message, if any. */
+  function takeHeldSnapshot() {
+    if (!heldSnapshot) return undefined;
+    // Each held snapshot is a diff against the one before it, so only the
+    // last one, sent as a keyframe, carries everything the others changed.
+    if (heldCount > 1) snapshotContext.markNavigated();
+    const decision = snapshotContext.decide(heldSnapshot);
+    heldSnapshot = null;
+    heldCount = 0;
+    return formatSnapshotMessage(decision);
+  }
+
+  const unsubscribeSnapshot = bridge.onSnapshot((snapshot) => {
+    if (!session) return;
+    if (runningBatches.size > 0) {
+      heldSnapshot = snapshot;
+      heldCount += 1;
+      return;
+    }
+    sendSnapshot(snapshot);
   });
 
   // Serialized on purpose (docs/code-review-notes.md H4): dispatching a batch
@@ -197,7 +259,9 @@ export function createLiveSession({
     for (const fc of functionCalls) {
       // The SDK types `name` as optional; Live always sends it with a call.
       const name = fc.name ?? '';
+      const id = fc.id ?? name;
       const signature = actionSignature(name, fc.args);
+      mark(`ds:tool-start:${id}`, { name });
       /** @type {ActionResult} */
       const result = loopGuard.check(signature)
         ? {
@@ -205,12 +269,18 @@ export function createLiveSession({
             error: 'This action has repeated too many times in a row — try something different.',
           }
         : await bridge.dispatchAction(name, toPositionalArgs(name, fc.args ?? {}));
+      mark(`ds:tool-end:${id}`, { name, success: result.success });
 
       // A drop retires the generation, so a batch from a dead session stops
       // here instead of answering into the dead socket or the replacement one.
       if (gen !== generation || !session) return;
+      const page = takeHeldSnapshot();
       session.sendToolResponse({
-        functionResponses: { id: fc.id, name: fc.name, response: result },
+        functionResponses: {
+          id: fc.id,
+          name: fc.name,
+          response: page ? { ...result, page } : result,
+        },
       });
     }
   }
@@ -225,7 +295,13 @@ export function createLiveSession({
    * @param {number} gen
    */
   function runToolCallBatch(functionCalls, gen) {
-    handleToolCallBatch(functionCalls, gen).catch((error) => handleFailure(gen, error));
+    const batch = Symbol('tool batch');
+    runningBatches.add(batch);
+    // A snapshot is a port message, so it can't land between a batch's last
+    // response and this cleanup: whatever the batch held, it has sent.
+    handleToolCallBatch(functionCalls, gen)
+      .catch((error) => handleFailure(gen, error))
+      .finally(() => runningBatches.delete(batch));
   }
 
   // details (StatusDetails) only accompany `reconnecting` and `failed`; the UI
@@ -292,12 +368,21 @@ export function createLiveSession({
     if (!serverAnswered) {
       serverAnswered = true;
       attempt = 0;
+      mark('ds:open');
+      if (recovering) {
+        recovering = false;
+        mark('ds:reconnected');
+      }
       setStatus('open');
     }
     if (message.serverContent?.interrupted) {
       onInterrupted?.();
     }
     if (message.data) {
+      if (awaitingFirstAudio) {
+        awaitingFirstAudio = false;
+        mark('ds:first-audio');
+      }
       onAudioChunk?.(message.data);
     }
     const outText = message.serverContent?.outputTranscription?.text;
@@ -323,15 +408,17 @@ export function createLiveSession({
   /**
    * @param {number} gen
    * @param {unknown} error Anything a failed attempt threw, or the socket's Error.
+   * @param {boolean} [handleStillValid] The server refused a resume only because
+   *   the dropped client is still attached; keep the handle for the next attempt.
    */
-  function handleFailure(gen, error) {
+  function handleFailure(gen, error, handleStillValid = false) {
     if (manuallyClosed || gen !== generation) return;
     generation += 1;
     teardown();
     // A resumed attempt that dies before the server says anything most likely
     // had its handle rejected (expired, or from a session the server dropped).
     // Retrying with it would fail the same way every time, so start fresh.
-    if (attemptResumed && !serverAnswered) resumeHandle = null;
+    if (attemptResumed && !serverAnswered && !handleStillValid) resumeHandle = null;
     if (isTokenError(error) && !error.retryable) {
       setStatus('failed', {
         attempt,
@@ -347,6 +434,7 @@ export function createLiveSession({
     }
     const delay = RECONNECT_DELAYS[attempt];
     attempt += 1;
+    recovering = true;
     // `reconnecting`, not `failed`, while a retry is still coming — the old
     // build reported `failed` here and then silently recovered.
     setStatus('reconnecting', {
@@ -368,6 +456,9 @@ export function createLiveSession({
     manuallyClosed = false;
     // A new conversation shouldn't inherit the last one's repeat streak.
     loopGuard.reset();
+    recovering = false;
+    awaitingFirstAudio = true;
+    mark('ds:connect-start');
     setStatus('connecting');
     return openSession();
   }
@@ -375,6 +466,11 @@ export function createLiveSession({
   async function openSession() {
     const gen = ++generation; // invalidates any older in-flight attempt
     teardown();
+    // A dead session's batches and the page state they held go with it; the
+    // new session asks for a fresh keyframe below.
+    runningBatches.clear();
+    heldSnapshot = null;
+    heldCount = 0;
     serverAnswered = false;
     attemptResumed = false;
 
@@ -403,8 +499,12 @@ export function createLiveSession({
           },
           onerror: () =>
             handleFailure(gen, new Error('The connection to the voice service failed.')),
-          onclose: () =>
-            handleFailure(gen, new Error('The connection to the voice service closed.')),
+          onclose: (event) =>
+            handleFailure(
+              gen,
+              new Error('The connection to the voice service closed.'),
+              SESSION_STILL_ATTACHED.test(event.reason),
+            ),
         },
         config: {
           responseModalities: [Modality.AUDIO],
@@ -459,6 +559,7 @@ export function createLiveSession({
     generation += 1; // invalidate any in-flight attempt too (teardown clears a scheduled retry)
     manuallyClosed = true;
     attempt = 0;
+    recovering = false;
     resumeHandle = null;
     pendingFrames = [];
     teardown();

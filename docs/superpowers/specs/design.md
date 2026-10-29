@@ -41,7 +41,7 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       `/health`. *(M5 T3)*
 - [x] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
       *(M5 T4)*
-- [ ] R12 An opt-in live e2e (fake-mic WAV) records the app metrics.
+- [x] R12 An opt-in live e2e (fake-mic WAV) records the app metrics. *(M5 T5)*
 - [ ] R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
 
 **M6: hardening and tuning (issue #5)**
@@ -142,7 +142,8 @@ mount. The bridge accepts the first one only. After that, everything travels on 
 | bridge → agent | `{type:'snapshot', full, changed, removed}` |
 | bridge → agent | `{type:'navigated'}` (sent before the load snapshot) |
 
-Snapshot node: `{selector, tag, label, disabled, hidden}`.
+Snapshot node: `{selector, tag, label, disabled, hidden, checked?}`. `label` is a form control's
+`<label>` text; `checked` is set on checkboxes and radios only (M5 T5).
 
 Local storage stays as it is in `knowledgeStore.js`.
 

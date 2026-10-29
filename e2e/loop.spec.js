@@ -125,10 +125,25 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await expect(frame.getByRole('heading', { name: 'Settings' })).toBeVisible();
   await expect(frame.getByTestId('notifications-toggle')).toBeChecked();
   await expect.poll(() => live.toolResponses()).toHaveLength(2);
-  expect(live.toolResponses()).toEqual([
-    { id: 'call-navigate', name: 'navigate', response: { success: true } },
-    { id: 'call-toggle', name: 'click', response: { success: true } },
-  ]);
+  // The settings page's keyframe rides in the navigate's own response, so the
+  // model continues from the new page (liveSession.js); the toggle is named by
+  // its label and reports its state (bridge.js). The click's snapshot is
+  // debounced, so it comes after the click's response, on its own.
+  const [navigateResponse, toggleResponse] = live.toolResponses();
+  expect(navigateResponse).toEqual({
+    id: 'call-navigate',
+    name: 'navigate',
+    response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\):/) },
+  });
+  expect(JSON.parse(navigateResponse.response.page.split('\n')[1])).toContainEqual({
+    selector: 'notifications-toggle',
+    tag: 'input',
+    label: 'Enable notifications',
+    disabled: false,
+    hidden: false,
+    checked: false,
+  });
+  expect(toggleResponse).toEqual({ id: 'call-toggle', name: 'click', response: { success: true } });
 
   // The server drops the socket. The reconnect's setupComplete is held back so
   // the page is seen waiting in `reconnecting` before it is Live again.

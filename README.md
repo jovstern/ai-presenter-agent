@@ -71,10 +71,11 @@ npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
 npm run e2e     # Playwright (Chromium): 3 specs, 13 tests, no Gemini key needed
+npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 86 tests
+npm test        # vitest: 10 files, 94 tests
 npm run lint    # ESLint: agent-client plus sandbox/bridge.js and target-app/*.js
 npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
@@ -88,13 +89,15 @@ The suite in `agent-client/src/__tests__/`:
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
   per drop, superseded connects, in-order tool batches, resumption without re-greeting, the
   `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard,
-  `dispose()`.
+  `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
+  during a tool batch goes out inside the next tool response (`page`); the `ds:*` timing marks.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; `fill` refuses an element that
-  isn't a text input; replies survive a later patch of `MessagePort.prototype.postMessage`.
+  isn't a text input; replies survive a later patch of `MessagePort.prototype.postMessage`; a
+  checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot.
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
@@ -122,12 +125,19 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
-  `toolResponse`s in order; a server-side close shows `Reconnecting…`, then Live, with exactly
+  `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
   connected". And a `not_configured` 500 goes straight to "Reload page" with no retries.
 - `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle and
   with the knowledge dialog open, and on both target-app pages: zero violations. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
+
+`npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the
+real Gemini Live API, with spoken prompts (`e2e/make-prompts.sh`, macOS `say`) played by
+Chromium's fake mic. Three scenarios: the greeting, the scripted five-step task checked in the
+iframe, and a forced socket close that must recover. It records the app metrics (connect time,
+first audio, tool round trips, reconnect time, pass rate) in `.metrics/live.json`. Never in CI.
+How to run it, what each number means and the current baseline: `docs/metrics/README.md`.
 
 The suite in `server/__tests__/`:
 

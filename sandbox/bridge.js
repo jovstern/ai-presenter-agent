@@ -18,7 +18,8 @@
    */
   /**
    * One interactive element of the target app, keyed by its data-testid.
-   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean }} SnapshotNode
+   * `checked` is set for checkboxes and radio buttons only.
+   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean }} SnapshotNode
    */
   /**
    * The full node list plus its diff against the bridge's previous snapshot.
@@ -277,9 +278,27 @@
   // Elements come from the frame's realm, so `instanceof HTMLElement` (this
   // realm's) would be false for all of them: properties are probed with `in`.
   /** @param {Element} el */
+  function isCheckable(el) {
+    return 'type' in el && (el.type === 'checkbox' || el.type === 'radio');
+  }
+
+  // A form control is named by its <label>. A checkbox's `value` is no name
+  // (it is "on" by default), and naming the notifications toggle "on" let the
+  // model report it as already on without clicking it (the live e2e, M5 T5).
+  /** @param {Element} el */
   function labelFor(el) {
-    const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
-    return el.getAttribute('aria-label') || el.textContent?.trim().slice(0, 60) || value || '';
+    const { labels } = /** @type {{ labels?: NodeListOf<HTMLLabelElement> | null }} */ (el);
+    const labelText = labels
+      ? [...labels].map((label) => label.textContent?.trim() ?? '').join(' ')
+      : '';
+    const value = !isCheckable(el) && 'value' in el && typeof el.value === 'string' ? el.value : '';
+    return (
+      el.getAttribute('aria-label') ||
+      labelText.slice(0, 60) ||
+      el.textContent?.trim().slice(0, 60) ||
+      value ||
+      ''
+    );
   }
 
   /**
@@ -302,13 +321,16 @@
     const elements = [...doc.querySelectorAll('[data-testid]')].slice(0, MAX_SNAPSHOT_NODES);
     return elements.map((el) => {
       const computedStyle = win.getComputedStyle(el);
-      return {
+      /** @type {SnapshotNode} */
+      const node = {
         selector: el.getAttribute('data-testid') ?? '', // always set: the query requires it
         tag: el.tagName.toLowerCase(),
         label: labelFor(el),
         disabled: 'disabled' in el && el.disabled === true,
         hidden: isHidden(el, computedStyle),
       };
+      if (isCheckable(el)) node.checked = 'checked' in el && el.checked === true;
+      return node;
     });
   }
 
@@ -350,6 +372,10 @@
     if (!doc) return;
     observer = new MutationObserver(scheduleSnapshot);
     observer.observe(doc.body, { subtree: true, childList: true, attributes: true });
+    // Form state (a checkbox's `checked`, a typed value) changes no attribute,
+    // so the observer alone never sees it. The listeners go with the document.
+    doc.addEventListener('input', scheduleSnapshot, true);
+    doc.addEventListener('change', scheduleSnapshot, true);
   }
 
   // Native iframe `load` event, not a postMessage handshake — simpler and

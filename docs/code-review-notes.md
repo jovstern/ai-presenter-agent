@@ -112,6 +112,13 @@ fragments into one bubble rather than pushing a new entry per fragment.
 > one. Covered by `liveSession.test.js` (one drop → exactly one reconnect; superseded connects)
 > and `useLiveAgent.test.jsx` (no stacked mic). PR #9 force-closed the socket in a real browser:
 > one token request, one reconnect.
+>
+> **M5 T5 (found by the live e2e).** The immediate resume after a drop is often refused with
+> `1008 "… session is already connected to an existing client"`: Gemini still holds the dropped
+> client. Treating that as a rejected handle started a fresh session on every such reconnect,
+> which lost the conversation. `liveSession.js` now keeps the handle for that close reason
+> (`SESSION_STILL_ATTACHED`), and the backoff's next attempt, 1 s later, resumes. Tested in
+> `liveSession.test.js`. The live numbers are in `docs/metrics/README.md`.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -363,6 +370,19 @@ if (message.toolCall) {
 > runs a 250 ms-debounced `MutationObserver` on the iframe body, reattached on every new document,
 > so user clicks and async DOM changes re-ground the model too. (3) Each snapshot node carries a
 > `hidden` flag (`el.hidden`, `display: none` or `visibility: hidden`).
+>
+> **M5 T5 (found by the live e2e).** Two more grounding gaps:
+> - A navigate's keyframe reached the model before the navigate's own result, as a user turn
+>   between the function call and its response, and the multi-step task stalled there.
+>   `liveSession.js` now holds a snapshot that arrives during a tool batch and sends it inside
+>   the batch's next tool response as `page`; the system instruction mentions `page` and asks
+>   for every step of a multi-step request.
+> - `bridge.js` named the notifications checkbox "on" (its default `value`) and the model once
+>   took that for its state. A form control is now named by its `<label>`, checkboxes and radios
+>   carry `checked`, and `input`/`change` events schedule a snapshot, since a toggle changes no
+>   attribute.
+>
+> Tested in `liveSession.test.js`, `bridge.test.js` and `e2e/loop.spec.js`.
 
 Two issues in one area:
 

@@ -185,3 +185,53 @@ describe('sandbox/bridge.js channel', () => {
     }
   });
 });
+
+describe('sandbox/bridge.js snapshots', () => {
+  const SETTINGS = `
+    <label><input data-testid="toggle" type="checkbox" /> Enable notifications</label>
+    <input data-testid="name" value="Ada" />
+    <button data-testid="save">Save</button>`;
+
+  // Resolves with the debounced snapshot of the new content, skipping the
+  // load's own snapshot of the still-empty document.
+  function loadPage(html) {
+    const snapshot = new Promise((resolve) => {
+      agentPort.onmessage = ({ data }) => {
+        if (data?.type === 'snapshot' && data.full.length > 0) resolve(data);
+      };
+    });
+    frame.load('/target-app/settings.html');
+    frame.doc.body.innerHTML = html;
+    return snapshot;
+  }
+
+  it("names a checkbox by its label, never its value, and reports whether it's checked", async () => {
+    const { full } = await loadPage(SETTINGS);
+
+    expect(full).toEqual([
+      {
+        selector: 'toggle',
+        tag: 'input',
+        label: 'Enable notifications',
+        disabled: false,
+        hidden: false,
+        checked: false,
+      },
+      { selector: 'name', tag: 'input', label: 'Ada', disabled: false, hidden: false },
+      { selector: 'save', tag: 'button', label: 'Save', disabled: false, hidden: false },
+    ]);
+  });
+
+  // Toggling a checkbox changes a property, not an attribute: without the
+  // change listener the MutationObserver never sends this snapshot.
+  it('sends a snapshot when a checkbox is toggled', async () => {
+    await loadPage(SETTINGS);
+    const toggle = frame.doc.querySelector('[data-testid="toggle"]');
+    const next = nextMessage(agentPort, 'snapshot');
+
+    toggle.click();
+
+    const { changed } = await next;
+    expect(changed).toEqual([expect.objectContaining({ selector: 'toggle', checked: true })]);
+  });
+});

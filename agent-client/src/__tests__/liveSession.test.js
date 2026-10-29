@@ -602,6 +602,106 @@ describe('createLiveSession', () => {
     expect(greetings(fresh.session)).toHaveLength(1);
   });
 
+  it('keeps the resumption handle when the server refuses a resume because the old client is still attached', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+
+    const early = live.calls[1];
+    early.resolve();
+    await flush();
+    // What Gemini answers an immediate resume with (seen in the live e2e).
+    early.params.callbacks.onclose({
+      code: 1008,
+      reason: 'BidiGenerateContent session is already connected to an existing client',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const retried = live.calls[2];
+    expect(retried.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    await establish(retried);
+    expect(greetings(retried.session)).toHaveLength(0);
+  });
+
+  it('sends a snapshot that arrives mid-batch inside the next tool response, as a keyframe when several were held', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const page = [node('a', 'A'), node('b', 'B'), node('c', 'C'), node('d', 'D')];
+    bridge.emitSnapshot({ full: page, changed: page, removed: [] }); // the first keyframe
+    const snapshotMessages = () =>
+      call.session.sendClientContent.mock.calls.filter(([arg]) =>
+        arg.turns.startsWith('Page snapshot'),
+      );
+    expect(snapshotMessages()).toHaveLength(1);
+    const finishers = [];
+    bridge.dispatchAction.mockImplementation(
+      () => new Promise((resolve) => finishers.push(resolve)),
+    );
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'nav', name: 'navigate', args: { route: 'settings' } },
+          { id: 'tap', name: 'click', args: { selector: 'a' } },
+        ],
+      },
+    });
+    await flush();
+    // Two small deltas while the navigate is in flight: neither goes out alone.
+    bridge.emitSnapshot({ full: page, changed: [node('a', 'A1')], removed: [] });
+    bridge.emitSnapshot({ full: page, changed: [node('b', 'B1')], removed: [] });
+    finishers[0]({ success: true });
+    await flush();
+    // One while the click is in flight.
+    bridge.emitSnapshot({ full: page, changed: [node('c', 'C1')], removed: [] });
+    finishers[1]({ success: true });
+    await flush();
+
+    expect(snapshotMessages()).toHaveLength(1);
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    // The first carries a keyframe: a lone delta would lose what the first
+    // held one changed. The second is a plain delta again.
+    expect(responses).toEqual([
+      {
+        id: 'nav',
+        name: 'navigate',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\)/) },
+      },
+      {
+        id: 'tap',
+        name: 'click',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(delta\)/) },
+      },
+    ]);
+  });
+
+  it('answers a tool call without a page when no snapshot arrived during it', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'a' } }] },
+    });
+    await flush();
+
+    expect(call.session.sendToolResponse).toHaveBeenCalledWith({
+      functionResponses: { id: 'tap', name: 'click', response: { success: true } },
+    });
+  });
+
   it('a sendToolResponse that throws on a closing socket is handled, not an unhandled rejection', async () => {
     const { liveSession, statusNames } = setup();
     const call = await connectAndEstablish(liveSession);
@@ -615,5 +715,80 @@ describe('createLiveSession', () => {
     await flush();
 
     expect(statusNames().at(-1)).toBe('reconnecting');
+  });
+});
+
+// The opt-in live e2e reads these off the page's performance timeline
+// (e2e/live.spec.js, docs/metrics/README.md). Fake timers fake `performance`
+// too, so the calls are read off a spy rather than the timeline.
+describe('timing marks', () => {
+  let markSpy;
+  const dsMarks = () =>
+    markSpy.mock.calls
+      .filter(([name]) => name.startsWith('ds:'))
+      .map(([name, options]) => ({ name, detail: options?.detail }));
+  const markNames = () => dsMarks().map((entry) => entry.name);
+
+  beforeEach(() => {
+    markSpy = vi.spyOn(performance, 'mark');
+  });
+
+  afterEach(() => markSpy.mockRestore());
+
+  it('marks connect-start, open on the first server message, and only the first audio chunk', async () => {
+    const { liveSession } = setup();
+    liveSession.connect();
+    await flush();
+    expect(markNames()).toEqual(['ds:connect-start']);
+
+    const call = live.calls.at(-1);
+    await establish(call);
+    call.params.callbacks.onmessage({ data: 'AAAA' });
+    call.params.callbacks.onmessage({ data: 'BBBB' });
+
+    expect(markNames()).toEqual(['ds:connect-start', 'ds:open', 'ds:first-audio']);
+  });
+
+  it('marks the start and end of each tool call with its id, name and outcome', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    bridge.dispatchAction
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, error: 'not found' });
+    markSpy.mockClear();
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'nav', name: 'navigate', args: { route: 'settings' } },
+          { id: 'tap', name: 'click', args: { selector: 'missing' } },
+        ],
+      },
+    });
+    await flush();
+
+    expect(dsMarks()).toEqual([
+      { name: 'ds:tool-start:nav', detail: { name: 'navigate' } },
+      { name: 'ds:tool-end:nav', detail: { name: 'navigate', success: true } },
+      { name: 'ds:tool-start:tap', detail: { name: 'click' } },
+      { name: 'ds:tool-end:tap', detail: { name: 'click', success: false } },
+    ]);
+  });
+
+  it('marks reconnected when a dropped session is open again, not on a first or manual connect', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    expect(markNames()).not.toContain('ds:reconnected');
+
+    drop(first);
+    await flush();
+    await establish(live.calls[1]);
+    expect(markNames().filter((name) => name === 'ds:reconnected')).toHaveLength(1);
+    expect(markNames().at(-1)).toBe('ds:reconnected');
+
+    liveSession.disconnect();
+    markSpy.mockClear();
+    await connectAndEstablish(liveSession);
+    expect(markNames()).toEqual(['ds:connect-start', 'ds:open']);
   });
 });
