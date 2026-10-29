@@ -7,6 +7,43 @@ import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
 import { createLoopGuard, actionSignature } from './loopGuard.js';
 
+/** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
+/** @import { ActionResult } from './bridgeProtocol.js' */
+/** @import { BridgeChannel } from './bridgeChannel.js' */
+
+/**
+ * @typedef {'connecting' | 'open' | 'reconnecting' | 'failed' | 'closed'} SessionStatus
+ */
+/**
+ * Sent with `reconnecting` and `failed` only. `fatal` marks a `failed` that
+ * Retry can't fix (the page's token request is rejected, or the server is
+ * misconfigured), so the UI offers a reload instead.
+ * @typedef {{ attempt: number, maxAttempts: number, reason?: string, fatal?: boolean }} StatusDetails
+ */
+/**
+ * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptEntry
+ */
+/**
+ * @typedef {object} LiveSessionOptions
+ * @property {Omit<BridgeChannel, 'close'>} bridge The page's channel; the
+ *   session subscribes to it and never closes it.
+ * @property {(status: SessionStatus, details?: StatusDetails) => void} [onStatusChange]
+ * @property {(base64Pcm: string) => void} [onAudioChunk] 24 kHz 16-bit PCM from the model.
+ * @property {(entry: TranscriptEntry) => void} [onTranscript]
+ * @property {() => void} [onInterrupted] The user barged in: stop playback now.
+ */
+/**
+ * @typedef {object} LiveSession
+ * @property {() => Promise<void>} connect Starts a fresh backoff budget; never rejects.
+ * @property {() => void} disconnect Closes the socket and cancels any retry.
+ * @property {() => void} dispose Disconnects and unsubscribes from the bridge and the knowledge store.
+ * @property {(base64Frame: string) => void} sendAudioFrame 16 kHz PCM; queued (bounded) until the socket is up.
+ */
+/**
+ * An Error that says whether retrying can help, and the reason to show if not.
+ * @typedef {Error & { retryable: boolean, reason?: string }} TokenError
+ */
+
 const MODEL = 'gemini-3.8-live';
 
 // Immediate, 1s, 3s, 7s, 15s, 30s — matches the backoff documented for the
@@ -26,8 +63,37 @@ const RELOAD_REASON =
 const MISCONFIGURED_REASON = "The server isn't configured to connect. Contact the site owner.";
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
+/** @param {number} status */
 function isRetryableStatus(status) {
   return status >= 500 || status === 429;
+}
+
+/**
+ * @param {unknown} value
+ * @returns {value is Record<string, unknown>}
+ */
+function isRecord(value) {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * @param {string} message The server's own error text; empty for none.
+ * @param {number} status
+ * @param {boolean} retryable
+ * @param {string} [reason]
+ * @returns {TokenError}
+ */
+function tokenError(message, status, retryable, reason) {
+  const error = new Error(message || `Token request failed: ${status}`);
+  return Object.assign(error, reason === undefined ? { retryable } : { retryable, reason });
+}
+
+/**
+ * @param {unknown} error
+ * @returns {error is TokenError}
+ */
+function isTokenError(error) {
+  return error instanceof Error && 'retryable' in error && typeof error.retryable === 'boolean';
 }
 
 // Expanded per docs/code-review-notes.md B4 now that tools exist: role,
@@ -51,6 +117,10 @@ const SYSTEM_INSTRUCTION =
 // for that gap so "hears you" doesn't depend on speaking after a fixed delay.
 const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
 
+/**
+ * @param {LiveSessionOptions} options
+ * @returns {LiveSession}
+ */
 export function createLiveSession({
   bridge,
   onStatusChange,
@@ -58,20 +128,25 @@ export function createLiveSession({
   onTranscript,
   onInterrupted,
 }) {
+  /** @type {Session | null} */
   let session = null;
   let generation = 0;
+  /** @type {string | null} */
   let resumeHandle = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let reconnectTimer = null;
   let attempt = 0;
   let manuallyClosed = false;
+  /** @type {string[]} */
   let pendingFrames = [];
   // Per attempt: whether the server has sent anything yet (what `open` and the
   // backoff reset hang on), and whether the attempt asked to resume a session.
   let serverAnswered = false;
   let attemptResumed = false;
 
+  /** @param {string} base64Frame */
   function sendFrame(base64Frame) {
-    session.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
+    session?.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
   }
 
   // Resent on every (re)connect (including a resumed one) and whenever
@@ -110,15 +185,22 @@ export function createLiveSession({
   // Serialized on purpose (docs/code-review-notes.md H4): dispatching a batch
   // concurrently races a navigate against a click that expects the new page,
   // and doesn't guarantee sendToolResponse ordering back to the model.
+  /**
+   * @param {FunctionCall[]} functionCalls
+   * @param {number} gen
+   */
   async function handleToolCallBatch(functionCalls, gen) {
     for (const fc of functionCalls) {
-      const signature = actionSignature(fc.name, fc.args);
+      // The SDK types `name` as optional; Live always sends it with a call.
+      const name = fc.name ?? '';
+      const signature = actionSignature(name, fc.args);
+      /** @type {ActionResult} */
       const result = loopGuard.check(signature)
         ? {
             success: false,
             error: 'This action has repeated too many times in a row — try something different.',
           }
-        : await bridge.dispatchAction(fc.name, toPositionalArgs(fc.name, fc.args ?? {}));
+        : await bridge.dispatchAction(name, toPositionalArgs(name, fc.args ?? {}));
 
       // A drop retires the generation, so a batch from a dead session stops
       // here instead of answering into the dead socket or the replacement one.
@@ -134,15 +216,20 @@ export function createLiveSession({
   // unhandled rejection. A socket that can't be sent on has failed: route it
   // through handleFailure, whose generation guard makes it a no-op if the
   // matching onclose got there first.
+  /**
+   * @param {FunctionCall[]} functionCalls
+   * @param {number} gen
+   */
   function runToolCallBatch(functionCalls, gen) {
     handleToolCallBatch(functionCalls, gen).catch((error) => handleFailure(gen, error));
   }
 
-  // details ({ attempt, maxAttempts, reason, fatal }) only accompany
-  // `reconnecting` and `failed`; the UI shows "attempt n of maxAttempts" and the
-  // reason. `fatal` marks a `failed` that Retry can't fix (the page's token
-  // request is rejected or the server is misconfigured), so the UI offers a
-  // reload instead.
+  // details (StatusDetails) only accompany `reconnecting` and `failed`; the UI
+  // shows "attempt n of maxAttempts" and the reason.
+  /**
+   * @param {SessionStatus} status
+   * @param {StatusDetails} [details]
+   */
   function setStatus(status, details) {
     onStatusChange?.(status, details);
   }
@@ -156,6 +243,7 @@ export function createLiveSession({
     session = null;
   }
 
+  /** @returns {Promise<string>} */
   async function fetchToken() {
     // Echoes the single-use nonce server/index.js embedded when it served
     // this page (docs/code-review-notes.md H1) — window.__DS_NONCE__ is set
@@ -163,21 +251,34 @@ export function createLiveSession({
     const nonce = window.__DS_NONCE__ ?? '';
     const res = await fetch(`/api/live-token?nonce=${encodeURIComponent(nonce)}`);
     if (!res.ok) {
+      /** @type {unknown} */
       const body = await res.json().catch(() => ({}));
-      const error = new Error(body.error || `Token request failed: ${res.status}`);
-      if (body.retryable === false) {
-        error.retryable = false;
-        error.reason = MISCONFIGURED_REASON;
+      const message = isRecord(body) && typeof body.error === 'string' ? body.error : '';
+      /** @type {TokenError} */
+      let error;
+      if (isRecord(body) && body.retryable === false) {
+        error = tokenError(message, res.status, false, MISCONFIGURED_REASON);
       } else {
-        error.retryable = isRetryableStatus(res.status);
-        if (!error.retryable) error.reason = RELOAD_REASON;
+        const retryable = isRetryableStatus(res.status);
+        error = tokenError(message, res.status, retryable, retryable ? undefined : RELOAD_REASON);
       }
       throw error;
     }
-    const { token } = await res.json();
-    return token;
+    /** @type {unknown} */
+    const body = await res.json();
+    // Checked rather than trusted: a missing token used to reach
+    // `new GoogleGenAI` outside openSession's try, so the attempt rejected
+    // unhandled and the status sat at `connecting` instead of retrying.
+    if (!isRecord(body) || typeof body.token !== 'string') {
+      throw tokenError('The token response had no token.', res.status, true);
+    }
+    return body.token;
   }
 
+  /**
+   * @param {LiveServerMessage} message
+   * @param {number} gen
+   */
   function handleMessage(message, gen) {
     // The server answering (setupComplete is its first message) is what
     // proves the session healthy — not onopen, which only proves the socket
@@ -216,6 +317,10 @@ export function createLiveSession({
   // a still-pending live.connect() or an in-flight tool batch from it) is
   // ignored; the reconnectTimer guard additionally keeps at most one retry
   // scheduled (the other half of B2, and M2's never-cleared timers).
+  /**
+   * @param {number} gen
+   * @param {unknown} error Anything a failed attempt threw, or the socket's Error.
+   */
   function handleFailure(gen, error) {
     if (manuallyClosed || gen !== generation) return;
     generation += 1;
@@ -224,7 +329,7 @@ export function createLiveSession({
     // had its handle rejected (expired, or from a session the server dropped).
     // Retrying with it would fail the same way every time, so start fresh.
     if (attemptResumed && !serverAnswered) resumeHandle = null;
-    if (error?.retryable === false) {
+    if (isTokenError(error) && !error.retryable) {
       setStatus('failed', {
         attempt,
         maxAttempts: MAX_ATTEMPTS,
@@ -241,7 +346,11 @@ export function createLiveSession({
     attempt += 1;
     // `reconnecting`, not `failed`, while a retry is still coming — the old
     // build reported `failed` here and then silently recovered.
-    setStatus('reconnecting', { attempt, maxAttempts: MAX_ATTEMPTS, reason: error?.message });
+    setStatus('reconnecting', {
+      attempt,
+      maxAttempts: MAX_ATTEMPTS,
+      reason: error instanceof Error ? error.message : undefined,
+    });
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null;
       openSession();
@@ -266,6 +375,7 @@ export function createLiveSession({
     serverAnswered = false;
     attemptResumed = false;
 
+    /** @type {string} */
     let token;
     try {
       token = await fetchToken();
@@ -332,6 +442,7 @@ export function createLiveSession({
     }
   }
 
+  /** @param {string} base64Frame */
   function sendAudioFrame(base64Frame) {
     if (session) {
       sendFrame(base64Frame);

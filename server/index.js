@@ -7,6 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI } from '@google/genai';
 
+/** @import { Request, Response } from 'express' */
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 const SANDBOX_HTML_PATH = path.join(__dirname, '../sandbox/index.html');
@@ -36,10 +38,14 @@ app.use(compression());
 // that needs a reload, which is an acceptable bar for this project's scope.
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-const requestLog = new Map(); // ip -> { count, windowStart }
+// req.ip is undefined only for a socket that's already gone; such requests
+// share one bucket rather than skipping the limit.
+/** @type {Map<string | undefined, { count: number, windowStart: number }>} */
+const requestLog = new Map();
 
 const NONCE_TTL_MS = 60 * 60_000; // 1 hour — long enough for a real demo session
-const nonces = new Map(); // nonce -> expiresAt
+/** @type {Map<string, number>} nonce -> expiresAt */
+const nonces = new Map();
 
 function issueNonce() {
   const now = Date.now();
@@ -51,11 +57,14 @@ function issueNonce() {
   return nonce;
 }
 
+/** @param {unknown} nonce The raw query value: a string, an array, an object or absent. */
 function isValidNonce(nonce) {
-  if (!nonce || !nonces.has(nonce)) return false;
-  return Date.now() <= nonces.get(nonce);
+  if (typeof nonce !== 'string') return false;
+  const expiresAt = nonces.get(nonce);
+  return expiresAt !== undefined && Date.now() <= expiresAt;
 }
 
+/** @param {Request} req */
 function isSameOrigin(req) {
   const expected = `${req.protocol}://${req.get('host')}`;
   const origin = req.get('origin');
@@ -75,6 +84,7 @@ function isSameOrigin(req) {
   }
 }
 
+/** @param {Request} req */
 function isRateLimited(req) {
   const now = Date.now();
   const entry = requestLog.get(req.ip);
@@ -135,6 +145,10 @@ app.get('/api/live-token', async (req, res) => {
 // process anyway.
 const SANDBOX_HTML = fs.readFileSync(SANDBOX_HTML_PATH, 'utf8');
 
+/**
+ * @param {Request} req
+ * @param {Response} res
+ */
 function sendSandbox(req, res) {
   res.type('html').send(SANDBOX_HTML.replace('%%DS_NONCE%%', issueNonce()));
 }

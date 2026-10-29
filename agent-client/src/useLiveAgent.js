@@ -3,6 +3,23 @@ import { createLiveSession } from './liveSession.js';
 import { startCapture, createPlayer } from './audioIO.js';
 import { decodeOutputChunk } from './pcm.js';
 
+/** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails, TranscriptEntry } from './liveSession.js' */
+
+/**
+ * `idle` until the first connect; then whatever the session last reported.
+ * @typedef {'idle' | SessionStatus} AgentStatus
+ */
+/**
+ * @typedef {object} LiveAgent
+ * @property {AgentStatus} status
+ * @property {StatusDetails | null} details Set with `reconnecting` and `failed` only.
+ * @property {TranscriptEntry[]} transcript Every line so far, in order.
+ * @property {Error | null} micError Why the mic couldn't start, until the next connect.
+ * @property {() => Promise<void>} connect Starts mic, playback and the session.
+ * @property {() => void} disconnect
+ * @property {() => Promise<void>} retry The same as connect.
+ */
+
 // Glue: wires liveSession + audioIO into React state. `bridge` is the page-
 // lifetime channel from main.jsx; this hook passes it on and never closes it.
 // The session is created lazily on the first connect() and reused across
@@ -13,15 +30,24 @@ import { decodeOutputChunk } from './pcm.js';
 //
 // connect/disconnect are plain functions, not useCallback: the React Compiler
 // covers memoization.
+/**
+ * @param {LiveSessionOptions['bridge']} bridge
+ * @returns {LiveAgent}
+ */
 export function useLiveAgent(bridge) {
-  // details ({ attempt, maxAttempts, reason }) come with `reconnecting` and
-  // `failed`; kept with the status so the two can never disagree.
-  const [connection, setConnection] = useState({ status: 'idle', details: null });
-  const [transcript, setTranscript] = useState([]);
-  const [micError, setMicError] = useState(null);
-  const sessionRef = useRef(null);
-  const captureRef = useRef(null);
-  const playerRef = useRef(null);
+  // details come with `reconnecting` and `failed`; kept with the status so
+  // the two can never disagree.
+  const [connection, setConnection] = useState(
+    /** @type {{ status: AgentStatus, details: StatusDetails | null }} */ ({
+      status: 'idle',
+      details: null,
+    }),
+  );
+  const [transcript, setTranscript] = useState(/** @type {TranscriptEntry[]} */ ([]));
+  const [micError, setMicError] = useState(/** @type {Error | null} */ (null));
+  const sessionRef = useRef(/** @type {LiveSession | null} */ (null));
+  const captureRef = useRef(/** @type {ReturnType<typeof startCapture> | null} */ (null));
+  const playerRef = useRef(/** @type {ReturnType<typeof createPlayer> | null} */ (null));
 
   function stopAudio() {
     captureRef.current?.stop();

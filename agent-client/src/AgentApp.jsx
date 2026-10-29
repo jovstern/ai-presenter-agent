@@ -3,8 +3,16 @@ import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import * as knowledgeStore from './knowledgeStore.js';
 
+/** @import { BridgeChannel } from './bridgeChannel.js' */
+/** @import { StatusDetails } from './liveSession.js' */
+/** @import { AgentStatus, LiveAgent } from './useLiveAgent.js' */
+
 // Minimal status wording from the spec's Screens table; the designed card
 // (orb, Talk/End, toast) is M7.
+/**
+ * @param {AgentStatus} status
+ * @param {StatusDetails | null} details
+ */
 function statusText(status, details) {
   switch (status) {
     case 'connecting':
@@ -25,6 +33,12 @@ function statusText(status, details) {
 // to hang up, including during a reconnect's backoff. A fatal failure (the
 // page's token is rejected, or the server is misconfigured) can't be fixed by
 // Retry, so it offers a reload instead.
+/**
+ * @param {AgentStatus} status
+ * @param {StatusDetails | null} details
+ * @param {Pick<LiveAgent, 'connect' | 'disconnect' | 'retry'>} agent
+ * @returns {{ label: string, onClick: () => void }}
+ */
 function primaryAction(status, details, { connect, disconnect, retry }) {
   switch (status) {
     case 'connecting':
@@ -44,6 +58,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 // getUserMedia rejects with NotAllowedError when the permission is blocked,
 // which the viewer can fix; anything else (no device, device busy) can't be
 // fixed from here, so it is reported as it is.
+/** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
     return 'Microphone blocked — allow it in the address bar, then press Connect.';
@@ -51,6 +66,10 @@ function micErrorText(error) {
   return `Microphone unavailable: ${error.message || String(error)}`;
 }
 
+/**
+ * @param {{ bridge: BridgeChannel, portalContainer: HTMLElement }} props
+ *   `portalContainer` keeps Radix portals inside the shadow root (main.jsx).
+ */
 export function AgentApp({ bridge, portalContainer }) {
   const agent = useLiveAgent(bridge);
   const { status, details, transcript, micError } = agent;

@@ -101,7 +101,11 @@ Language: JS with checkJs (ADR 0002).
 | eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals |
 | eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) |
 | prettier | root | format gate (R8): one formatter for every package and the static dirs |
-| typescript, @types/node, @types/express, @types/supertest | both packages | `tsc -p jsconfig.json` checkJs (R9) |
+| typescript (7.x) | both packages | `tsc -p jsconfig.json` checkJs (R9, ADR 0002) |
+| @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies |
+| @types/node, @types/express | server | Node and Express types for checkJs (R9) |
+| @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) |
+| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) |
 | pino, pino-http | server | structured logs (metrics skill) |
 | helmet | server | security headers and CSP (H1 remainder) |
 | supertest, vitest | server | token-gate tests (R10) |

@@ -65,12 +65,14 @@ and starts the server in one step.
 
 ```bash
 npm install     # at the repo root, once: Prettier
-npm run check   # Prettier check, then lint + tests + build in agent-client, lint in server
+npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
+                # lint + typecheck in server
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 8 files, 76 tests
+npm test        # vitest: 10 files, 84 tests
 npm run lint    # ESLint: agent-client plus sandbox/bridge.js
+npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
 ```
 
@@ -78,13 +80,18 @@ The suite in `agent-client/src/__tests__/`:
 
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
   per drop, superseded connects, in-order tool batches, resumption without re-greeting, the
-  `reconnecting` → `failed` sequence, the loop guard, `dispose()`.
+  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard,
+  `dispose()`.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
-  own page and reports a page that never loads as a failure; replies survive a later patch of
-  `MessagePort.prototype.postMessage`.
+  own page and reports a page that never loads as a failure; `fill` refuses an element that
+  isn't a text input; replies survive a later patch of `MessagePort.prototype.postMessage`.
+- `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
+  `src/bridgeProtocol.js`, and both list the spec's six message types.
+- `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
+  inherited names (`toString`) get none.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.

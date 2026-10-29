@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node index.js",
     "lint": "eslint .",
-    "check": "npm run lint"
+    "typecheck": "tsc -p jsconfig.json",
+    "check": "npm run lint && npm run typecheck"
   },
   "keywords": [],
   "author": "",
@@ -20,7 +21,11 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/compression": "^1.8.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.19.2",
     "eslint": "^10.13.0",
-    "globals": "^17.13.0"
+    "globals": "^17.13.0",
+    "typescript": "^7.0.2"
   }
 }

@@ -135,6 +135,37 @@ describe('sandbox/bridge.js navigate', () => {
   });
 });
 
+describe('sandbox/bridge.js fill', () => {
+  it('types into an input and reports success', async () => {
+    frame.doc.body.innerHTML = '<input data-testid="name-input" />';
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({
+      type: 'action',
+      id: 'f1',
+      action: 'fill',
+      args: ['name-input', 'Ada'],
+    });
+
+    expect(await result).toEqual({ type: 'action-result', id: 'f1', success: true });
+    expect(frame.doc.querySelector('input').value).toBe('Ada');
+  });
+
+  // Found by the checkJs pass: an element without `value` got an expando and a
+  // success reply while nothing on the page changed.
+  it('reports failure for an element that is not a text input', async () => {
+    frame.doc.body.innerHTML = '<div data-testid="card"></div>';
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f2', action: 'fill', args: ['card', 'Ada'] });
+
+    expect(await result).toEqual({
+      type: 'action-result',
+      id: 'f2',
+      success: false,
+      error: 'data-testid="card" is not a text input',
+    });
+  });
+});
+
 describe('sandbox/bridge.js channel', () => {
   it('keeps replying on the port when MessagePort.prototype.postMessage is patched after load', async () => {
     const tap = vi.fn();

@@ -2,14 +2,21 @@ import { useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 import * as knowledgeStore from './knowledgeStore.js';
 
+/** @import { ChangeEvent } from 'react' */
+
+/**
+ * @param {{ open: boolean, onOpenChange: (open: boolean) => void, portalContainer: HTMLElement }} props
+ */
 export function KnowledgeModal({ open, onOpenChange, portalContainer }) {
   const [files, setFiles] = useState(() => knowledgeStore.listFiles());
   const [rules, setRulesState] = useState(() => knowledgeStore.getRules());
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(/** @type {string | null} */ (null));
   const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef(null);
+  const fileInputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
 
+  /** @param {FileList | null} fileList */
   async function handleFiles(fileList) {
+    if (!fileList) return;
     setError(null);
     for (const file of fileList) {
       const result = await knowledgeStore.addFile(file);
@@ -21,11 +28,13 @@ export function KnowledgeModal({ open, onOpenChange, portalContainer }) {
     setFiles(knowledgeStore.listFiles());
   }
 
+  /** @param {string} id */
   function handleRemove(id) {
     knowledgeStore.removeFile(id);
     setFiles(knowledgeStore.listFiles());
   }
 
+  /** @param {ChangeEvent<HTMLTextAreaElement>} e */
   function handleRulesChange(e) {
     const text = e.target.value;
     setRulesState(text);

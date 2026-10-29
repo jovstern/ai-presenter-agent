@@ -412,6 +412,22 @@ describe('createLiveSession', () => {
     expect(live.calls).toHaveLength(1);
   });
 
+  // Found by the checkJs pass: the token went unchecked into `new GoogleGenAI`,
+  // which sits outside openSession's try, so a throw there left the status at
+  // `connecting` with an unhandled rejection instead of retrying.
+  it('treats a 200 token response without a token as a retryable failure', async () => {
+    fetchMock.mockImplementationOnce(async () => tokenResponse(200, {}));
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(statusNames()).toEqual(['connecting', 'reconnecting']);
+    expect(statuses.at(-1).reason).toBe('The token response had no token.');
+    // Only the immediate retry, with a real token, reached live.connect.
+    expect(live.calls.map((call) => call.options.apiKey)).toEqual(['ephemeral-token']);
+  });
+
   it('dispose() unsubscribes everything and closes the session, but never the bridge channel', async () => {
     const { liveSession, bridge } = setup();
     const call = await connectAndEstablish(liveSession);

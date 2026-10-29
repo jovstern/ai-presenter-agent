@@ -450,6 +450,12 @@ rest.
 
 ### [ ] M5 — `fill` only works for `<input>`
 
+> Partly addressed. The rebuilt `sandbox/bridge.js` `fill` sets `el.value` directly, which covers
+> `<input>`, `<textarea>` and `<select>`. Since M5 T2 (checkJs) it replies `{success:false}` for an
+> element with no `value` instead of reporting success while nothing changed
+> (`agent-client/src/__tests__/bridge.test.js`). Still open: `contenteditable`, and the
+> native-setter trick a framework's controlled input would need.
+
 `bridge.js:136-138` hardcodes the `HTMLInputElement.prototype` value setter. Wrong for
 `<textarea>` and `<select>`; `contenteditable` unsupported. Fine for the current mock — worth a
 one-line note in the bridge that this is input-only for now. If generalised: pick the setter by

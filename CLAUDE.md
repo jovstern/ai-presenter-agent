@@ -18,7 +18,7 @@ that holds only Prettier and the cross-package scripts:
   case. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
   (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
   script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
-  `npm run lint`, `npm run check` (lint + test + build).
+  `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck + test + build).
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested.
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
@@ -32,11 +32,15 @@ that holds only Prettier and the cross-package scripts:
     with the designed card in M7 (issue #11).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`.
+  - `bridgeProtocol.js` — types only: the bridge messages as JSDoc `@typedef`s. `sandbox/bridge.js`
+    holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
+    they drift, so edit both together.
 - `server/` (npm) — Node/Express. Mints short-lived Gemini Live tokens (`/api/live-token`, gated
   on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories,
   gzipped (`compression`). Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port
   `PORT` or 3000.
-  `npm start`, `npm run lint`, `npm run check` (lint only until M5 T3 adds tests). Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
+  `npm start`, `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck; tests
+  arrive in M5 T3). Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots). No build step.
 - `target-app/` (static) — 2-page mock app used as the demo target. No build step.
@@ -55,8 +59,14 @@ Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` 
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
 importing `useMemo`/`useCallback`/`memo`. agent-client's config also lints `sandbox/*.js` and
 any `target-app/**/*.js` as classic browser scripts, so its `lint` script runs from the repo
-root (ESLint 10 ignores files outside the base path). Typecheck (`checkJs`) is not configured
-yet: M5 T2 adds it ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)).
+root (ESLint 10 ignores files outside the base path).
+
+Typecheck is `checkJs` + `strict` on plain JS with JSDoc types
+([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)): `npm run typecheck` in each package
+runs `tsc -p jsconfig.json` (TypeScript 7; plain `tsc` ignores `jsconfig.json`).
+agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`) and
+`src/globals.d.ts` (window globals such as `__DS_NONCE__`); it excludes `src/__tests__/` for
+now. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
 
 ## Docs map
 
@@ -96,8 +106,9 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   their npm commands (`npm install` included); the root only runs `check`, `format` and `dev`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 8 vitest files (76 tests): `bridge` (runs
-  `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `domSnapshotContext`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (84 tests): `actionTools`,
+  `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
+  `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
   Library). `server/` has none yet; the bridge's real-browser handshake test arrives with the M5
   e2e. Follow the existing vitest pattern when adding
