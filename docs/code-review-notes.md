@@ -1,21 +1,28 @@
 # Code review notes — a senior FE pass over v2
 
+> **Read this first (M4 T5):** the `file:line` references in the original items below
+> (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
+> point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
+> code instead. Status at a glance: B1–B4, H2–H5, M2–M4, L9 and L12 are done; H1 waits for the CSP
+> in M5; the rest are open.
+
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
 > `project-knowledge-handoff.md` §3.3 already owns (live loop never run, resumption field names
 > inferred, no bridge-validation test, untuned snapshot cap, `ScriptProcessorNode`, no deploy
 > story) — those aren't repeated here.
 >
-> Each item has a checkbox. Tick the ones worth doing; leave the rest. Nothing here has been
-> changed in the code — this doc is the only thing added.
+> Each item has a checkbox. Tick the ones worth doing; leave the rest. *(Historical, the original
+> reviewer's framing: "Nothing here has been changed in the code — this doc is the only thing
+> added." The code has changed since; see the editorial notes and each item's "Fixed" note.)*
 >
 > **Editorial note (added afterward, not by the original reviewer):** H5 is now half-stale. Point
 > 1 (diff computed but discarded, contradicting spec §5.3) was fixed by introducing
 > `domSnapshotContext.js` — the client now sends a full keyframe or a compact delta, decided
 > explicitly. Point 2 (no `MutationObserver`) was fixed the same way this review independently
 > suggested — a debounced observer, reattached on every iframe load, replacing the fixed
-> post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) is still open. Left the checkbox
-> and severity as this reviewer wrote them; just don't read H5 as fully open anymore.
+> post-action `setTimeout`. Point 3 (no `hidden`/visibility flag) was closed in M4, and H5 is now
+> ticked.
 >
 > **Editorial note (M1 rebuild, GitHub issue #1 / PR #6):** the file paths below (`bridge.js`,
 > `actionTools.js`, a 294-line `useLiveAgent.js`) no longer exist — the whole implementation was
@@ -29,18 +36,28 @@
 >   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
 > - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
 >   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
-> - **H1** (open token-vending endpoint) — **partially** fixed. `server/index.js` gates
->   `/api/live-token` on same-origin (checked against `Origin`, falling back to `Referer` since
->   Chrome's `fetch()` omits `Origin` on same-origin requests — confirmed against this exact
->   endpoint; a request with neither header, e.g. curl, is rejected) and rate-limits per IP. Still
->   doesn't close the co-resident-script vector H1 actually describes — a hostile script already
->   running on this origin can forge both headers trivially. That needs a short-TTL nonce embedded
->   in the sandbox page and echoed back by the client — `sandbox/` exists as of M3, but nothing
->   binds a nonce to it yet, since there's no live session to bind against until the bridge is
->   actually wired to tool-calling. Still open, tracked for M4.
+> - **H1** (open token-vending endpoint) — partly mitigated; open until the M5 CSP (#13). `server/
+>   index.js` gates `/api/live-token` on same-origin (`Origin`, falling back to `Referer` since
+>   Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per IP, and now (M4)
+>   also requires a nonce that `sandbox/index.html` embeds at serve time (`window.__DS_NONCE__`,
+>   templated in by the server) and `liveSession.js` echoes back as a query param. This closes the
+>   cross-origin-frame/other-window vector cleanly. It does **not** close the co-resident-script
+>   vector H1 actually describes — a hostile script already running on this origin can read
+>   `window.__DS_NONCE__` off the page exactly like `agent-client` does. What the nonce actually
+>   buys against that script: a request must come from a script that loaded on this exact page, not
+>   an arbitrary cross-origin/cross-frame caller. This residual gap is inherent to the "hostile
+>   script running on the same origin" threat model, not a missing implementation step — closing it
+>   fully would need isolating the clone from the agent (e.g. a separate origin/sandboxed iframe for
+>   the clone), out of scope for this rebuild.
 >
-> B3, B4, and everything else below remain open or not yet applicable (e.g. B3's re-greet-on-
-> navigation bug has no iframe/navigation to trigger it yet in this rebuild).
+>   **Deviated from H1's original wording**: the nonce is reusable within a 1-hour TTL, not
+>   single-use. A live Gemini token is itself single-use + 60s, so a real conversation fetches a
+>   fresh one on every connect *and* every reconnect (network drop, session-cap resumption). A
+>   single-use nonce made every reconnect after the first fail with a 403 — caught while testing
+>   B2's reconnect path in a real browser, not a theoretical concern.
+>
+> At the time of M1, B3, B4 and everything else were still open; M4 closed B3, B4, H4 and H5 (see
+> each item's "Fixed" note).
 >
 > Severity: **Blocker** = likely broken or conspicuously missing the first time it runs for real ·
 > **High** = correctness / security / core UX · **Medium** = will bite eventually · **Low** = polish.
@@ -49,7 +66,12 @@
 
 ## Blocker
 
-### [ ] B1 — The transcript log will always be empty
+### [x] B1 — The transcript log will always be empty
+
+> **Fixed (M1).** `liveSession.js`'s connect config sets `outputAudioTranscription: {}` and
+> `inputAudioTranscription: {}`; `handleMessage` forwards both as `onTranscript({ role, text })`,
+> and `AgentApp.jsx` renders them as agent/user lines. Fragments are not coalesced yet: each one
+> is its own line until the M7 card (#11).
 
 `useLiveAgent.js:248` connects with `responseModalities: [Modality.AUDIO]` and no transcription
 config. The Live API emits **one** response modality at a time; with audio-only and no
@@ -79,7 +101,15 @@ if (inp) appendTranscript("user", inp);
 Note both transcriptions stream in fragments — you'll want to coalesce consecutive same-role
 fragments into one bubble rather than pushing a new entry per fragment.
 
-### [ ] B2 — Reconnect multiplies the audio pipeline and leaks the old one
+### [x] B2 — Reconnect multiplies the audio pipeline and leaks the old one
+
+> **Fixed (M1 split, M4 T3/T4 tests).** Reconnect lives in `liveSession.js` and never touches the
+> mic: a drop retires the session's `generation`, so `onerror`+`onclose` collapse into one retry,
+> and the single `reconnectTimer` keeps at most one scheduled. Capture and playback (`audioIO.js`)
+> are owned by `useLiveAgent.js`, whose `connect()` stops any previous pipeline before starting
+> one. Covered by `liveSession.test.js` (one drop → exactly one reconnect; superseded connects)
+> and `useLiveAgent.test.jsx` (no stacked mic). PR #9 force-closed the socket in a real browser:
+> one token request, one reconnect.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -124,7 +154,12 @@ const scheduleReconnect = useCallback(() => {
 }, []);
 ```
 
-### [ ] B3 — The agent re-greets on every navigation
+### [x] B3 — The agent re-greets on every navigation
+
+> **Fixed (M4).** `sandbox/bridge.js` sends `navigated` on each new iframe document, and
+> `liveSession.js` only marks the next snapshot as a keyframe for it. The greeting is sent once,
+> from `openSession()`, for a fresh session only — not after navigation and not on a resumed
+> reconnect (`liveSession.test.js` checks the latter).
 
 `bridge.js:108-111` posts `{type:"ds-ready"}` on **every** iframe `load`, and the client's
 `ds-ready` handler (`useLiveAgent.js:93-103`) unconditionally injects
@@ -136,7 +171,12 @@ Fix: latch the greeting on the client (`greetedRef`), or have the bridge send `d
 the first load and a plain `ds-navigated` afterward. Subsequent loads should send only the
 page-context snapshot (which already happens via `diffAndSendSnapshot`).
 
-### [ ] B4 — There is no `systemInstruction` / persona
+### [x] B4 — There is no `systemInstruction` / persona
+
+> **Fixed (M4).** `liveSession.js`'s `SYSTEM_INSTRUCTION` sets the role, "only use a selector given
+> in a snapshot", and the say → act → confirm loop, and is passed as `systemInstruction` on every
+> connect. The greeting itself is still a one-line `sendClientContent` turn, sent once per fresh
+> session (see B3).
 
 The connect config (`useLiveAgent.js:246-258`) has no `systemInstruction`. The "Presenter Agent"
 has no standing guidance about: its role, that it must only use selectors it was explicitly handed,
@@ -195,7 +235,41 @@ Suggested, in rough order of value:
 - Add a short section to the handoff doc: *what the token + allowlist protect against, and what
   they explicitly don't* (a hostile same-origin script).
 
-### [ ] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
+> **Note (M4 T2):** the agent-client ↔ bridge traffic now runs on a private `MessageChannel`
+> ([ADR 0001](./adr/0001-private-bridge-channel.md)): one `ds-bridge-connect` handshake on
+> `window`, accepted first-only, then everything on the port, so passive `message` listeners no
+> longer see snapshots/results and forged `window` messages are ignored. It does not stop a
+> same-realm script that patches `MessagePort.prototype.postMessage`; since the M4 fix wave both
+> ends capture that method at load, which closes tampering after load. Residual risks: tampering
+> before load, and a hostile script that runs before the handshake and connects first.
+>
+> **Still open (M4 T5):** the endpoint half is done (`server/index.js`: same-origin check,
+> per-IP rate limit, page nonce — see the editorial note at the top). H1 stays unticked until the
+> CSP on the sandbox page lands in M5 (#13).
+
+### [x] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
+
+> **Fixed (M1 split + M4 T3 tests).** The hook was split as directed: `audioIO.js` owns capture and
+> playback (M1), `liveSession.js` owns the socket, reconnect, resumption, tool dispatch and
+> context injection, and `useLiveAgent.js` is glue with no `useCallback`s or `exhaustive-deps`
+> escape hatches. Since M4 T3, `agent-client/src/__tests__/liveSession.test.js` (23 tests, fake
+> `@google/genai/web` + stubbed token `fetch` + fake bridge, fake timers) covers: `onerror`+`onclose`
+> → exactly one reconnect (B2); a connect superseded during `live.connect()` or the token fetch;
+> a `[navigate, click]` batch dispatched in order (H4); no stale tool response after a mid-batch
+> reconnect; resumption with the handle and no re-greeting; the status sequence `connecting` →
+> `open` → `reconnecting` → `open` → … → `failed`; `reconnecting` (not `failed`) while a retry is
+> pending; the loop guard's 4th-call block; a manual connect after `failed` resetting the
+> attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
+> server message, not `onopen`); a 4xx token response failing at once with a reload reason while
+> 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
+> The M4 fix wave added: `open` reported on the first server message; a `retryable: false` 500
+> (missing key) failing at once, with `fatal` set for every non-retryable failure; a late
+> `onclose` after a manual disconnect staying `closed`; every (re)connect requesting a snapshot
+> and sending the next one as a keyframe; buffered connect-time audio flushed and capped at 20; the
+> loop guard reset on a manual connect; a rejected resumption handle dropped; and a throwing
+> `sendToolResponse` handled instead of becoming an unhandled rejection.
+> Since M4 T4, the hook has its own Testing Library tests (`useLiveAgent.test.jsx`).
+
 
 `useLiveAgent.js` (294 lines) owns the socket lifecycle, reconnect + resumption, mic capture,
 playback scheduling, tool dispatch, and context injection — and has no test coverage. The three
@@ -219,7 +293,11 @@ Direction: pull the machinery out of the hook.
 Then a jsdom test with a mock `liveSession` can drive `toolCall → dispatchAction → postMessage →
 (mock bridge) → result → sendToolResponse` and catch B2/H3/H4 regressions.
 
-### [ ] H3 — Barge-in / interruption is not handled
+### [x] H3 — Barge-in / interruption is not handled
+
+> **Fixed (M1).** `audioIO.js`'s `createPlayer()` keeps every scheduled source; `interrupt()` stops
+> them all and resets the timeline. `liveSession.js` calls `onInterrupted` on
+> `serverContent.interrupted`, which `useLiveAgent.js` wires to `player.interrupt()`.
 
 `serverContent.interrupted` is never read, and `playAudioChunk` (`useLiveAgent.js:149-163`)
 schedules `AudioBufferSourceNode`s without keeping references — nothing can stop them. When the
@@ -244,7 +322,12 @@ if (message.serverContent?.interrupted) {
 }
 ```
 
-### [ ] H4 — Tool calls run concurrently, not serialized
+### [x] H4 — Tool calls run concurrently, not serialized
+
+> **Fixed (M4).** `liveSession.js`'s `handleToolCallBatch` awaits each `bridge.dispatchAction` in
+> order and sends each `sendToolResponse` before the next call; a batch from a retired generation
+> stops instead of answering into a new session. `liveSession.test.js` covers the in-order
+> `[navigate, click]` batch and the mid-batch reconnect.
 
 `handleServerMessage` does `for (const fc of message.toolCall.functionCalls) handleToolCall(fc)`
 (`useLiveAgent.js:172-174`) with no `await` — `handleToolCall` is `async`. If the model emits
@@ -259,7 +342,13 @@ if (message.toolCall) {
 }
 ```
 
-### [ ] H5 — The snapshot diff is computed but discarded, and grounding barely refreshes
+### [x] H5 — The snapshot diff is computed but discarded, and grounding barely refreshes
+
+> **Fixed (M4), all three points.** (1) `domSnapshotContext.js` decides keyframe vs. delta and
+> `liveSession.js` sends what it decides (`domSnapshotContext.test.js`). (2) `sandbox/bridge.js`
+> runs a 250 ms-debounced `MutationObserver` on the iframe body, reattached on every new document,
+> so user clicks and async DOM changes re-ground the model too. (3) Each snapshot node carries a
+> `hidden` flag (`el.hidden`, `display: none` or `visibility: hidden`).
 
 Two issues in one area:
 
@@ -306,14 +395,27 @@ leans on. Options: a shared JSON imported by both (the bridge can be a module, o
 inline it), or at minimum a test asserting `actionTools.KNOWN_ROUTES` deep-equals the bridge's
 list.
 
-### [ ] M2 — Pending reconnect timers are never cleared
+### [x] M2 — Pending reconnect timers are never cleared
+
+> Fixed in M4 T4 (timer half landed with M4 T3): `liveSession.js` keeps the one pending retry in
+> `reconnectTimer`, and `teardown()` — run by every `openSession()`, `disconnect()` and `dispose()`
+> — clears it, so at most one retry is ever scheduled. There is no separate "retry now" path: the
+> hook's `retry` *is* `connect()`, which resets the attempts and supersedes any in-flight attempt
+> by generation, and the UI shows Retry only once the backoff has given up (`failed`); while
+> `reconnecting` the button is Disconnect, which cancels the pending retry.
 
 `retryNow` (`useLiveAgent.js:279-282`) and `scheduleReconnect` both schedule `connect` via
 `setTimeout` without storing the handle. Tapping "Reconnect" while a backoff retry is already
 pending gives you two concurrent connects (compounds B2). Store the id, clear it at the top of
 both functions.
 
-### [ ] M3 — Bridge action handlers aren't wrapped in try/catch
+### [x] M3 — Bridge action handlers aren't wrapped in try/catch
+
+> Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
+> The M4 fix wave closed the same class of gap for `navigate`: it used to report success when its
+> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 3.5 s
+> for a load of the requested path only and replies `{success:false, error:'The page did not finish
+> loading.'}` otherwise (`agent-client/src/__tests__/bridge.test.js`).
 
 `bridge.js:188-191` calls `handler(data.args)` directly. A throw inside `fill` / `click` (e.g. the
 `Object.getOwnPropertyDescriptor(...).set` lookup returning `undefined`) skips the
@@ -327,7 +429,17 @@ catch (err) { result = { success: false, detail: String(err?.message || err) }; 
 post({ type: "ds-action-result", id: data.id, ...result });
 ```
 
-### [ ] M4 — Leaks on unmount, not just on reconnect
+### [x] M4 — Leaks on unmount, not just on reconnect
+
+> Fixed in M4 T4: `useLiveAgent.js` has one unmount effect that calls the session's `dispose()`,
+> stops the capture (mic tracks + its `AudioContext`), closes the player's `AudioContext`, and nulls
+> the session ref so a remount — including StrictMode's mount → cleanup → mount — builds a new
+> session over the same page-lifetime bridge (whose channel is never closed). `connect()` stops any
+> previous capture and player first, so a double press or Retry never stacks a second mic, and
+> `failed` stops both too. `main.jsx` keeps the React root and unmounts it on a non-persisted
+> `pagehide`; there is no custom element any more (the host is a plain div), so no
+> `disconnectedCallback`. The rAF meter loop doesn't exist in this rebuild. Covered by
+> `agent-client/src/__tests__/useLiveAgent.test.jsx`.
 
 The unmount cleanup (`useLiveAgent.js:286-289`) stops mic tracks but never `close()`s the
 `AudioContext` and never cancels the `tickMeter` rAF loop (self-recursing, no handle).
@@ -422,17 +534,20 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 - [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
-- [ ] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
+- [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.
+  *Fixed (M4): `sandbox/bridge.js`'s `buildSnapshotNodes` names the field `tag`.*
 - [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
 - [ ] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.
-- [ ] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
+- [x] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
   operating on it").
+  *Fixed (M4 T5): `docs/sandbox-simulation.md` §2 now reads "sandbox"; the rewritten README no
+  longer had it.*
 
 ---
 

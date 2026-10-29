@@ -1,4 +1,7 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import compression from 'compression';
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,19 +9,52 @@ import { GoogleGenAI } from '@google/genai';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const SANDBOX_HTML_PATH = path.join(__dirname, '../sandbox/index.html');
 
 const app = express();
 
-// Partial fix for docs/code-review-notes.md H1 (open token vending machine):
-// gate on same-origin and rate-limit per IP. This does NOT close the
-// co-resident-script vector H1 describes (a hostile script running on this
-// same origin, e.g. inside the sandboxed clone) — that needs a short-TTL nonce
-// embedded in the sandbox page and echoed back by the client. sandbox/ exists
-// now (M3), but nothing binds a nonce to it yet — still tracked for M4, where
-// the bridge's action-dispatch messages get a real session to bind against.
+// Before every route: the agent-client bundle is ~620 kB raw and ~150 kB
+// gzipped, and serving it uncompressed made it the page's LCP bottleneck (M4
+// metrics, docs/metrics/m04.md: mobile LCP 4.26 s → 1.86 s with gzip).
+app.use(compression());
+
+// Fix for docs/code-review-notes.md H1 (open token vending machine): gate on
+// same-origin, rate-limit per IP, and require a nonce that sandbox/index.html
+// embeds at serve time and the client echoes back. This closes the
+// cross-origin-frame/other-window vector. It does NOT close the co-resident-
+// script vector H1 also describes — a hostile script already running on this
+// origin can read window.__DS_NONCE__ off the page just like agent-client
+// does. What the nonce actually buys: a request must come from a script that
+// loaded on *this* page, not an arbitrary cross-origin/cross-frame caller.
+//
+// Deliberately NOT single-use, despite H1's original wording: a live Gemini
+// token is itself single-use + 60s (below), so a real conversation fetches a
+// fresh one on every connect *and* every reconnect (network drop, session-
+// cap resumption). A single-use nonce made every reconnect after the first
+// fail with a 403 — caught by testing B2's reconnect path, not a theoretical
+// concern. Reusable within a generous TTL instead; a page open longer than
+// that needs a reload, which is an acceptable bar for this project's scope.
 const RATE_LIMIT_MAX = 30;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const requestLog = new Map(); // ip -> { count, windowStart }
+
+const NONCE_TTL_MS = 60 * 60_000; // 1 hour — long enough for a real demo session
+const nonces = new Map(); // nonce -> expiresAt
+
+function issueNonce() {
+  const now = Date.now();
+  for (const [key, expiresAt] of nonces) {
+    if (expiresAt < now) nonces.delete(key);
+  }
+  const nonce = crypto.randomUUID();
+  nonces.set(nonce, now + NONCE_TTL_MS);
+  return nonce;
+}
+
+function isValidNonce(nonce) {
+  if (!nonce || !nonces.has(nonce)) return false;
+  return Date.now() <= nonces.get(nonce);
+}
 
 function isSameOrigin(req) {
   const expected = `${req.protocol}://${req.get('host')}`;
@@ -59,10 +95,16 @@ app.get('/api/live-token', async (req, res) => {
     res.status(429).json({ error: 'Too many requests' });
     return;
   }
+  if (!isValidNonce(req.query.nonce)) {
+    res.status(403).json({ error: 'Missing, invalid, or expired nonce' });
+    return;
+  }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: 'GEMINI_API_KEY is not set on the server' });
+    // retryable:false tells the client not to burn its reconnect backoff on
+    // this: no amount of retrying (or reloading) sets the key.
+    res.status(500).json({ error: 'GEMINI_API_KEY is not set on the server', retryable: false });
     return;
   }
 
@@ -76,16 +118,31 @@ app.get('/api/live-token', async (req, res) => {
     });
     res.json({ token: token.name });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to mint live token', detail: err.message });
+    // A9 (assessment): the SDK's message can carry upstream request details, so it
+    // stays in the server log and the browser gets only the generic error.
+    console.error('[live-token] failed to mint live token:', err);
+    res.status(500).json({ error: 'Failed to mint live token' });
   }
 });
 
+// A1 (assessment): every URL that renders the sandbox page must go through the
+// nonce template, or the page ships the literal %%DS_NONCE%% and every
+// /api/live-token call 403s (see H1 above). Registered before
+// express.static('/sandbox') so static can never serve the untemplated file.
+// Express 5 routing is non-strict, so '/sandbox' matches both '/sandbox' and
+// '/sandbox/'; the page's asset URLs are absolute, so no redirect is needed.
+// Read once at startup: the file only changes on a deploy, which restarts the
+// process anyway.
+const SANDBOX_HTML = fs.readFileSync(SANDBOX_HTML_PATH, 'utf8');
+
+function sendSandbox(req, res) {
+  res.type('html').send(SANDBOX_HTML.replace('%%DS_NONCE%%', issueNonce()));
+}
+
+app.get(['/', '/sandbox', '/sandbox/index.html'], sendSandbox);
 app.use('/agent-client', express.static(path.join(__dirname, '../agent-client/dist')));
 app.use('/sandbox', express.static(path.join(__dirname, '../sandbox')));
 app.use('/target-app', express.static(path.join(__dirname, '../target-app')));
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../sandbox/index.html'));
-});
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT}`);

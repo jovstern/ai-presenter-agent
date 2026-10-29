@@ -36,24 +36,29 @@ rather than retrofit — this list is the actual build checklist for this repo:
 
 | # | v1 gap | v2 goal |
 |---|--------|---------|
-| 1 | `postMessage` bridge between agent and sandbox had no origin/token validation | Validate `event.origin` + `event.source`, and sign every message with the live session token |
+| 1 | `postMessage` bridge between agent and sandbox had no origin/token validation | One validated handshake (`event.origin` + `event.source`, first connect only), then all traffic on a private `MessageChannel`: invisible to passive `message` listeners and immune to forged `window` messages, though not to a script that patches `MessagePort.prototype.postMessage` before load ([ADR 0001](./adr/0001-private-bridge-channel.md)) |
 | 2 | Action-execution library lived on `window` — reachable directly, bypassing any message validation | Keep it in a closure only the message handler can call; never attach it to a global |
 | 3 | Action dispatch likely indexed an object by a string that ultimately traces back to model output | Explicit allowlist/switch over known action names before dispatch — never dynamic property access on untrusted input |
 | 4 | Agent sometimes hallucinated navigation targets that don't exist | Constrain *all* navigation (scripted flow steps **and** live/freeform decisions) to the same crawled-route allowlist — realized here as native Gemini function-calling with an enum of known pages, so the model literally cannot emit an unknown target |
 | 5 | Repetition loops (agent repeats a sentence/action) | Loop guard: cap consecutive identical actions/utterances, force escalation past the cap |
 | 6 | Dropped WebSocket/Live session was silent to the user (volume graph + mic just vanish) | Explicit reconnecting / failed states, with a manual retry affordance on final failure |
 | 7 | DOM grounding shape was informal / undocumented | Formal reduced snapshot: interactive/labeled nodes only, diffed against the last snapshot, size-capped |
-| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value |
-| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates |
+| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value. **Status:** lost in the from-scratch rebuild (no volume meter today); restored in M7 (#11) as the volume orb |
+| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates. **Status:** lost in the from-scratch rebuild; `renderIsolation.test.jsx` is restored in M7 (#11) |
 | 10 | Template edits' effect on already-created demo-agents was never verified | Out of scope for this build (no template/demo-agent model here) — documented for the full-product build later |
+
+> **Note (M4 T5):** goals #8 and #9 were built in the first v2 implementation and lost when it was
+> deleted and rebuilt from scratch. The current card has no volume meter and no render-count test;
+> both come back with the designed widget in M7 (issue #11).
 
 ## 3. Functional requirements (this build)
 
 - A **sandbox** page hosting an `<iframe>` pointing at the target-app, same-origin.
 - A **target-app**: a couple of static pages with a handful of labeled interactive elements
   (nav link, button, form) — the stand-in for a "cloned app."
-- An **agent-client**: a prebuilt script + custom element, mounted into a shadow root in the
-  sandbox, that connects directly to Gemini Live, converses by voice, and dispatches actions.
+- An **agent-client**: a prebuilt script that mounts itself into a shadow root (on a plain host
+  `<div>`) in the sandbox, connects directly to Gemini Live, converses by voice, and dispatches
+  actions.
 - A minimal **server**: mints a short-lived ephemeral token for Gemini Live (the only thing it
   does — see §5.4) and serves the static bundles.
 
@@ -71,16 +76,20 @@ flowchart LR
 
     Server -. ephemeral token, once .-> AgentClient
     AgentClient <-->|Live API: audio + tool calls| Gemini
-    AgentClient <-->|window.postMessage\norigin+token checked, allowlisted| Bridge
+    AgentClient <-->|private MessageChannel\n(one window handshake, then port only; allowlisted)| Bridge
     Bridge -->|direct DOM ops\n(same-origin, no 2nd postMessage needed)| Iframe
     Iframe -->|native iframe 'load' event\n+ DOM read on load/nav| Bridge
 ```
 
 Two independent bundles share one browser window: the **agent-client** (its own deployable unit,
 mounted in a shadow root) and the **sandbox bridge** (the host page's own script, holding the
-action library). They talk via `window.postMessage` even though they're same-origin and could in
-principle share a module — that's a deliberate decoupling choice carried over from v1, not an
-accident of iframe communication. See [`sandbox-simulation.md`](./sandbox-simulation.md) for the
+action library). They talk over a private `MessageChannel` even though they're same-origin and
+could in principle share a module — that's a deliberate decoupling choice carried over from v1,
+not an accident of iframe communication. The agent-client posts one `ds-bridge-connect`
+handshake to `window` at mount, transferring a port; the bridge accepts the first one only, and
+everything after travels on that port, out of sight of other scripts on the page
+([ADR 0001](./adr/0001-private-bridge-channel.md), which also records the residual risk of a
+script that connects first). See [`sandbox-simulation.md`](./sandbox-simulation.md) for the
 full mechanics of that bridge and why the iframe itself never gets a second postMessage hop.
 
 ### 4.1 Runtime sequence
@@ -96,22 +105,25 @@ sequenceDiagram
 
     U->>Sv: open /sandbox/
     Sv-->>U: sandbox HTML + bridge.js + agent-client.js
+    AC->>Br: window.postMessage {type:'ds-bridge-connect'} + [port] (once, at mount)
+    Br->>Br: accept first connect only (same origin + source, one port)
+    U->>AC: press Connect
     AC->>Sv: fetch ephemeral token
     Sv-->>AC: token (single-use)
     AC->>G: ai.live.connect(token, tools=[click,navigate,scroll,fill])
     IF->>Br: native "load" event (page ready)
     Br->>Br: read iframe DOM, build reduced snapshot
-    Br->>AC: postMessage {type:'ds-dom-snapshot', nodes}
+    Br->>AC: port {type:'navigated'}, then {type:'snapshot', full, changed, removed}
     AC->>G: sendClientContent (context turn, turnComplete:false)
     G-->>AC: "Hello" (audio) + greets
     U->>AC: mic audio
     AC->>G: sendRealtimeInput(audio)
     G-->>AC: toolCall {name:'click', args:{selector}}
-    AC->>Br: postMessage {type:'ds-action', action:'click', selector, token} (signed + allowlisted)
-    Br->>Br: validate origin+source+token, allowlist check
+    AC->>Br: port {type:'action', id, action:'click', args:[selector]}
+    Br->>Br: allowlist check, try/catch around the action
     Br->>IF: direct DOM op (same-origin)
     IF-->>Br: result
-    Br-->>AC: postMessage {type:'ds-action-result', success}
+    Br-->>AC: port {type:'action-result', id, success, error?}
     AC->>G: sendToolResponse({functionResponses:[{result}]})
 ```
 
@@ -131,9 +143,19 @@ needed; this is intentionally the simplest piece.
   client-side route change; noted in `sandbox-simulation.md`).
 - Owns the reduced DOM snapshot (see §5.3) and the action library — both live in a module closure,
   never on `window` (v2 goal #2).
-- Validates every inbound `ds-action` message: `event.origin` matches the sandbox's own origin,
-  the message carries the current session token, and the action name is in an explicit allowlist
-  before dispatch (v2 goals #1, #3).
+- Listens on `window` for one thing only: the first `ds-bridge-connect` whose `event.origin` is
+  the sandbox's own origin, whose `event.source` is the sandbox window itself, and which carries
+  exactly one port. Later connects are ignored. All other traffic (actions, results, snapshots,
+  `navigated`) goes over that private port, so passive `message` listeners never see it and
+  forged `window` messages are ignored (v2 goal #1, [ADR 0001](./adr/0001-private-bridge-channel.md)).
+  Both ends capture `MessagePort.prototype.postMessage` at load, so patching it later doesn't
+  reach the traffic. Residual risks: a script that patches it *before* load, and a hostile script
+  that runs before the agent-client's handshake and connects first; closing those needs another
+  origin (`code-review-notes.md` H1).
+- Checks every action name against an explicit allowlist before dispatch, and wraps each action
+  in try/catch so a throw still replies `{success:false, error}` (v2 goal #3).
+- Drops snapshots and `navigated` produced before the handshake; the agent-client asks for a
+  fresh snapshot once connected. On each iframe load it posts `navigated` before the snapshot.
 
 ### 5.3 DOM grounding snapshot
 
@@ -141,7 +163,7 @@ needed; this is intentionally the simplest piece.
   `data-testid`-based selector, visibility/enabled flag.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
 - The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
-  (changed/removed) against its last snapshot — cheap, same-process postMessage regardless of page
+  (changed/removed) against its last snapshot — cheap, same-process port message regardless of page
   size. The decision that actually costs tokens — whether to tell the *model* the whole page or
   just what changed — is made downstream, in `agent-client/src/domSnapshotContext.js`: a **full
   keyframe** on page navigation, when nothing's been sent yet, or when the delta covers most of
@@ -160,7 +182,8 @@ events go directly from the browser to Gemini Live.
 
 - Connects to Gemini Live with `tools` = function declarations for `click`, `navigate` (enum of
   known routes — closes v2 goal #4 directly), `scroll`, `fill`.
-- On a `toolCall` message: dispatch to the bridge via `postMessage`, await the correlated result,
+- On a `toolCall` message: dispatch to the bridge over the private channel, await the result
+  correlated by id (4 s timeout → failure),
   call `session.sendToolResponse()` with it. This action-result loop is the primary grounding
   signal — no screenshots.
 - Loop guard: caps consecutive identical action/utterance signatures; past the cap, injects a
@@ -169,13 +192,17 @@ events go directly from the browser to Gemini Live.
   on final failure, shows a visible failed state with a manual retry button (v2 goal #6).
 - Volume meter: volume value lives in a ref, bars update imperatively via `requestAnimationFrame`
   — no React state, no re-renders for that value at all (v2 goal #8, the "go further" option from
-  the deep-dive doc).
+  the deep-dive doc). Not in the current build: lost in the rebuild, restored in M7 (#11).
 
 ### 5.6 Testing
 
 - Render-count test on the sibling components (avatar image, transcript log) asserting their
-  render counts stay flat under a burst of simulated volume updates (v2 goal #9).
-- A unit test for the bridge's origin/token/allowlist validation — the exact gap v1 shipped with.
+  render counts stay flat under a burst of simulated volume updates (v2 goal #9). Lost in the
+  rebuild; restored in M7 (#11).
+- A test for the bridge's origin/source/allowlist validation — the exact gap v1 shipped with.
+  The agent side of the private channel is unit-tested today (`bridgeChannel.test.js`); the
+  test of `sandbox/bridge.js`'s handshake and allowlist arrives with the M5 e2e (#13,
+  `e2e/bridge.spec.js`).
 
 ## 6. Open questions
 

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentApp } from './AgentApp.jsx';
+import { connectBridge } from './bridgeChannel.js';
 
 const HOST_ID = 'ai-presenter-agent-host';
 
@@ -25,22 +26,25 @@ function mount() {
       border: 1px solid #ccc;
       border-radius: 8px;
       padding: 12px;
-      max-width: 320px;
+      box-sizing: border-box;
+      width: 320px;
+      max-width: calc(100vw - 32px);
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     }
-    .agent-app__status { margin-left: 8px; color: #666; }
-    .agent-app__mic-error { margin-top: 8px; color: #b3261e; font-size: 0.9em; }
+    .agent-app__status { display: block; margin-top: 8px; color: #666; }
+    .agent-app__mic-error, .agent-app__error { margin-top: 8px; color: #b3261e; font-size: 0.9em; }
     .agent-app__transcript { list-style: none; margin: 8px 0 0; padding: 0; max-height: 200px; overflow-y: auto; }
     .agent-app__line { margin-bottom: 4px; }
     .agent-app__line--agent { color: #1a1a1a; }
     .agent-app__line--user { color: #555; font-style: italic; }
     .agent-app__knowledge-btn { margin-left: 8px; }
-    .agent-app__knowledge-btn--empty { opacity: 0.5; box-shadow: 0 0 0 2px #b3261e inset; }
+    .agent-app__knowledge-btn--empty { box-shadow: 0 0 0 2px #b3261e inset; }
 
     .knowledge-modal__overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.4); }
     .knowledge-modal__content {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      background: #fff; border-radius: 8px; padding: 20px; width: 360px;
+      background: #fff; border-radius: 8px; padding: 20px;
+      box-sizing: border-box; width: min(360px, calc(100vw - 32px));
       max-height: 80vh; overflow-y: auto; font-family: system-ui, sans-serif;
     }
     .knowledge-modal__dropzone {
@@ -67,11 +71,29 @@ function mount() {
   const portalContainer = document.createElement('div');
   shadowRoot.appendChild(portalContainer);
 
-  createRoot(mountPoint).render(
+  // Connected once, here, and never closed: sandbox/bridge.js accepts only the
+  // first ds-bridge-connect for the page's lifetime (docs/adr/0001-private-bridge-channel.md),
+  // so a channel closed by session disposal, a StrictMode double effect or a
+  // remount could never be replaced. Connecting at mount rather than on the
+  // Connect click also keeps the window in which another script could claim
+  // the bridge first as small as possible.
+  const bridge = connectBridge();
+
+  // Kept so the tree can be unmounted, which runs useLiveAgent's cleanup
+  // (session disposed, mic stopped, AudioContexts closed — docs/code-review-notes.md M4).
+  const root = createRoot(mountPoint);
+  root.render(
     <StrictMode>
-      <AgentApp portalContainer={portalContainer} />
+      <AgentApp bridge={bridge} portalContainer={portalContainer} />
     </StrictMode>,
   );
+
+  // The host is a plain div that lives as long as the page, so the one real
+  // end of life is the page going away. Skipped when the page enters the
+  // back/forward cache (persisted), since it may be restored with the tree intact.
+  window.addEventListener('pagehide', (event) => {
+    if (!event.persisted) root.unmount();
+  });
 }
 
 if (document.readyState === 'loading') {

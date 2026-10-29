@@ -2,33 +2,46 @@
 
 A from-scratch rebuild of the runtime half of Demostack's AI Presenter Agent: a voice avatar
 (Gemini Live API) embedded in an iframe that both talks and acts (click/scroll/navigate/fill) on
-a target web app via a postMessage bridge. Not in scope: agent-creation UI, real RAG
+a target web app via a private MessageChannel bridge (ADR 0001). Not in scope: agent-creation UI, real RAG
 (chunking/embeddings — only a "RAG-lite" localStorage context-stuffing feature exists), the flow
 builder. See `docs/project-knowledge-handoff.md` for the full origin story and what was
 deliberately left out.
 
 ## Package layout
 
-No root package.json, no workspaces — four independent directories, each with its own commands:
+No root package.json, no workspaces — two npm packages and two static directories, each run
+on its own:
 
-- `agent-client/` — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`) wired
-  into `vite.config.js`'s `@vitejs/plugin-react` babel config — autocomplete/autocorrect for
-  memoization is the default going forward; don't add manual `useMemo`/`useCallback` for
-  render-perf reasons unless the compiler demonstrably can't cover the case. UI elements needing a
-  primitive (dialog, toast, dropdown, etc.) should default to Radix (`@radix-ui/react-*`), which
-  is already how `KnowledgeModal.jsx`/`Toast.jsx` are built — this is a going-forward convention
-  for new elements, not a mandate to refactor existing hand-rolled visualizations (`VolumeMeter`,
-  `TranscriptLog`). Builds to a single script mounted in a shadow root. `npm test` (vitest),
-  `npm run build`, `npm run watch`.
-- `server/` — Node/Express (migrated off Hono). Mints short-lived Gemini Live tokens, serves
-  static files for all three other packages. `npm start`. Its only hard requirement is the token
-  endpoint — the real `GEMINI_API_KEY` can't reach the browser — but static-file serving is
-  currently kept alongside it rather than split out (see `docs/project-knowledge-handoff.md`
-  §5.3 for the alternative of shrinking it to token-only).
-- `sandbox/` — host page: iframe + `bridge.js` (postMessage bridge + action library). No build step.
-- `target-app/` — static 2-page mock app used as the demo target. No build step.
+- `agent-client/` (npm) — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`)
+  wired into `vite.config.js`'s `@vitejs/plugin-react` babel config — don't add manual
+  `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't cover the
+  case. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
+  (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
+  script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`.
+  - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
+    dispatch, context injection. The riskiest file; unit-tested.
+  - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
+    playback, barge-in) into React state; owns teardown on unmount.
+  - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
+    ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
+  - `AgentApp.jsx` — a minimal card: one never-disabled Connect/Cancel/Disconnect/Retry/Reload
+    page button, a status line, an alert on `failed`, the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
+    `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
+    successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
+    with the designed card in M7 (issue #11).
+  - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
+    `knowledgeStore.js`.
+- `server/` (npm) — Node/Express. Mints short-lived Gemini Live tokens (`/api/live-token`, gated
+  on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories,
+  gzipped (`compression`). Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port
+  `PORT` or 3000.
+  `npm start`. Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
+- `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
+  DOM snapshots). No build step.
+- `target-app/` (static) — 2-page mock app used as the demo target. No build step.
 
-No lint or typecheck is configured anywhere in the repo.
+No lint or typecheck is configured yet (M5, issue #13, adds them; see
+[ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)).
 
 ## Docs map
 
@@ -37,38 +50,43 @@ No lint or typecheck is configured anywhere in the repo.
 - `docs/demostack-ai-presenter-agent.md` — build spec.
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
-- `docs/code-review-notes.md` — a living, severity-tagged (Blocker/High/Medium/Low) review
-  checklist with checkboxes: B1–B4, H1–H5, M1–M9, L1–L12, all still open and unchecked except
-  H5 points 1 & 2 (fixed by the two most recent commits, per an added editorial note — see
-  memory `active-review-items` for specifics). The single most serious item per the reviewer is
-  **B2**: reconnect leaks the old mic/audio pipeline and can race into two concurrent live
-  sessions. Update this doc in place when an item gets fixed; don't start a second tracking doc.
+- `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
+  M1–M9, L1–L12). Done: B1–B4, H2–H5, M2–M4, L9, L12. H1 waits for the CSP in M5; the rest are
+  open. Its original `file:line` references point at pre-rebuild code; each "Fixed" note names
+  the current location. Update it in place; don't start a second tracking doc.
+- `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
+  checking, 0003 hosting on Render.
+- `docs/superpowers/` — the `/build` cycle: `specs/assessment.md`, `specs/design.md` (the spec)
+  and `plans/plan.md` (milestones M4–M7 and their tasks).
 
 ## Active work area
 
-Recent development concentrates in `agent-client/src/useLiveAgent.js` and `sandbox/bridge.js`:
-DOM-state grounding (keyframe vs. delta snapshots) and Gemini Live session robustness (model
-verification, session resumption, MutationObserver-based action-completion detection replacing a
-fixed post-action timeout). `useLiveAgent.js` itself has zero test coverage (H2) and is called
-out as the riskiest file in the repo.
+Recent work concentrates in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
+grounding (keyframe vs. delta snapshots, a debounced `MutationObserver`), the private bridge
+channel, and Live session robustness (one reconnect per drop, `reconnecting`/`failed` status,
+session resumption, serialized tool calls). `liveSession.js` is the riskiest file and is covered
+by `liveSession.test.js`; `useLiveAgent.js` is thin glue with its own Testing Library tests.
 
 ## Note on origin knowledge
 
 `docs/project-knowledge-handoff.md` §1 describes the *original* Demostack product this rebuild is
 modeled on (team, data model, config UI) — it's explicitly "why decisions were made," not a
 description of this repo's own code. This rebuild deliberately excludes the agent-creation UI,
-template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) and §5.2 (Radix UI)
-are marked IMPLEMENTED — already built, not just planned.
+template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) is IMPLEMENTED;
+§5.2 (Radix UI) is implemented for the Dialog only, the toast returns in M7.
 
 ## Workflow notes
 
-- This is three separate npm roots, not a workspace — `cd` into the right package before running
-  npm commands.
-- When touching `useLiveAgent.js` or `bridge.js`, reconcile changes against
+- Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running npm
+  commands.
+- When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Test coverage is thin and uneven: `agent-client/__tests__/` has 4 vitest files
-  (`domSnapshotContext`, `knowledgeStore`, `loopGuard`, `renderIsolation`); `server/` and
-  `sandbox/` have none. Follow the existing vitest pattern when adding tests to `agent-client`.
+- Tests: `agent-client/src/__tests__/` has 8 vitest files (76 tests): `bridge` (runs
+  `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `domSnapshotContext`,
+  `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
+  Library). `server/` has none yet; the bridge's real-browser handshake test arrives with the M5
+  e2e. Follow the existing vitest pattern when adding
+  tests to `agent-client`.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
 
