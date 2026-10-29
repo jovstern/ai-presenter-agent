@@ -1,0 +1,14 @@
+{
+  "name": "ai-presenter-agent",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npm run format:check && npm --prefix agent-client run check && npm --prefix server run check",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "dev": "npm --prefix agent-client run build && npm --prefix server start"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.10"
+  }
+}

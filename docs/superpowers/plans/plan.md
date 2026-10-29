@@ -263,6 +263,9 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   The rest of `node-api.md` (a services/routes tree) is a recorded deviation, given a
   single-route server.
 - `GET /health`; `x-powered-by` off.
+- Moving the target-app inline scripts into `.js` files: add `target-app` to agent-client's
+  `lint` script (its `eslint.config.js` already matches `target-app/**/*.js`; T1 left it out
+  because ESLint errors on a path with no files).
 - Supertest tests, written first:
   - 403 cross-origin, and 403 without Referer/Origin;
   - 403 bad nonce;
@@ -278,6 +281,7 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 *(medium, 20 min)*
 
 **T4 — Deterministic Playwright e2e (R11).**
+- Adds the root `e2e` script (T1 left it out rather than ship a placeholder).
 - Root `playwright.config.js` starts the server on a free port with a dummy key.
 - `e2e/fixtures.js` fails a test on any console error or page error.
 - `e2e/bridge.spec.js` runs on a fixture sandbox page served through `page.route`. The page

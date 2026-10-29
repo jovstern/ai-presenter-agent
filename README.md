@@ -28,8 +28,8 @@ agent-client/    npm package: the React app built into a single script, mounted 
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
 ```
 
-Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`);
-there is no root `package.json`.
+Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
+and a thin root `package.json` (no workspaces) holding Prettier and the cross-package scripts.
 
 ## Run it
 
@@ -58,11 +58,19 @@ lost for good, or Reload page when retrying can't help (the reason shows under t
 line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
+After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
+and starts the server in one step.
+
 ## Test
 
 ```bash
+npm install     # at the repo root, once: Prettier
+npm run check   # Prettier check, then lint + tests + build in agent-client, lint in server
+npm run format  # Prettier write
+
 cd agent-client
 npm test        # vitest: 8 files, 76 tests
+npm run lint    # ESLint: agent-client plus sandbox/bridge.js
 npm run build   # single-file IIFE bundle in agent-client/dist/
 ```
 

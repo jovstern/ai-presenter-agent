@@ -9,15 +9,16 @@ deliberately left out.
 
 ## Package layout
 
-No root package.json, no workspaces — two npm packages and two static directories, each run
-on its own:
+Two npm packages and two static directories, plus a thin root `package.json` (no workspaces)
+that holds only Prettier and the cross-package scripts:
 
 - `agent-client/` (npm) — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`)
   wired into `vite.config.js`'s `@vitejs/plugin-react` babel config — don't add manual
   `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't cover the
   case. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
   (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
-  script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`.
+  script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
+  `npm run lint`, `npm run check` (lint + test + build).
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested.
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
@@ -35,13 +36,27 @@ on its own:
   on same-origin, a per-IP rate limit and a page nonce) and serves the other three directories,
   gzipped (`compression`). Serves the nonce-templated sandbox page at `/` and `/sandbox/`, port
   `PORT` or 3000.
-  `npm start`. Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
+  `npm start`, `npm run lint`, `npm run check` (lint only until M5 T3 adds tests). Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots). No build step.
 - `target-app/` (static) — 2-page mock app used as the demo target. No build step.
 
-No lint or typecheck is configured yet (M5, issue #13, adds them; see
-[ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)).
+## Commands and gates
+
+From the repo root (run `npm install` there once for Prettier):
+
+- `npm run check` — Prettier check, then each package's `check` via `npm --prefix`. The gate
+  before every commit.
+- `npm run format` — Prettier write (`.prettierrc.json`; Markdown, lockfiles and `dist/` are
+  ignored in `.prettierignore`).
+- `npm run dev` — build agent-client, then start the server.
+
+Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
+`globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
+importing `useMemo`/`useCallback`/`memo`. agent-client's config also lints `sandbox/*.js` and
+any `target-app/**/*.js` as classic browser scripts, so its `lint` script runs from the repo
+root (ESLint 10 ignores files outside the base path). Typecheck (`checkJs`) is not configured
+yet: M5 T2 adds it ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)).
 
 ## Docs map
 
@@ -77,8 +92,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
 
 ## Workflow notes
 
-- Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running npm
-  commands.
+- Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running
+  their npm commands (`npm install` included); the root only runs `check`, `format` and `dev`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
 - Tests: `agent-client/src/__tests__/` has 8 vitest files (76 tests): `bridge` (runs

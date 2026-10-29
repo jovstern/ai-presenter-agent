@@ -98,8 +98,9 @@ Language: JS with checkJs (ADR 0002).
 
 | Package | Where | Why |
 |---|---|---|
-| eslint, @eslint/js, eslint-plugin-react-hooks, globals | both packages | lint gate (R8) |
-| prettier | root | format gate (R8) |
+| eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals |
+| eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) |
+| prettier | root | format gate (R8): one formatter for every package and the static dirs |
 | typescript, @types/node, @types/express, @types/supertest | both packages | `tsc -p jsconfig.json` checkJs (R9) |
 | pino, pino-http | server | structured logs (metrics skill) |
 | helmet | server | security headers and CSP (H1 remainder) |
