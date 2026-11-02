@@ -66,9 +66,13 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`).
-- **Loop guard** — stops the model repeating the same action: past three identical **action
-  signatures** (tool name + arguments) in a row, the call is refused and the model is told to
-  try something else (`agent-client/src/loopGuard.js`).
+- **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
+  **action signature** (tool name + normalised arguments) that is the 4th identical one in a
+  row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
+  try something else. An **agent turn** (its transcription fragments up to `turnComplete`)
+  whose normalised sentence fills 3 of the last 5 turns is an **utterance loop**: `liveSession`
+  sends one **corrective turn** per episode, which ends when the agent says something else or
+  the user speaks. Reset on every manual connect.
 
 ## Knowledge
 

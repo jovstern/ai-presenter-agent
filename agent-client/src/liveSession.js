@@ -122,6 +122,10 @@ const SYSTEM_INSTRUCTION =
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
+// Sent once per utterance-loop episode (loopGuard.checkUtterance).
+const CORRECTIVE_TURN =
+  'You are repeating yourself. Stop, say one short sentence to the user and wait for them.';
+
 // Wraps ai.live.connect: owns the WebSocket lifecycle, reconnect + session
 // resumption. Deliberately knows nothing about the microphone — reconnects
 // never touch audio capture, which is what caused the old build's reconnect
@@ -209,6 +213,37 @@ export function createLiveSession({
   const snapshotContext = createDomSnapshotContext();
   const loopGuard = createLoopGuard();
 
+  // The utterance half of the loop guard (docs/code-review-notes.md M6). Live
+  // streams the agent's speech as outputTranscription fragments and ends each
+  // turn with turnComplete, so a turn is the fragments in between, checked
+  // once complete; an interrupted turn is dropped unchecked, and the user's
+  // own transcription ends any loop episode. A loop gets one corrective turn,
+  // which prompts a reply (turnComplete true): like a snapshot, it can't sit
+  // between a function call and its response, so while a tool batch runs it
+  // waits for the batch's end. A drop discards both: they belong to the dead
+  // session.
+  let agentTurn = '';
+  let correctivePending = false;
+
+  function sendCorrective() {
+    correctivePending = false;
+    session?.sendClientContent({ turns: CORRECTIVE_TURN, turnComplete: true });
+  }
+
+  /** @param {LiveServerMessage['serverContent']} content */
+  function trackUtterances(content) {
+    if (!content) return;
+    if (content.inputTranscription?.text) loopGuard.userSpoke();
+    if (content.interrupted) agentTurn = '';
+    agentTurn += content.outputTranscription?.text ?? '';
+    if (!content.turnComplete) return;
+    const turn = agentTurn;
+    agentTurn = '';
+    if (!loopGuard.checkUtterance(turn)) return;
+    if (runningBatches.size > 0) correctivePending = true;
+    else sendCorrective();
+  }
+
   // Traffic with sandbox/bridge.js goes over the private channel main.jsx owns
   // (docs/adr/0001-private-bridge-channel.md). These unsubscribe functions are
   // kept so the session can detach without closing the channel itself.
@@ -281,7 +316,8 @@ export function createLiveSession({
       const result = loopGuard.check(signature)
         ? {
             success: false,
-            error: 'This action has repeated too many times in a row — try something different.',
+            error:
+              'This action has repeated too many times, alone or in a cycle with your last few — try something different.',
           }
         : await bridge.dispatchAction(name, toPositionalArgs(name, fc.args ?? {}));
       mark(`ds:tool-end:${id}`, { name, success: result.success });
@@ -316,7 +352,12 @@ export function createLiveSession({
     // response and this cleanup: whatever the batch held, it has sent.
     handleToolCallBatch(functionCalls, gen)
       .catch((error) => handleFailure(gen, error))
-      .finally(() => runningBatches.delete(batch));
+      .finally(() => {
+        runningBatches.delete(batch);
+        // openSession clears the pending corrective on a drop, so one still
+        // pending here is the live session's.
+        if (correctivePending && runningBatches.size === 0 && gen === generation) sendCorrective();
+      });
   }
 
   // details (StatusDetails) only accompany `reconnecting` and `failed`; the UI
@@ -404,6 +445,7 @@ export function createLiveSession({
     if (outText) onTranscript?.({ role: 'agent', text: outText });
     const inText = message.serverContent?.inputTranscription?.text;
     if (inText) onTranscript?.({ role: 'user', text: inText });
+    trackUtterances(message.serverContent);
 
     const resumption = message.sessionResumptionUpdate;
     if (resumption?.resumable && resumption.newHandle) {
@@ -469,7 +511,7 @@ export function createLiveSession({
   function connect() {
     attempt = 0;
     manuallyClosed = false;
-    // A new conversation shouldn't inherit the last one's repeat streak.
+    // A new conversation shouldn't inherit the last one's repeats or cycles.
     loopGuard.reset();
     recovering = false;
     awaitingFirstAudio = true;
@@ -486,6 +528,8 @@ export function createLiveSession({
     runningBatches.clear();
     heldSnapshot = null;
     heldCount = 0;
+    agentTurn = '';
+    correctivePending = false;
     serverAnswered = false;
     attemptResumed = false;
 

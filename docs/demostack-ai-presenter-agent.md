@@ -201,8 +201,11 @@ events go directly from the browser to Gemini Live.
   field (a keyframe when several were held), instead of going out as a separate turn: a
   navigate's keyframe sent on its own landed between the call and its response, and the model
   ended its turn without the new page's selectors (M5 T5).
-- Loop guard: caps consecutive identical action/utterance signatures; past the cap, injects a
-  corrective context turn instead of dispatching again (v2 goal #5).
+- Loop guard (`loopGuard.js`): an action that is the 4th identical call in a row, or completes
+  an A-B-A-B or A-B-C-A-B-C cycle, is not dispatched and is answered with a failure telling the
+  model to try something else; an agent sentence said in 3 of the last 5 turns gets one
+  corrective context turn per episode ("You are repeating yourself…") (v2 goal #5,
+  `docs/code-review-notes.md` M6).
 - Reconnect: real backoff (immediate, 1s, 3s, 7s, 15s, 30s — 6 attempts) around `ai.live.connect`;
   on final failure, shows a visible failed state with a manual retry button (v2 goal #6).
 - Volume meter: volume value lives in a ref, bars update imperatively via `requestAnimationFrame`

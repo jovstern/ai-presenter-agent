@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M1–M5, L9, L11 and L12 are done (H1 with the
-> M5 T3 CSP; M1 and M5 in M6 T1); the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M1–M6, L9, L11 and L12 are done (H1 with the
+> M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -525,7 +525,21 @@ one-line note in the bridge that this is input-only for now. If generalised: pic
 `el.tagName`, or use `el.value = v` for non-React targets and keep the descriptor trick only where
 a framework's controlled input needs it.
 
-### [ ] M6 — The loop guard misses the common failure shape
+### [x] M6 — The loop guard misses the common failure shape
+
+> Fixed in M6 T2: `agent-client/src/loopGuard.js` keeps the last 6 action signatures (tool name
+> + args with keys sorted and strings trimmed, `actionSignature()`) and trips on the call that
+> makes the 4th identical one in a row, or completes an A-B-A-B or A-B-C-A-B-C cycle
+> (`CYCLE_RULES`, a cycle needs two different calls). `liveSession.js` treats every trip as it
+> did a repeat: the call isn't dispatched and is answered `{success:false, error:'…repeated too
+> many times…'}`. Utterances: `liveSession` joins an agent turn's `outputTranscription`
+> fragments until `turnComplete` (an interrupted turn is dropped) and `checkUtterance()` trips
+> when the normalised sentence (lowercase, punctuation and whitespace collapsed, ≥ 4 words, so
+> "Done." doesn't count) fills 3 of the last 5 turns. A trip sends one corrective turn ("You
+> are repeating yourself…", `turnComplete: true`), held until a running tool batch ends and
+> dropped with the session on a reconnect; it fires once per episode, which ends on a turn that
+> isn't a repeat or on the user's own transcription. The thresholds are named constants that
+> M6 T5 may tune. Tested in `loopGuard.test.js` and `liveSession.test.js`.
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says

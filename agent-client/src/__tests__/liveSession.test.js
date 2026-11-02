@@ -964,3 +964,179 @@ describe('timing marks', () => {
     expect(markNames()).toEqual(['ds:connect-start', 'ds:open']);
   });
 });
+
+describe('createLiveSession: loop guard', () => {
+  it('blocks the call that completes an A-B-A-B cycle with the loop guard, like a repeat', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const go = (id, route) => ({ id, name: 'navigate', args: { route } });
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [go('1', 'home'), go('2', 'settings'), go('3', 'home'), go('4', 'settings')],
+      },
+    });
+    await flush();
+
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    expect(responses).toHaveLength(4);
+    expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
+    expect(responses[3].response.error).toMatch(/repeated/i);
+  });
+
+  describe('the utterance loop guard', () => {
+    const LINE = 'Let me show you the settings page.';
+
+    // One agent turn the way Live delivers it: transcription fragments, then
+    // turnComplete in a message of its own.
+    function say(call, text) {
+      const words = text.split(' ');
+      const half = Math.ceil(words.length / 2);
+      for (const fragment of [words.slice(0, half).join(' '), ' ' + words.slice(half).join(' ')]) {
+        call.params.callbacks.onmessage({
+          serverContent: { outputTranscription: { text: fragment } },
+        });
+      }
+      call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+    }
+
+    const correctives = (call) =>
+      call.session.sendClientContent.mock.calls.filter(
+        ([arg]) => typeof arg.turns === 'string' && /repeating yourself/i.test(arg.turns),
+      );
+
+    it('sends one corrective turn when the agent says the same sentence three turns running', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      say(call, LINE);
+      say(call, LINE);
+      expect(correctives(call)).toHaveLength(0);
+      say(call, LINE);
+
+      expect(correctives(call)).toHaveLength(1);
+      expect(correctives(call)[0][0].turnComplete).toBe(true);
+    });
+
+    it('sends it once per episode, and again only after the user speaks', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      for (let i = 0; i < 5; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(1);
+
+      call.params.callbacks.onmessage({
+        serverContent: { inputTranscription: { text: 'Why do you keep saying that?' } },
+      });
+      for (let i = 0; i < 3; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(2);
+    });
+
+    it('discards an interrupted partial turn instead of counting it', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      say(call, LINE);
+      say(call, LINE);
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: 'Let me show you' } },
+      });
+      call.params.callbacks.onmessage({ serverContent: { interrupted: true } });
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: ' the settings page.' }, turnComplete: true },
+      });
+
+      expect(correctives(call)).toHaveLength(0);
+    });
+
+    it('holds the corrective while a tool batch runs, then sends it after the last response', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'c', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+
+      for (let i = 0; i < 3; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(0);
+
+      finishClick({ success: true });
+      await flush();
+
+      expect(correctives(call)).toHaveLength(1);
+      const order = call.session.sendToolResponse.mock.invocationCallOrder[0];
+      const correctiveCall = call.session.sendClientContent.mock.calls.findIndex(([arg]) =>
+        /repeating yourself/i.test(String(arg.turns)),
+      );
+      expect(
+        call.session.sendClientContent.mock.invocationCallOrder[correctiveCall],
+      ).toBeGreaterThan(order);
+    });
+
+    it('never sends a held corrective to the replacement session after a drop', async () => {
+      const { liveSession, bridge } = setup();
+      const first = await connectAndEstablish(liveSession);
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+      first.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'c', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      for (let i = 0; i < 3; i += 1) say(first, LINE);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      finishClick({ success: true });
+      await flush();
+      // Nor at the end of the new session's first batch.
+      second.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'd', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+
+      expect(second.session.sendToolResponse).toHaveBeenCalledTimes(1);
+      expect(correctives(first)).toHaveLength(0);
+      expect(correctives(second)).toHaveLength(0);
+    });
+
+    it('ignores turns from a dropped session', async () => {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      say(first, LINE);
+      say(first, LINE);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      say(first, LINE); // a late message on the dead socket
+
+      expect(correctives(first)).toHaveLength(0);
+      expect(correctives(second)).toHaveLength(0);
+    });
+
+    it('a manual connect() starts the utterance history afresh', async () => {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      say(first, LINE);
+      say(first, LINE);
+
+      liveSession.disconnect();
+      const second = await connectAndEstablish(liveSession);
+      say(second, LINE);
+
+      expect(correctives(second)).toHaveLength(0);
+    });
+  });
+});

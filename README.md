@@ -91,7 +91,8 @@ The suite in `agent-client/src/__tests__/`:
 
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
   per drop, superseded connects, in-order tool batches, resumption without re-greeting, the
-  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard,
+  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
+  per repeated-sentence episode, never sent to a replacement session),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
   during a tool batch goes out inside the next tool response (`page`); the `ds:*` timing marks.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
@@ -113,7 +114,9 @@ The suite in `agent-client/src/__tests__/`:
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
 - `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, the
   context blob it builds.
-- `loopGuard.test.js`, `pcm.test.js` — the repeat cap and the audio encode/decode helpers.
+- `loopGuard.test.js`, `pcm.test.js` — the loop guard (repeats, A-B-A-B and period-3 cycles,
+  repeated agent sentences, realistic sequences that must pass) and the audio encode/decode
+  helpers.
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
