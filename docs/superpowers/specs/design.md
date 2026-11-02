@@ -51,8 +51,11 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - [ ] R14 Every remaining M and L item is closed or deferred with a reason.
 - [x] R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
       same-origin under `script-src 'self'`; 16 kHz Int16 80 ms frames; `e2e/audio.spec.js`.)*
-- [ ] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
-      numbers.
+- [x] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
+      numbers. *(M6 T5, `docs/metrics/m06.md`: the cap, the ratio and the loop thresholds are
+      kept on the numbers; the still-attached retry is 400 ms × the attempt; a resume no
+      longer resends knowledge. Task 8 of 10 meets the 80 % budget only just, and the cap and
+      ratio are measured on the 8-node target app only.)*
 
 **M7: presentable widget (new issue)**
 - [ ] R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.

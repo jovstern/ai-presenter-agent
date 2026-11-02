@@ -81,8 +81,10 @@
   // against the parent (sandbox) page's URL, not the iframe's document.
   const ROUTE_PATHS = readRoutes();
 
-  // Size cap so a larger page can't blow the model's context — a guess, not
-  // tuned against a real page yet (docs/project-knowledge-handoff.md §3.3).
+  // Size cap so a larger page can't blow the model's context. Kept at 30 in
+  // M6 T5: keyframes measured ~100 B a node (777–855 B for the target app's 8),
+  // so 30 nodes is ~3–3.5 kB, inside the 4 kB budget (docs/metrics/m06.md).
+  // Not yet measured on a page big enough to reach it.
   const MAX_SNAPSHOT_NODES = 30;
   const SNAPSHOT_DEBOUNCE_MS = 250;
   // Kept under agent-client's ACTION_TIMEOUT_MS (4000, bridgeChannel.js) so a

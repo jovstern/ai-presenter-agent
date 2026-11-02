@@ -13,6 +13,9 @@
  *   | { type: 'delta', changed: SnapshotNode[], removed: string[] }} SnapshotDecision
  */
 
+// Kept at 0.6 in M6 T5: a delta that covers 60 % of the nodes costs about as
+// much as the keyframe that also resets the model's view. The target app's
+// deltas are 1–2 of 8 nodes and never reach it (docs/metrics/m06.md).
 const FULL_REFRESH_RATIO = 0.6;
 
 export function createDomSnapshotContext() {

@@ -270,12 +270,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   token (ADR 0004). The same check covered every other field `liveSession.js` reads
   (`message.data`, transcriptions, `interrupted`, `turnComplete`, `toolCall.functionCalls`,
   `setupComplete`) and the three send signatures (code-review-notes M8, L10).
-- **`sendKnowledgeContext` and the DOM-snapshot keyframe are both resent on every `connect()`,
-  including a resumed reconnect — deliberately, not an oversight.** A (re)connect can't fully
-  trust that a resumed session's turn history is intact, so both resend fresh grounding rather
-  than assuming the model still remembers. The one acknowledged cost: on a *successfully* resumed
-  session (where the model's context genuinely did survive), this adds a small amount of
-  redundant context. Worth revisiting only if that turns out to matter in practice.
+- **A resumed reconnect resends the DOM keyframe but not the knowledge context — reversed in
+  M6 T5 (code-review-notes M9).** Until then both were resent on every (re)connect, "deliberately":
+  a reconnect couldn't trust that a resumed session's history was intact. The live e2e now
+  measures it: the reconnect scenario seeds a 386 B knowledge file naming a code name, drops the
+  socket and asks for the code name afterwards. With the resend (5 runs) and without it (10 runs)
+  the resumed session named it every time, so resumption does carry the knowledge, and the resend
+  only stacked another copy of it (up to `MAX_TOTAL_BYTES`, 4 MB) into the context on every drop.
+  A fresh session (no handle, or a handle the server rejected) still gets it, and so does a
+  resumed one when the store changed while no session was up. The keyframe (777–855 B on the
+  target app) is still forced on every reconnect: the page can change during a drop.
+- **Reconnect timing.** A resume refused with 1008 "already connected" is retried after 400 ms ×
+  the attempt (capped by the usual backoff) instead of the generic 1 s, since M6 T5
+  (`STILL_ATTACHED_RETRY_MS`); numbers in `docs/metrics/m06.md`.
 - **Mic capture runs in an AudioWorklet** (M6 T3; it replaced the deprecated
   `ScriptProcessorNode`, see §4). `agent-client/public/capture-worklet.js` is copied into `dist/`
   by Vite and loaded with `audioWorklet.addModule('/agent-client/capture-worklet.js')` — the URL
@@ -291,10 +298,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Safari (the e2e is Chromium only).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
-- **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`
-  in `bridge.js`) is a guess, not tuned against a real page or a real model's context behavior.
-  (The keyframe-vs-delta *decision* logic itself, in `domSnapshotContext.js`, is unit-tested — it's
-  specifically the real-world tuning of the cap and the 0.6 full-refresh ratio that's unverified.)
+- **DOM snapshot payload size is measured on the mock target app only** (M6 T5, the `ds:keyframe`
+  mark): 8 nodes per page, keyframes 777–855 B, about 100 B a node, so the 30-node cap
+  (`MAX_SNAPSHOT_NODES` in `bridge.js`) comes to roughly 3–3.5 kB, inside the 4 kB budget. The cap
+  and the 0.6 full-refresh ratio were kept, but these pages never reach the cap or a large delta,
+  so neither is stressed. A real, larger page is the test that's still missing.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
   and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and AudioWorklet need a
   secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Connect now stops
@@ -373,6 +381,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Host on Render** (2026-10-28) — a web service from a `render.yaml` blueprint: automatic HTTPS
   (the mic needs a secure context), the key as a dashboard secret, PR previews; free-tier cold
   starts accepted. Deploy is M8. See [ADR 0003](./adr/0003-hosting-on-render.md).
+
+- **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
+  Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the
+  4 kB budget), `FULL_REFRESH_RATIO` 0.6, and the loop-guard thresholds (no trip in 14 runs).
+  Changed: a 1008 "already connected" refusal is retried after 400 ms × the attempt instead of
+  the generic 1 s. The worst recovery went from 3.14 s to 2.89 s, and two attempts now take
+  2.5–2.9 s instead of 2.8–3.4 s. A resumed session no longer gets the knowledge again (M9, §3.3).
+  **Tried and reverted:** a `next` line in a successful navigate's tool result ("the page has
+  loaded … carry on with the next step"), meant for the stall after navigate. The task passed
+  0 of 3 with it, against 6 of 6 for the code just before it. The model still ended its turn
+  after the navigate, so the change was reverted. The task path is now the baseline's, and it
+  passed 8 of 10 after the other changes. Its misses were a stall after `fill` and a prompt that
+  the voice activity detection split in two.
 
 ## 5. Future planning (not yet built — read before starting on these)
 

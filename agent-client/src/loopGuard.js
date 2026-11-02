@@ -17,7 +17,10 @@
 // - Period 3 (A-B-C-A-B-C): on the second C. A three-step routine (fill,
 //   toggle, save) is one task; doing it all again, unchanged, is a loop.
 // A cycle needs at least two different calls; a constant run is period 1's.
-// T5 (M6) may tune these from the live-e2e runs.
+// Kept as they are in M6 T5: in 14 live runs with the `ds:loop-trip` mark
+// (and 5 more where a refused action would show as a failed tool) nothing
+// tripped, and the six-step task's longest repeat is the counter's two
+// clicks (docs/metrics/m06.md).
 const REPEAT_LIMIT = 3;
 const CYCLE_RULES = [
   { period: 1, repeats: REPEAT_LIMIT + 1 },

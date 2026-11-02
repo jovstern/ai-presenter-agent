@@ -766,6 +766,106 @@ describe('createLiveSession', () => {
     expect(greetings(retried.session)).toHaveLength(0);
   });
 
+  // M6 T5: the generic 1 s backoff made a two-attempt recovery 2.8–3.4 s in
+  // the live e2e; a still-attached refusal retries after 400 ms, then 800 ms…
+  it('retries a still-attached refusal after 400 ms, then 800 ms, and any other close on the usual backoff', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+    const refuse = async (call) => {
+      call.resolve();
+      await flush();
+      call.params.callbacks.onclose({
+        code: 1008,
+        reason: 'BidiGenerateContent session is already connected to an existing client',
+      });
+    };
+
+    await refuse(live.calls[1]);
+    await vi.advanceTimersByTimeAsync(399);
+    expect(live.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(3);
+
+    await refuse(live.calls[2]);
+    await vi.advanceTimersByTimeAsync(799);
+    expect(live.calls).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(4);
+    expect(live.calls[3].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+
+    // A plain failure on the next attempt waits the usual 7 s (attempt 4).
+    live.calls[3].reject(new Error('network'));
+    await vi.advanceTimersByTimeAsync(6_999);
+    expect(live.calls).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(5);
+  });
+
+  describe('knowledge on a reconnect (M9)', () => {
+    const knowledgeSends = (session) =>
+      session.sendClientContent.mock.calls.filter(([arg]) =>
+        String(arg.turns).startsWith('STRICT RULES'),
+      );
+
+    async function dropAndReconnect(first, { handle = true } = {}) {
+      if (handle) {
+        first.params.callbacks.onmessage({
+          sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+        });
+      }
+      drop(first);
+      await flush();
+      const second = live.calls.at(-1);
+      await establish(second);
+      return second;
+    }
+
+    it('sends it on a fresh session, and not again on a resumed one', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      expect(knowledgeSends(first.session)).toHaveLength(1);
+
+      const resumed = await dropAndReconnect(first);
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      expect(knowledgeSends(resumed.session)).toHaveLength(0);
+    });
+
+    it('sends it on a reconnect that starts a fresh session (no handle)', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      const fresh = await dropAndReconnect(first, { handle: false });
+      expect(knowledgeSends(fresh.session)).toHaveLength(1);
+    });
+
+    it('sends it on a resumed session when it changed while no session was up', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      setRules('Be very brief.');
+      await flush();
+      const resumed = live.calls.at(-1);
+      await establish(resumed);
+      expect(knowledgeSends(resumed.session).map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+
+      // Sent once: the next resume has nothing new to send.
+      const again = await dropAndReconnect(resumed);
+      expect(knowledgeSends(again.session)).toHaveLength(0);
+    });
+  });
+
   it('drops the resumption handle when a close that is not 1008 carries the still-attached text', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -838,7 +938,10 @@ describe('createLiveSession', () => {
       {
         id: 'nav',
         name: 'navigate',
-        response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\)/) },
+        response: {
+          success: true,
+          page: expect.stringMatching(/^Page snapshot \(full\)/),
+        },
       },
       {
         id: 'tap',

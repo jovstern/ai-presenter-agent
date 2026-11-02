@@ -604,12 +604,22 @@ checked against the installed version — the SDK has shipped `thinkingBudget` /
 shapes, and `thinkingLevel` may not be the field. Pin exact versions in all three
 `package.json`s and commit to the lockfiles (they exist — good).
 
-### [ ] M9 — A resumed reconnect re-sends context it already has
+### [x] M9 — A resumed reconnect re-sends context it already has
 
 `connect()` always calls `sendKnowledgeContext` (`useLiveAgent.js:270`), and the `ds-ready` path
 re-greets (B3), even when `resumeHandleRef.current` is set and the session already carries all of
 it. Handoff §3.3 flags the knowledge waste; combined with B3, a successful resume gets a greeting
 dropped into the middle of the conversation. Guard both on `!resumeHandleRef.current`.
+
+> Fixed in M6 T5: the greeting was already guarded (`openSession` greets only a fresh session).
+> `agent-client/src/liveSession.js` now sends the knowledge context only to a fresh session, or
+> to a resumed one when the store changed while no session was up (`knowledgeChangedOffline`).
+> Measured in the live e2e (`docs/metrics/m06.md`): the reconnect scenario seeds a 386 B knowledge
+> file and asks for its code name after the drop. With the resend, 5 of 5 resumed sessions named
+> it, and without it 10 of 10, so the resend only stacked a copy of the knowledge (up to 4 MB)
+> into the context per drop. The handoff's "deliberate" stance (§3.3) is reversed. The keyframe
+> is still forced on every reconnect, because the page can change during a drop. Tests:
+> `liveSession.test.js` "knowledge on a reconnect (M9)".
 
 ---
 

@@ -121,6 +121,9 @@ A tool's round trip is the bridge only: the dispatch through the private channel
 iframe and back, not the model's thinking time. The observer summarises the file (median and
 worst per metric, pass rate per scenario) in the milestone report.
 
+The latest numbers are in `m06.md` (M6 T5: six-step task 8 of 10, reconnect worst 2.89 s,
+keyframe ≤ 855 B, fill ≤ 3 ms). The M5 baseline below is kept for history.
+
 ## M5 T5 baseline (2026-10-29, 11 runs)
 
 Measured on `m5-quality-baseline`, model `gemini-3.8-live`, after the three fixes the live

@@ -76,6 +76,12 @@ const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 // before it has let go of the dropped client. The handle is fine, just early:
 // the backoff's next attempt resumes with it (seen in the live e2e, M5 T5).
 const SESSION_STILL_ATTACHED = /already connected/i;
+// Such a refusal is retried after STILL_ATTACHED_RETRY_MS × the attempt
+// (400 ms, 800 ms, …), never later than the usual backoff. With the generic
+// 1 s, a recovery that needed a second attempt took 2.8–3.4 s against the 3 s
+// budget (M5 T5 and the M6 T5 baseline, docs/metrics/m06.md); the linear
+// ramp still gives Gemini ~6 s in all to let go before the budget runs out.
+const STILL_ATTACHED_RETRY_MS = 400;
 
 /** @param {number} status */
 function isRetryableStatus(status) {
@@ -211,12 +217,21 @@ export function createLiveSession({
     });
   }
 
-  // Resent on every (re)connect (including a resumed one) and whenever
-  // the knowledge store changes mid-session — a (re)connect can't fully
-  // trust a resumed session's turn history is intact, so this resends fresh
-  // grounding rather than assuming the model still remembers.
+  // Sent on every fresh session and whenever the knowledge store changes
+  // mid-session, but not on a resumed reconnect: resumption restores the
+  // session's context, knowledge included, so a resend only stacked another
+  // copy (up to MAX_TOTAL_BYTES, 4 MB) into it on every drop. The live e2e
+  // showed the resumed session still naming the seeded knowledge without it
+  // (docs/code-review-notes.md M9, docs/metrics/m06.md). A change made while
+  // no session was up is the exception: the resumed session never saw it.
+  let knowledgeChangedOffline = false;
+
   function sendKnowledgeContext() {
-    if (!session) return;
+    if (!session) {
+      knowledgeChangedOffline = true;
+      return;
+    }
+    knowledgeChangedOffline = false;
     const message = buildContextMessage();
     if (!message) return;
     mark('ds:knowledge', { bytes: byteLength(message) });
@@ -517,7 +532,9 @@ export function createLiveSession({
       setStatus('failed', { attempt, maxAttempts: MAX_ATTEMPTS, reason: EXHAUSTED_REASON });
       return;
     }
-    const delay = RECONNECT_DELAYS[attempt];
+    const delay = handleStillValid
+      ? Math.min(RECONNECT_DELAYS[attempt], STILL_ATTACHED_RETRY_MS * attempt)
+      : RECONNECT_DELAYS[attempt];
     attempt += 1;
     recovering = true;
     // `reconnecting`, not `failed`, while a retry is still coming — the old
@@ -610,12 +627,11 @@ export function createLiveSession({
       session = newSession;
       pendingFrames.forEach(sendFrame);
       pendingFrames = [];
-      sendKnowledgeContext();
-      // A (re)connect can't fully trust a resumed session's turn history is
-      // intact (same reasoning as sendKnowledgeContext above) — force a
-      // fresh keyframe rather than assuming the model still remembers the
-      // page, and ask bridge.js for one right away instead of waiting for
-      // the next incidental DOM mutation.
+      if (!attemptResumed || knowledgeChangedOffline) sendKnowledgeContext();
+      // The page, unlike the knowledge, may have changed during the drop, and
+      // a keyframe is small (≤ 855 B in the live e2e) — force a fresh one
+      // rather than assuming the model still has the page right, and ask
+      // bridge.js for one now instead of waiting for the next DOM mutation.
       snapshotContext.markNavigated();
       bridge.requestSnapshot();
       // Greet once per fresh session, not on a resumed reconnect — otherwise

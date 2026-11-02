@@ -78,14 +78,14 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 12 files, 204 tests
+npm test        # vitest: 12 files, 212 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 2 files, 50 tests
+npm test        # vitest + supertest: 3 files, 52 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -96,7 +96,9 @@ The suite in `agent-client/src/__tests__/`:
   `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
   per repeated-sentence episode, never sent to a replacement session),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
-  during a tool batch goes out inside the next tool response (`page`); the `ds:*` timing marks.
+  during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
+  retried after 400 ms × the attempt; knowledge not resent to a resumed session (M9); the `ds:*`
+  timing and size marks.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
