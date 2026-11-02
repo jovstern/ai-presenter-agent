@@ -11,7 +11,7 @@
     "build": "vite build",
     "watch": "vite build --watch",
     "lint": "cd .. && eslint --config agent-client/eslint.config.js agent-client sandbox target-app e2e playwright.config.js",
-    "typecheck": "tsc -p jsconfig.json",
+    "typecheck": "tsc -p jsconfig.json && tsc -p jsconfig.worklet.json",
     "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

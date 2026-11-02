@@ -49,7 +49,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 
 **M6: hardening and tuning (issue #5)**
 - [ ] R14 Every remaining M and L item is closed or deferred with a reason.
-- [ ] R15 Capture uses an AudioWorklet.
+- [x] R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
+      same-origin under `script-src 'self'`; 16 kHz Int16 80 ms frames; `e2e/audio.spec.js`.)*
 - [ ] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
       numbers.
 
@@ -184,6 +185,7 @@ come from `status`.
 | failed | "Connection lost" plus a Retry button (or "Reload page" when the failure is fatal), and a Radix toast once |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
+| insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
 
 - **Transcript:** the last 3 coalesced turns, `aria-live="polite"`, with user turns visually
   distinct.

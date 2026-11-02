@@ -24,6 +24,7 @@ vi.mock('../liveSession.js', () => ({
 }));
 
 vi.mock('../audioIO.js', () => ({
+  voiceSupportError: vi.fn(() => null),
   startCapture: vi.fn(() => {
     const n = fakes.captures.length;
     fakes.events.push(`startCapture#${n}`);
@@ -59,7 +60,7 @@ function fakeBridge() {
 function renderApp(bridge = fakeBridge()) {
   const utils = render(
     <StrictMode>
-      <AgentApp bridge={bridge} nonce="page-nonce" />
+      <AgentApp bridge={bridge} nonce="page-nonce" workletUrl="/agent-client/capture-worklet.js" />
     </StrictMode>,
   );
   return { bridge, ...utils };
@@ -98,6 +99,46 @@ describe('AgentApp + useLiveAgent', () => {
     renderApp();
     await click('Connect');
     expect(fakes.sessions[0].options.nonce).toBe('page-nonce');
+  });
+
+  it('hands the worklet URL from main.jsx to the mic capture', async () => {
+    const { startCapture } = await import('../audioIO.js');
+    renderApp();
+    await click('Connect');
+    expect(startCapture).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workletUrl: '/agent-client/capture-worklet.js' }),
+    );
+  });
+
+  it('over plain http, says voice needs https and opens no session', async () => {
+    const { voiceSupportError } = await import('../audioIO.js');
+    voiceSupportError.mockReturnValueOnce(
+      Object.assign(new Error('insecure'), { name: 'InsecureContextError' }),
+    );
+    renderApp();
+    await click('Connect');
+
+    expect(fakes.sessions).toHaveLength(0);
+    expect(fakes.captures).toHaveLength(0);
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Voice needs a secure connection (https). Open this page over https, or on localhost.',
+    );
+    // Still Connect and enabled: the same button, so focus stays on it.
+    expect(screen.getByRole('button', { name: 'Connect' }).disabled).toBe(false);
+  });
+
+  it('without AudioWorklet, names a browser that can capture voice', async () => {
+    const { voiceSupportError } = await import('../audioIO.js');
+    voiceSupportError.mockReturnValueOnce(
+      Object.assign(new Error('no worklet'), { name: 'AudioUnsupportedError' }),
+    );
+    renderApp();
+    await click('Connect');
+
+    expect(fakes.sessions).toHaveLength(0);
+    expect(screen.getByRole('alert').textContent).toBe(
+      "This browser can't capture voice. Use a current Chrome, Edge, Firefox or Safari.",
+    );
   });
 
   it('pressing Connect twice stops the first capture and closes the first player before the second capture starts', async () => {

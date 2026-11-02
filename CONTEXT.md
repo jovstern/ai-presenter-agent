@@ -74,6 +74,12 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   sends one **corrective turn** per episode, which ends when the agent says something else or
   the user speaks. Reset on every manual connect.
 
+- **Capture worklet** — the AudioWorklet that turns the mic into what the Live API takes:
+  `agent-client/public/capture-worklet.js`, served as a same-origin file at
+  `/agent-client/capture-worklet.js`. It low-passes, resamples to 16 kHz, converts to Int16 and
+  posts one **frame** (80 ms, 1280 samples) at a time; `audioIO.js` base64-encodes each frame
+  for the session (`pcm.js`).
+
 ## Knowledge
 
 - **RAG-lite** — the knowledge feature: `.txt`/`.md` files and free-text **rules** the user

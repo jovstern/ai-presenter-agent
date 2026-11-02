@@ -6,6 +6,7 @@ import { CHANGE_EVENT, buildContextMessage } from './knowledgeStore.js';
 import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
 import { createLoopGuard, actionSignature } from './loopGuard.js';
+import { INPUT_SAMPLE_RATE } from './pcm.js';
 
 /** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
 /** @import { ActionResult, Snapshot } from './bridgeProtocol.js' */
@@ -133,7 +134,7 @@ const CORRECTIVE_TURN =
 // Mic frames arrive continuously from the moment Connect is clicked, but
 // ai.live.connect() takes a beat to resolve — bound how much audio queues up
 // for that gap so "hears you" doesn't depend on speaking after a fixed delay.
-const MAX_PENDING_FRAMES = 20; // ~5s of 4096-sample/16kHz frames
+const MAX_PENDING_FRAMES = 20; // ~1.6 s of the capture worklet's 80 ms frames
 
 // Timing marks on the page's performance timeline, read by the opt-in live
 // e2e (e2e/live.spec.js, docs/metrics/README.md): `ds:connect-start`,
@@ -194,7 +195,9 @@ export function createLiveSession({
 
   /** @param {string} base64Frame */
   function sendFrame(base64Frame) {
-    session?.sendRealtimeInput({ audio: { data: base64Frame, mimeType: 'audio/pcm;rate=16000' } });
+    session?.sendRealtimeInput({
+      audio: { data: base64Frame, mimeType: `audio/pcm;rate=${INPUT_SAMPLE_RATE}` },
+    });
   }
 
   // Resent on every (re)connect (including a resumed one) and whenever

@@ -73,15 +73,16 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 3 specs, 18 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 4 specs, 19 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 144 tests
+npm test        # vitest: 12 files, 204 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
-npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
-npm run build   # single-file IIFE bundle in agent-client/dist/
+npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
+                   # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
+npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
 npm test        # vitest + supertest: 2 files, 50 tests
@@ -96,7 +97,7 @@ The suite in `agent-client/src/__tests__/`:
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
   during a tool batch goes out inside the next tool response (`page`); the `ds:*` timing marks.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
-  Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
+  Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
@@ -112,11 +113,19 @@ The suite in `agent-client/src/__tests__/`:
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
-- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, the
-  context blob it builds.
-- `loopGuard.test.js`, `pcm.test.js` — the loop guard (repeats, A-B-A-B and period-3 cycles,
-  repeated agent sentences, realistic sequences that must pass) and the audio encode/decode
-  helpers.
+- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, file
+  ids without `crypto.randomUUID` (plain http), the context blob it builds.
+- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
+  sentences, realistic sequences that must pass.
+- `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack
+  overflow), a subarray encodes only its own samples, Int16 from an odd byte offset or with a
+  trailing half sample.
+- `captureWorklet.test.js` — `public/capture-worklet.js` under a stubbed AudioWorklet scope:
+  80 ms Int16 frames of 1280 at 16 kHz, posted with the buffer transferred; from 48 and 44.1 kHz,
+  16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing).
+- `audioIO.test.js` — the secure-context / AudioWorklet check, and that capture releases the
+  port, nodes, mic track and context once, including on a stop mid-setup or a worklet that
+  fails to load.
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
@@ -140,6 +149,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
   connected". And a `not_configured` 500 goes straight to "Reload page" with no retries.
+- `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
+  capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
+  Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
+  none after Disconnect.
 - `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle and
   with the knowledge dialog open, and on both target-app pages: zero violations. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.

@@ -156,7 +156,8 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `liveSession.js` — the Live socket: token fetch, connect, one-retry-per-drop backoff,
   resumption, serialized tool dispatch, knowledge and snapshot injection. The riskiest file.
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
-  playback, barge-in); owns teardown.
+  playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
+  `agent-client/public/capture-worklet.js` (§4).
 - `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Reload page button, status line, alert
   on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
@@ -268,10 +269,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   than assuming the model still remembers. The one acknowledged cost: on a *successfully* resumed
   session (where the model's context genuinely did survive), this adds a small amount of
   redundant context. Worth revisiting only if that turns out to matter in practice.
-- **Mic capture uses `ScriptProcessorNode`**, which is a deprecated Web Audio API. Chosen
-  deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
-  meaningfully more code — a separate worklet module, message-passing to the main thread). Fine
-  for a local demo; worth swapping before anything resembling production use.
+- **Mic capture runs in an AudioWorklet** (M6 T3; it replaced the deprecated
+  `ScriptProcessorNode`, see §4). `agent-client/public/capture-worklet.js` is copied into `dist/`
+  by Vite and loaded with `audioWorklet.addModule('/agent-client/capture-worklet.js')` — the URL
+  is resolved by `main.jsx` against its own script tag — so the CSP's `script-src 'self'` covers
+  it with no `blob:`. The AudioContext runs at the device rate; the worklet low-passes (63-tap
+  Blackman windowed sinc at 7 kHz) and resamples to 16 kHz by linear interpolation, converts
+  to Int16 and posts 80 ms frames (1280 samples) with the buffer transferred. Verified:
+  `captureWorklet.test.js` (frame size, 16000 samples/s from 48 and 44.1 kHz, a 12 kHz tone
+  suppressed below −40 dB), `e2e/audio.spec.js` (Chromium's fake mic at 48 kHz through the real
+  worklet under the real CSP: 2560-byte `audio/pcm;rate=16000` frames at ~12.5/s), and one
+  `npm run e2e:live` run on 2026-11-02 in which all three live scenarios passed, the spoken
+  five-step task included — so Gemini heard the worklet's audio. Not verified: Firefox and
+  Safari (the e2e is Chromium only).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`
@@ -279,8 +289,13 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (The keyframe-vs-delta *decision* logic itself, in `domSnapshotContext.js`, is unit-tested — it's
   specifically the real-world tuning of the cap and the 0.6 full-refresh ratio that's unverified.)
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
-  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and `crypto.randomUUID`
-  need a secure context — fine on `localhost`, HTTPS anywhere else.
+  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and AudioWorklet need a
+  secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Connect now stops
+  before opening a session and the card says "Voice needs a secure connection (https)…"
+  (`voiceSupportError()` in `audioIO.js`; code-review-notes L6). Of the two `crypto.randomUUID`
+  callers, the knowledge store's file ids no longer use it (they use `getRandomValues`), and the
+  bridge channel's action ids only run inside a session, which can't start without a secure
+  context.
 
 ## 4. Decisions log (fast "why did we do X" reference)
 
@@ -310,8 +325,17 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   further" version of the original's isolate-and-memoize fix, backed by a test proving the
   isolation actually holds. Built in the first v2 implementation, lost in the from-scratch
   rebuild; the volume orb and `renderIsolation.test.jsx` return in M7 (#11).
-- **`ScriptProcessorNode` over `AudioWorklet`** — simpler, deprecated-but-functional, a known
-  tradeoff (see §3.3), not an oversight.
+- **`AudioWorklet` over `ScriptProcessorNode` — reversed in M6 T3** (2026-11-02). The first
+  build chose `ScriptProcessorNode` for simplicity: deprecated but functional, one file, no
+  module to serve. Reversed because the deprecated node runs its callback on the main thread
+  (capture glitches whenever React or the snapshot work is busy, and its resampling there was
+  linear interpolation with no low-pass, so everything above 8 kHz aliased into the voice band),
+  and because the "more code" cost turned out small once the CSP existed to say where the
+  worklet must come from: a same-origin file under `script-src 'self'`, not a `blob:` URL. The
+  AudioContext deliberately runs at the device rate rather than 16 kHz: Firefox has long
+  refused to connect a mic stream to a context at a different rate ("Connecting AudioNodes from
+  AudioContexts with different sample-rate is currently not supported"; not re-checked against
+  the current release), so the worklet resamples itself, one path for every browser. See §3.3 for what is verified.
 - **Session resumption wired up proactively, before ever hitting the 15-minute session cap in
   practice** — discovered the limit by reading the docs, not by observing a real session die at
   minute 15. Chose to fix it structurally (reuse the existing reconnect path) rather than wait and

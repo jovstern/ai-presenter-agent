@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createLiveSession } from './liveSession.js';
-import { startCapture, createPlayer } from './audioIO.js';
+import { startCapture, createPlayer, voiceSupportError } from './audioIO.js';
 import { decodeOutputChunk } from './pcm.js';
 
 /** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails, TranscriptEntry } from './liveSession.js' */
@@ -14,7 +14,8 @@ import { decodeOutputChunk } from './pcm.js';
  * @property {AgentStatus} status
  * @property {StatusDetails | null} details Set with `reconnecting` and `failed` only.
  * @property {TranscriptEntry[]} transcript Every line so far, in order.
- * @property {Error | null} micError Why the mic couldn't start, until the next connect.
+ * @property {Error | null} micError Why the mic couldn't start (or can't on this page), until
+ *   the next connect.
  * @property {() => Promise<void>} connect Starts mic, playback and the session.
  * @property {() => void} disconnect
  * @property {() => Promise<void>} retry The same as connect.
@@ -33,9 +34,10 @@ import { decodeOutputChunk } from './pcm.js';
 /**
  * @param {LiveSessionOptions['bridge']} bridge
  * @param {LiveSessionOptions['nonce']} nonce The page nonce, read once by main.jsx.
+ * @param {string} workletUrl The capture worklet's URL, resolved once by main.jsx.
  * @returns {LiveAgent}
  */
-export function useLiveAgent(bridge, nonce) {
+export function useLiveAgent(bridge, nonce, workletUrl) {
   // details come with `reconnecting` and `failed`; kept with the status so
   // the two can never disagree.
   const [connection, setConnection] = useState(
@@ -87,10 +89,16 @@ export function useLiveAgent(bridge, nonce) {
   // a new one starts, so a double press or a Retry never stacks a second mic.
   async function connect() {
     stopAudio();
-    setMicError(null);
+    // Over plain http (or without AudioWorklet) the mic can never start, so
+    // no session is opened and no token minted: the card stays on Connect
+    // with the reason (docs/code-review-notes.md L6).
+    const unsupported = voiceSupportError();
+    setMicError(unsupported);
+    if (unsupported) return;
     const session = getSession();
     playerRef.current = createPlayer();
     captureRef.current = startCapture({
+      workletUrl,
       onFrame: (frame) => session.sendAudioFrame(frame),
       onError: (err) => {
         setMicError(err); // AgentApp words it by err.name

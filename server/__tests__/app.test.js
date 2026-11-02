@@ -376,6 +376,7 @@ describe('headers', () => {
     const csp = cspOf(res);
 
     expect(csp['default-src']).toBe("'self'");
+    // Covers the capture worklet too (a same-origin file): no blob:, no inline.
     expect(csp['script-src']).toBe("'self'");
     expect(csp['style-src']).toBe("'self' 'unsafe-inline'");
     expect(csp['connect-src']).toBe(

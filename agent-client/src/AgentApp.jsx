@@ -56,23 +56,31 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 }
 
 // getUserMedia rejects with NotAllowedError when the permission is blocked,
-// which the viewer can fix; anything else (no device, device busy) can't be
+// which the viewer can fix. The two voiceSupportError() names (audioIO.js)
+// say what would fix them. Anything else (no device, device busy) can't be
 // fixed from here, so it is reported as it is.
 /** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
     return 'Microphone blocked — allow it in the address bar, then press Connect.';
   }
+  if (error.name === 'InsecureContextError') {
+    return 'Voice needs a secure connection (https). Open this page over https, or on localhost.';
+  }
+  if (error.name === 'AudioUnsupportedError') {
+    return "This browser can't capture voice. Use a current Chrome, Edge, Firefox or Safari.";
+  }
   return `Microphone unavailable: ${error.message || String(error)}`;
 }
 
 /**
- * @param {{ bridge: BridgeChannel, nonce: string, portalContainer: HTMLElement }} props
- *   `nonce` is the page nonce for the token request; `portalContainer` keeps
+ * @param {{ bridge: BridgeChannel, nonce: string, workletUrl: string, portalContainer: HTMLElement }} props
+ *   `nonce` is the page nonce for the token request; `workletUrl` is where the
+ *   capture worklet is served; `portalContainer` keeps
  *   Radix portals inside the shadow root (both from main.jsx).
  */
-export function AgentApp({ bridge, nonce, portalContainer }) {
-  const agent = useLiveAgent(bridge, nonce);
+export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
+  const agent = useLiveAgent(bridge, nonce, workletUrl);
   const { status, details, transcript, micError } = agent;
   const action = primaryAction(status, details, agent);
 

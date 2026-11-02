@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M1–M6, L9, L11 and L12 are done (H1 with the
-> M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2); the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M1–M6, L1, L6, L9, L11 and L12 are done (H1
+> with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -593,10 +593,16 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 
 ## Low / polish
 
-- [ ] **L1** — `pcm.js` base64 helpers build strings char-by-char ~20×/s (`int16ToBase64:23-25`,
+- [x] **L1** — `pcm.js` base64 helpers build strings char-by-char ~20×/s (`int16ToBase64:23-25`,
   `base64ToInt16:30-32`). `new Int16Array(bytes.buffer)` throws on an odd byte length or a
   non-zero-offset view. Convert in chunks (`String.fromCharCode.apply(null, subarray)`), and copy
   into a fresh aligned buffer before the `Int16Array` view.
+  *Fixed in M6 T3: `agent-client/src/pcm.js` encodes base64 by spreading 32 Ki-byte
+  `subarray`s into `String.fromCharCode` (a 1 MB frame encodes; `pcm.test.js`), and encodes only
+  the view's own bytes (`byteOffset`/`byteLength`, not the whole `buffer`). `bytesToInt16`
+  copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
+  sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
+  thread into `public/capture-worklet.js`.*
 - [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
@@ -608,9 +614,18 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   `:host { display: block; }` (or `contents`) so it doesn't depend on that coincidence.
 - [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
-- [ ] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
+- [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.
+  *Fixed in M6 T3: `agent-client/src/audioIO.js` `voiceSupportError()` checks
+  `window.isSecureContext`, then `AudioWorkletNode` and `getUserMedia`, and `useLiveAgent.js`
+  runs it before Connect does anything: on plain http the card says "Voice needs a secure
+  connection (https)…" and no session opens or token is minted (`useLiveAgent.test.jsx`, and
+  checked in Chromium over a LAN-IP http URL). The UUID half: `knowledgeStore.js`'s file ids
+  now come from `crypto.getRandomValues` (available everywhere), so adding a file on plain http
+  no longer throws (`knowledgeStore.test.js`); `bridgeChannel.js`'s action ids keep
+  `crypto.randomUUID()`, since actions only run in a session, which now can't start outside a
+  secure context. Handoff §3.3 notes both halves.*
 - [ ] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
   linting. `import styles from './styles.css?inline'` keeps the single-file IIFE build and
   restores tooling / syntax highlighting.

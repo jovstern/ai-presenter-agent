@@ -154,6 +154,8 @@ function contentSecurityPolicy(production) {
       defaultSrc: ["'self'"],
       // No inline script on any served page: the target app's scripts are
       // files, and the page nonce rides on a data- attribute (sandbox/index.html).
+      // Also governs worklets: the mic capture worklet is a same-origin file
+      // (/agent-client/capture-worklet.js), so no blob: is needed (M6 T3).
       scriptSrc: ["'self'"],
       // 'unsafe-inline' on purpose: the agent-client's shadow root gets its
       // stylesheet as a runtime <style> element (main.jsx), and Radix Dialog's

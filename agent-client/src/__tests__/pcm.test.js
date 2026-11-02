@@ -1,41 +1,83 @@
 import { describe, expect, it } from 'vitest';
-import { encodeInputFrame, decodeOutputChunk } from '../pcm.js';
+import { bytesToInt16, decodeOutputChunk, encodeInputFrame } from '../pcm.js';
+
+/** Little-endian bytes of the given Int16 samples. */
+function le16(...samples) {
+  return new Uint8Array(new Int16Array(samples).buffer);
+}
 
 describe('pcm', () => {
-  it('round-trips a signal through encode -> decode within quantization error', () => {
-    const sourceRate = 16000; // no resampling in this case, isolates quantization error
-    const samples = new Float32Array(160);
-    for (let i = 0; i < samples.length; i++) {
-      samples[i] = Math.sin((i / samples.length) * Math.PI * 2) * 0.5;
-    }
+  it('round-trips Int16 samples through encode -> decode', () => {
+    const samples = new Int16Array([0, 1, -1, 0x7fff, -0x8000, 1234, -4321]);
+    const decoded = decodeOutputChunk(encodeInputFrame(samples));
 
-    const encoded = encodeInputFrame(samples, sourceRate);
-    const decoded = decodeOutputChunk(encoded);
-
-    expect(decoded.length).toBe(samples.length);
-    for (let i = 0; i < samples.length; i++) {
-      expect(decoded[i]).toBeCloseTo(samples[i], 3);
-    }
+    expect(decoded).toHaveLength(samples.length);
+    expect(Array.from(decoded)).toEqual(
+      Array.from(samples, (s) => Math.fround(s / (s < 0 ? 0x8000 : 0x7fff))),
+    );
+    expect(decoded[3]).toBe(1);
+    expect(decoded[4]).toBe(-1);
   });
 
-  it('resamples down to 16kHz when the source rate is higher', () => {
-    const sourceRate = 48000;
-    const samples = new Float32Array(480).fill(0.25);
+  it('encodes only a subarray view, not the whole buffer behind it', () => {
+    const whole = new Int16Array([9, 9, 100, -200, 300, 9]);
+    const view = whole.subarray(2, 5);
 
-    const encoded = encodeInputFrame(samples, sourceRate);
-    const decoded = decodeOutputChunk(encoded);
-
-    // 480 samples at 48kHz -> ~160 samples at 16kHz
-    expect(decoded.length).toBe(160);
+    expect(encodeInputFrame(view)).toBe(encodeInputFrame(new Int16Array([100, -200, 300])));
   });
 
-  it('clamps out-of-range values instead of wrapping', () => {
-    const samples = new Float32Array([2, -2, 0]);
-    const encoded = encodeInputFrame(samples, 16000);
-    const decoded = decodeOutputChunk(encoded);
+  it('encodes a 1 MB frame without a stack overflow, and it decodes back intact', () => {
+    const samples = new Int16Array(512 * 1024); // 1 MiB of bytes
+    for (let i = 0; i < samples.length; i++) samples[i] = ((i * 7919) % 65536) - 32768;
 
-    expect(decoded[0]).toBeCloseTo(1, 3);
-    expect(decoded[1]).toBeCloseTo(-1, 3);
-    expect(decoded[2]).toBeCloseTo(0, 3);
+    const encoded = encodeInputFrame(samples);
+    expect(encoded).toHaveLength(Math.ceil(samples.byteLength / 3) * 4);
+    expect(bytesToInt16(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)))).toEqual(samples);
+  });
+
+  it('matches the platform base64 for a frame', () => {
+    const bytes = le16(1, 256, -2);
+    expect(encodeInputFrame(new Int16Array([1, 256, -2]))).toBe(
+      btoa(String.fromCharCode(...bytes)),
+    );
+  });
+
+  describe('bytesToInt16', () => {
+    it('reads samples from a view at an odd byte offset (an aligned copy, no RangeError)', () => {
+      const backing = new Uint8Array(1 + 6);
+      backing.set(le16(1000, -1000, 7), 1);
+      const odd = backing.subarray(1);
+      expect(odd.byteOffset).toBe(1);
+
+      expect(Array.from(bytesToInt16(odd))).toEqual([1000, -1000, 7]);
+    });
+
+    it('reads samples from an even non-zero offset in place', () => {
+      const backing = new Uint8Array(2 + 4);
+      backing.set(le16(-5, 5), 2);
+      const view = backing.subarray(2);
+
+      const int16 = bytesToInt16(view);
+      expect(Array.from(int16)).toEqual([-5, 5]);
+      expect(int16.buffer).toBe(backing.buffer); // no copy needed
+    });
+
+    it('drops a trailing half sample instead of throwing', () => {
+      const bytes = new Uint8Array([...le16(42, -42), 0xff]);
+      expect(Array.from(bytesToInt16(bytes))).toEqual([42, -42]);
+    });
+
+    it('drops a trailing half sample at an odd offset too', () => {
+      const backing = new Uint8Array([0, ...le16(3), 0xff]);
+      expect(Array.from(bytesToInt16(backing.subarray(1)))).toEqual([3]);
+    });
+  });
+
+  it('decodes 24 kHz output to Float32 in [-1, 1]', () => {
+    const base64 = btoa(String.fromCharCode(...le16(0x7fff, -0x8000, 0, 0x4000)));
+    const decoded = decodeOutputChunk(base64);
+
+    expect(decoded).toBeInstanceOf(Float32Array);
+    expect(Array.from(decoded)).toEqual([1, -1, 0, 0x4000 / 0x7fff].map(Math.fround));
   });
 });
