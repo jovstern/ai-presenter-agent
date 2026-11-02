@@ -667,7 +667,7 @@ What pushes it to the worst case:
 | Milestone | Estimated | Actual | Why it differed |
 |---|---|---|---|
 | M4 | ~110 min | ~127 min (1.15×) | Real-browser checks in every task; a larger fix wave (6 Important, 2 Must fix, the LCP miss); two re-review rounds. Remaining milestones re-scaled by 1.15×: M5 ~175, M6 ~150, M7 ~115, M8 ~80 (~8.7 h). |
-| M5 | ~150 min | | |
+| M5 | ~150 min (~175 re-scaled) | ~130 min (0.87×) | T1–T4 ran under estimate; T5's live runs took the planned ~45 min; two fix-wave rounds. A ~3 h usage-limit pause isn't counted. M4+M5 together: 257 vs 260 min, so the remaining estimates stay as written (M6 ~130, M7 ~100, M8 ~70). |
 | M6 | ~130 min | | |
 | M7 | ~100 min | | |
 | M8 | ~70 min | | |
