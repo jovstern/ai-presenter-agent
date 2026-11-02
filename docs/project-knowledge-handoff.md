@@ -158,7 +158,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
-- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Reload page button, status line, alert
+- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
   on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`.
@@ -238,17 +238,25 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
   no longer accepted: the reason tells the user to reload. Every server error has one shape,
   `{ error: { code, message } }`, and a 500 with the code `not_configured` also fails at once,
-  with a "contact the site owner, then reload" reason: the server sends it when it has no
+  with a "contact the site owner, then press Try again" reason: the server sends it when it has no
   `GEMINI_API_KEY` and when Google rejects the key it has (an upstream 400/401/403 from the
-  mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. Both
-  fatal cases carry `fatal: true`, and the card offers "Reload page" instead of Retry.
-  The status turns `open` and the attempt count resets on the first server message of a session
-  (normally `setupComplete`), not when the socket opens, so a socket that opens and closes
-  without the server answering never shows "Live" and keeps climbing the backoff instead of
-  retrying at 0 ms. A resumed attempt that closes before the server answers drops its handle, so
-  the next attempt starts a fresh session instead of retrying a rejected handle, except when the
-  close is code 1008 with "already connected": Gemini still holds the dropped client, the handle
-  is fine, and the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
+  mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. The
+  fatal cases carry their kind (M6 T6): `fatal: 'token'` (a rejected nonce) makes the card offer
+  "Reload page", which brings a fresh nonce; `fatal: 'config'` makes it offer "Try again", which
+  asks the server again, since a reload can't fix a missing key.
+  The status turns `open` on the first server message of a session (normally `setupComplete`),
+  not when the socket opens, so a socket that opens and closes without the server answering
+  never shows "Live". The attempt count resets later still (M6 T6): once the session has stayed
+  open 5 s (`STABLE_SESSION_MS`) or the server has sent real content (`serverContent` or a
+  `toolCall`), so a server that completes setup and then closes every session keeps climbing the
+  backoff instead of retrying at 0 ms. `live.connect` resolves only on `setupComplete`, so an
+  attempt the server never answers fails after 10 s (`SETUP_TIMEOUT_MS`) and is retried; the
+  abandoned socket is closed if it ever lands. A resumed attempt that the server closes before
+  setup completes drops its handle, so the next attempt starts a fresh session instead of
+  retrying a rejected handle; a network failure (a socket error, a 1006 close with no close frame,
+  1001/1012–1014, `live.connect` rejecting, the setup timeout) keeps it. So does a close of code
+  1008 with "already connected": Gemini still holds the dropped client, the handle is fine, and
+  the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
   Connect/Retry starts a fresh budget and resets the loop guard. Unit-tested; not yet exercised
   against a real network drop in this form.
 - **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since
@@ -443,8 +451,9 @@ Decisions actually made (the open questions from the plan, resolved):
 shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
 / Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost), one primary button whose
 job follows the status and is never disabled (Connect; Cancel while connecting; Disconnect while
-live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, or Reload
-page when the failure is fatal), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
+live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, Reload
+page when the page's token is rejected, or Try again when the server isn't configured — a reload
+can't fix that, M6 T6), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
 the page to reconnect" after a rejected token). A blocked microphone is a `role="alert"` too. The Radix toast for the failed state arrives with the designed card in M7
 (#11).
 

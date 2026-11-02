@@ -243,7 +243,7 @@ describe('AgentApp + useLiveAgent', () => {
     expect(fakes.captures[0].stop).toHaveBeenCalled();
   });
 
-  it('on a fatal failure, offers Reload page instead of Retry', async () => {
+  it('on a fatal token failure, offers Reload page instead of Retry', async () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...window.location, reload });
     renderApp();
@@ -251,16 +251,44 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('failed', {
       attempt: 0,
       maxAttempts: 6,
-      reason:
-        "The server isn't configured to connect. Contact the site owner, then reload this page.",
-      fatal: true,
+      reason: 'This page can no longer get a connection token. Reload the page to reconnect.',
+      fatal: 'token',
     });
 
-    expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    expect(screen.getByRole('alert').textContent).toMatch(/Reload the page/);
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await click('Reload page');
     expect(reload).toHaveBeenCalledTimes(1);
     expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(1);
+  });
+
+  // M6 T6 (M4 re-review): a reload can't fix a server with no key, so the card
+  // offers no Reload page; Try again asks the server again (it works once the
+  // owner has fixed the key, without losing the page).
+  it('on a fatal config failure, offers Try again (no Reload page), keeping focus on the button', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload });
+    renderApp();
+    const button = screen.getByRole('button', { name: 'Connect' });
+    button.focus();
+    await click('Connect');
+    emitStatus('failed', {
+      attempt: 0,
+      maxAttempts: 6,
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then press Try again.",
+      fatal: 'config',
+    });
+
+    expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull();
+    expect(document.activeElement).toBe(button);
+    expect(button.textContent).toBe('Try again');
+    expect(button.disabled).toBe(false);
+
+    await click('Try again');
+    expect(reload).not.toHaveBeenCalled();
+    expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(2);
   });
 
   it('keeps focus on the primary button through connecting → reconnecting → failed', async () => {

@@ -364,6 +364,8 @@
   // An input whose value is its caption, so it names the button.
   const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
   const MAX_VALUE_LENGTH = 60;
+  // A snapshot node's name, whatever its source.
+  const MAX_NAME_LENGTH = 60;
   // A select's options listed in a snapshot (and in a failed fill's error).
   const MAX_OPTIONS = 20;
 
@@ -456,9 +458,12 @@
   // (it is "on" by default), and naming the notifications toggle "on" let the
   // model report it as already on without clicking it (the live e2e, M5 T5).
   // A text field's value is its content, reported as `value`, not its name;
-  // only a button-like input is named by its value (its caption). Past those,
-  // aria-labelledby's text, then the placeholder, then the title, so a field
-  // with only a placeholder isn't named ''.
+  // only a button-like input is named by its value (its caption). The order
+  // is the accessible-name spec's: aria-labelledby's text first, then
+  // aria-label, the <label>, the content or a button's caption, and last the
+  // placeholder, then the title, so a field with only a placeholder isn't
+  // named ''. Every source is cut to MAX_NAME_LENGTH (docs/code-review-notes.md,
+  // M5 re-review).
   /** @param {Element} el */
   function labelledByText(el) {
     const ids = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
@@ -478,16 +483,16 @@
       BUTTON_INPUT_TYPES.has(inputType(el)) && 'value' in el && typeof el.value === 'string'
         ? el.value
         : '';
-    return (
+    const name =
+      labelledByText(el) ||
       el.getAttribute('aria-label') ||
-      labelText.slice(0, 60) ||
-      el.textContent?.trim().slice(0, 60) ||
+      labelText ||
+      el.textContent?.trim() ||
       value ||
-      labelledByText(el).slice(0, 60) ||
       el.getAttribute('placeholder') ||
       el.getAttribute('title') ||
-      ''
-    );
+      '';
+    return name.slice(0, MAX_NAME_LENGTH);
   }
 
   /**

@@ -20,10 +20,16 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * @typedef {'connecting' | 'open' | 'reconnecting' | 'failed' | 'closed'} SessionStatus
  */
 /**
- * Sent with `reconnecting` and `failed` only. `fatal` marks a `failed` that
- * Retry can't fix (the page's token request is rejected, or the server is
- * misconfigured), so the UI offers a reload instead.
- * @typedef {{ attempt: number, maxAttempts: number, reason?: string, fatal?: boolean }} StatusDetails
+ * Why a `failed` can't be fixed by retrying on its own: `token` — this page's
+ * token request is rejected (an expired nonce, a wrong origin), which a reload
+ * fixes; `config` — the server has no key, or Google rejects it, which only
+ * the site owner can fix, so a reload is no help.
+ * @typedef {'config' | 'token'} FatalKind
+ */
+/**
+ * Sent with `reconnecting` and `failed` only. `fatal` marks a `failed` the
+ * backoff won't retry, and says which kind (the UI words its action by it).
+ * @typedef {{ attempt: number, maxAttempts: number, reason?: string, fatal?: FatalKind }} StatusDetails
  */
 /**
  * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptEntry
@@ -46,30 +52,38 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * @property {() => void} dispose Disconnects and unsubscribes from the bridge and the knowledge store.
  * @property {(base64Frame: string) => void} sendAudioFrame 16 kHz PCM; queued (bounded) until the socket is up.
  */
-/**
- * An Error that says whether retrying can help, and the reason to show if not.
- * @typedef {Error & { retryable: boolean, reason?: string }} TokenError
- */
 
 // Immediate, 1s, 3s, 7s, 15s, 30s — matches the backoff documented for the
 // original build (docs/project-knowledge-handoff.md §3.3).
 const RECONNECT_DELAYS = [0, 1000, 3000, 7000, 15000, 30000];
 const MAX_ATTEMPTS = RECONNECT_DELAYS.length;
+// live.connect resolves only once the server sends setupComplete, so a socket
+// that opens and then hears nothing would sit at `connecting` forever. Past
+// this, the attempt counts as failed and the backoff retries (M4 re-review).
+const SETUP_TIMEOUT_MS = 10_000;
+// The backoff resets only once a session has proved itself: it stayed open
+// this long, or the server sent real content (not just setupComplete). A
+// server that completes setup and then closes every session used to reset the
+// backoff each time and retry at 0 ms, bounded only by the token rate limit
+// (the M6 T3 deferral).
+const STABLE_SESSION_MS = 5_000;
 
 // A 4xx from /api/live-token means this page's own request is rejected
 // (expired nonce, wrong origin), so the same request will be rejected again:
 // burning the whole backoff on it would just delay the honest answer. 429 is
 // the exception — the server's rate limit clears on its own.
-const RELOAD_REASON =
-  'This page can no longer get a connection token. Reload the page to reconnect.';
 // The server marks a failure it can't recover from on its own (no
-// GEMINI_API_KEY) with the code `not_configured`: a 500, but retrying won't
-// help and a reload only helps once the key is fixed, so the reason points at
-// whoever runs the site first. server/app.js sends it for a missing key and for
-// a key Google rejects (an upstream 400/401/403); a mint that merely failed is
-// a retryable 502. Every server error has one shape, { error: { code, message } }.
-const MISCONFIGURED_REASON =
-  "The server isn't configured to connect. Contact the site owner, then reload this page.";
+// GEMINI_API_KEY) with the code `not_configured`: a 500, but neither the
+// backoff nor a reload can help until the key is fixed, so the reason points
+// at whoever runs the site, and the card's Try again asks the server again.
+// server/app.js sends it for a missing key and for a key Google rejects (an
+// upstream 400/401/403); a mint that merely failed is a retryable 502. Every
+// server error has one shape, { error: { code, message } }.
+/** @type {Record<FatalKind, string>} */
+const FATAL_REASONS = {
+  token: 'This page can no longer get a connection token. Reload the page to reconnect.',
+  config: "The server isn't configured to connect. Contact the site owner, then press Try again.",
+};
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
 // What Gemini closes a resume with (code 1008) when the reconnect arrives
@@ -82,6 +96,11 @@ const SESSION_STILL_ATTACHED = /already connected/i;
 // budget (M5 T5 and the M6 T5 baseline, docs/metrics/m06.md); the linear
 // ramp still gives Gemini ~6 s in all to let go before the budget runs out.
 const STILL_ATTACHED_RETRY_MS = 400;
+// Close codes that say nothing against a resume handle: no close frame at all
+// (1006, the network), or the server going away or asking to come back later
+// (1001, 1012–1014). Any other close of a resumed attempt before setup
+// completes is the server rejecting the handle (M4 re-review).
+const TRANSIENT_CLOSE_CODES = new Set([1001, 1006, 1012, 1013, 1014]);
 
 /** @param {number} status */
 function isRetryableStatus(status) {
@@ -96,24 +115,16 @@ function isRecord(value) {
   return typeof value === 'object' && value !== null;
 }
 
-/**
- * @param {string} message The server's own error text; empty for none.
- * @param {number} status
- * @param {boolean} retryable
- * @param {string} [reason]
- * @returns {TokenError}
- */
-function tokenError(message, status, retryable, reason) {
-  const error = new Error(message || `Token request failed: ${status}`);
-  return Object.assign(error, reason === undefined ? { retryable } : { retryable, reason });
-}
-
-/**
- * @param {unknown} error
- * @returns {error is TokenError}
- */
-function isTokenError(error) {
-  return error instanceof Error && 'retryable' in error && typeof error.retryable === 'boolean';
+// A token request the backoff mustn't retry; any other Error is retryable.
+class FatalTokenError extends Error {
+  /**
+   * @param {string} message
+   * @param {FatalKind} kind
+   */
+  constructor(message, kind) {
+    super(message);
+    this.kind = kind;
+  }
 }
 
 // Expanded per docs/code-review-notes.md B4 now that tools exist: role,
@@ -201,10 +212,15 @@ export function createLiveSession({
   let manuallyClosed = false;
   /** @type {string[]} */
   let pendingFrames = [];
-  // Per attempt: whether the server has sent anything yet (what `open` and the
-  // backoff reset hang on), and whether the attempt asked to resume a session.
+  // Per attempt: whether the server has sent anything yet (what `open` hangs
+  // on), whether the attempt asked to resume a session, the setup timeout,
+  // and the timer that resets the backoff once the session is stable.
   let serverAnswered = false;
   let attemptResumed = false;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let setupTimer = null;
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let stableTimer = null;
   // For the timing marks: whether this conversation has had its first audio
   // chunk yet, and whether a drop is being recovered from.
   let awaitingFirstAudio = false;
@@ -413,11 +429,15 @@ export function createLiveSession({
     onStatusChange?.(status, details);
   }
 
+  function clearTimer(/** @type {ReturnType<typeof setTimeout> | null} */ timer) {
+    if (timer) clearTimeout(timer);
+    return null;
+  }
+
   function teardown() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
+    reconnectTimer = clearTimer(reconnectTimer);
+    setupTimer = clearTimer(setupTimer);
+    stableTimer = clearTimer(stableTimer);
     session?.close();
     session = null;
   }
@@ -431,16 +451,13 @@ export function createLiveSession({
       /** @type {unknown} */
       const body = await res.json().catch(() => ({}));
       const apiError = isRecord(body) && isRecord(body.error) ? body.error : {};
-      const message = typeof apiError.message === 'string' ? apiError.message : '';
-      /** @type {TokenError} */
-      let error;
-      if (apiError.code === 'not_configured') {
-        error = tokenError(message, res.status, false, MISCONFIGURED_REASON);
-      } else {
-        const retryable = isRetryableStatus(res.status);
-        error = tokenError(message, res.status, retryable, retryable ? undefined : RELOAD_REASON);
-      }
-      throw error;
+      const message =
+        typeof apiError.message === 'string' && apiError.message
+          ? apiError.message
+          : `Token request failed: ${res.status}`;
+      if (apiError.code === 'not_configured') throw new FatalTokenError(message, 'config');
+      if (!isRetryableStatus(res.status)) throw new FatalTokenError(message, 'token');
+      throw new Error(message);
     }
     /** @type {unknown} */
     const body = await res.json();
@@ -448,7 +465,7 @@ export function createLiveSession({
     // `new GoogleGenAI` outside openSession's try, so the attempt rejected
     // unhandled and the status sat at `connecting` instead of retrying.
     if (!isRecord(body) || typeof body.token !== 'string') {
-      throw tokenError('The token response had no token.', res.status, true);
+      throw new Error('The token response had no token.');
     }
     return body.token;
   }
@@ -459,20 +476,26 @@ export function createLiveSession({
    */
   function handleMessage(message, gen) {
     // The server answering (setupComplete is its first message) is what
-    // proves the session healthy — not onopen, which only proves the socket
-    // opened. So both `open` and the backoff reset happen here, together:
-    // resetting on onopen let open-then-immediate-close cycles retry at delay
-    // 0 forever, and reporting `open` there showed "Live" for sockets the
-    // server was about to reject.
+    // makes the session `open` — not onopen, which only proves the socket
+    // opened and showed "Live" for sockets the server was about to reject.
+    // The backoff reset waits longer (STABLE_SESSION_MS): setupComplete
+    // followed by a close, every time, must keep climbing the backoff.
     if (!serverAnswered) {
       serverAnswered = true;
-      attempt = 0;
+      stableTimer = setTimeout(() => {
+        stableTimer = null;
+        if (gen === generation) attempt = 0;
+      }, STABLE_SESSION_MS);
       mark('ds:open');
       if (recovering) {
         recovering = false;
         mark('ds:reconnected');
       }
       setStatus('open');
+    }
+    if (stableTimer && (message.serverContent || message.toolCall)) {
+      stableTimer = clearTimer(stableTimer);
+      attempt = 0;
     }
     if (message.serverContent?.interrupted) {
       onInterrupted?.();
@@ -508,23 +531,27 @@ export function createLiveSession({
   /**
    * @param {number} gen
    * @param {unknown} error Anything a failed attempt threw, or the socket's Error.
-   * @param {boolean} [handleStillValid] The server refused a resume only because
-   *   the dropped client is still attached; keep the handle for the next attempt.
+   * @param {{ handleRejected?: boolean, stillAttached?: boolean }} [close] Set by
+   *   onclose only. `handleRejected`: the server closed the attempt for a reason
+   *   that isn't the network's. `stillAttached`: it refused a resume only because
+   *   the dropped client is still attached (the handle is fine, just early).
    */
-  function handleFailure(gen, error, handleStillValid = false) {
+  function handleFailure(gen, error, { handleRejected = false, stillAttached = false } = {}) {
     if (manuallyClosed || gen !== generation) return;
     generation += 1;
     teardown();
-    // A resumed attempt that dies before the server says anything most likely
-    // had its handle rejected (expired, or from a session the server dropped).
-    // Retrying with it would fail the same way every time, so start fresh.
-    if (attemptResumed && !serverAnswered && !handleStillValid) resumeHandle = null;
-    if (isTokenError(error) && !error.retryable) {
+    // A resumed attempt the server closes before setup completes had its
+    // handle rejected (expired, or from a session it dropped); retrying with it
+    // would fail the same way every time, so start fresh. A network failure
+    // (an error, a close with no close frame, the setup timeout) says nothing
+    // against the handle, and keeps it (M4 re-review).
+    if (attemptResumed && !serverAnswered && handleRejected) resumeHandle = null;
+    if (error instanceof FatalTokenError) {
       setStatus('failed', {
         attempt,
         maxAttempts: MAX_ATTEMPTS,
-        reason: error.reason ?? RELOAD_REASON,
-        fatal: true,
+        reason: FATAL_REASONS[error.kind],
+        fatal: error.kind,
       });
       return;
     }
@@ -532,7 +559,7 @@ export function createLiveSession({
       setStatus('failed', { attempt, maxAttempts: MAX_ATTEMPTS, reason: EXHAUSTED_REASON });
       return;
     }
-    const delay = handleStillValid
+    const delay = stillAttached
       ? Math.min(RECONNECT_DELAYS[attempt], STILL_ATTACHED_RETRY_MS * attempt)
       : RECONNECT_DELAYS[attempt];
     attempt += 1;
@@ -590,6 +617,13 @@ export function createLiveSession({
 
     const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: 'v1alpha' } });
     attemptResumed = Boolean(resumeHandle);
+    // The abandoned socket can't be closed from here (live.connect hasn't
+    // returned it); the generation check below closes it if it ever lands,
+    // and ignores its callbacks until then.
+    setupTimer = setTimeout(() => {
+      setupTimer = null;
+      handleFailure(gen, new Error('The voice service did not answer in time.'));
+    }, SETUP_TIMEOUT_MS);
 
     try {
       const newSession = await ai.live.connect({
@@ -603,12 +637,15 @@ export function createLiveSession({
           },
           onerror: () =>
             handleFailure(gen, new Error('The connection to the voice service failed.')),
-          onclose: (event) =>
-            handleFailure(
-              gen,
-              new Error('The connection to the voice service closed.'),
-              event?.code === 1008 && SESSION_STILL_ATTACHED.test(event.reason ?? ''),
-            ),
+          onclose: (event) => {
+            const stillAttached =
+              event?.code === 1008 && SESSION_STILL_ATTACHED.test(event.reason ?? '');
+            const transient = event?.code === undefined || TRANSIENT_CLOSE_CODES.has(event.code);
+            handleFailure(gen, new Error('The connection to the voice service closed.'), {
+              stillAttached,
+              handleRejected: !stillAttached && !transient,
+            });
+          },
         },
         config: {
           responseModalities: [Modality.AUDIO],
@@ -624,6 +661,7 @@ export function createLiveSession({
         newSession.close();
         return;
       }
+      setupTimer = clearTimer(setupTimer);
       session = newSession;
       pendingFrames.forEach(sendFrame);
       pendingFrames = [];

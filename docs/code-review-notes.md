@@ -3,8 +3,11 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M1–M6, L1, L6, L9, L11 and L12 are done (H1
-> with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3); the rest are open.
+> code instead. Status at a glance (M6 T6): **closed out.** B1–B4, H1–H5, M1–M9, L1, L6 and
+> L9–L12 are done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3;
+> M7, M8 and L10 in M6 T4; M9 in M6 T5). L2, L3, L4, L5, L7 and L8 are deferred to M7 (issue
+> #11): each is a card item the designed card replaces, and M7's T1–T3 name them. The M4 and M5
+> re-review items accepted for M6 are fixed in M6 T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -119,6 +122,26 @@ fragments into one bubble rather than pushing a new entry per fragment.
 > which lost the conversation. `liveSession.js` now keeps the handle for that close reason
 > (`SESSION_STILL_ATTACHED`), and the backoff's next attempt, 1 s later, resumes. Tested in
 > `liveSession.test.js`. The live numbers are in `docs/metrics/README.md`.
+>
+> **M6 T6 (the M4 re-review and the M6 T3 deferral).** Four reconnect gaps, closed in
+> `liveSession.js` and tested in `liveSession.test.js` with fake timers:
+> - *Setup timeout.* `live.connect` resolves only on `setupComplete`, so a socket that opened and
+>   then heard nothing sat at `connecting` forever. After `SETUP_TIMEOUT_MS` (10 s) the attempt
+>   fails as a retryable failure on its own generation; the abandoned socket is closed if it
+>   ever lands, and its callbacks are ignored.
+> - *The resume handle survives the network.* It used to be dropped by any resumed attempt that
+>   died before the server answered. Now only a server close (any code but 1006 — no close
+>   frame — and the come-back-later 1001/1012–1014, `TRANSIENT_CLOSE_CODES`) drops it; a socket
+>   error, a 1006, `live.connect` rejecting or the setup timeout keep it.
+> - *The backoff reset waits for a stable session.* It used to reset on the first server
+>   message, so setupComplete-then-close retried at 0 ms each cycle (bounded only by the token
+>   rate limit). It now resets after `STABLE_SESSION_MS` (5 s) open, or on the first real content
+>   (`serverContent` or a `toolCall`). `open` is still reported on the first message.
+> - *Two kinds of fatal failure.* `StatusDetails.fatal` is `'token'` (a 4xx: the page's nonce is
+>   rejected; the card offers Reload page) or `'config'` (`not_configured`: no key, or Google
+>   rejects it; a reload can't help, so the card offers Try again, which asks the server again
+>   and connects once the owner has fixed the key). Card: `useLiveAgent.test.jsx` (focus stays
+>   on the button, no Reload page); browser: `e2e/loop.spec.js`, both paths from the keyboard.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -239,6 +262,10 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 > (`script-src 'self'`); style injection can restyle the page but not run code. Revisit if the
 > styles move to a constructable stylesheet and Radix stops injecting. Tests:
 > `server/__tests__/app.test.js`.
+>
+> **M6 T6 (the M5 re-review).** `server/app.js`'s `errorPage()` (the 404 and page-load 429
+> pages) escapes all three arguments with `escapeHtml()`, so a later caller passing a path or
+> a message can't inject markup; today's callers pass constants. Tested in `app.test.js`.
 
 `server/index.js:35` returns an ephemeral Gemini token to any GET — no origin/referer check, no
 rate limit, no per-page nonce. In the real product the iframe holds a crawled clone of a
@@ -288,10 +315,11 @@ Suggested, in rough order of value:
 > `open` → `reconnecting` → `open` → … → `failed`; `reconnecting` (not `failed`) while a retry is
 > pending; the loop guard's 4th-call block; a manual connect after `failed` resetting the
 > attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
-> server message, not `onopen`); a 4xx token response failing at once with a reload reason while
+> server message, not `onopen` — since M6 T6 only after 5 s open or the first content, see B2); a 4xx token response failing at once with a reload reason while
 > 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
 > The M4 fix wave added: `open` reported on the first server message; a `retryable: false` 500
-> (missing key) failing at once, with `fatal` set for every non-retryable failure; a late
+> (missing key) failing at once, with `fatal` set for every non-retryable failure (since M6 T6
+> its kind, `'config'` or `'token'`, see B2); a late
 > `onclose` after a manual disconnect staying `closed`; every (re)connect requesting a snapshot
 > and sending the next one as a keyframe; buffered connect-time audio flushed and capped at 20; the
 > loop guard reset on a manual connect; a rejected resumption handle dropped; and a throwing
@@ -390,6 +418,12 @@ if (message.toolCall) {
 >   attribute.
 >
 > Tested in `liveSession.test.js`, `bridge.test.js` and `e2e/loop.spec.js`.
+>
+> **M6 T6 (the M5 re-review).** `sandbox/bridge.js`'s `labelFor()` follows the accessible-name
+> order: `aria-labelledby`'s text first, then `aria-label`, the `<label>`, the text, a
+> button-like input's value, the placeholder and the title; and every source, the placeholder,
+> title and `aria-label` included, is cut to 60 characters (`MAX_NAME_LENGTH`). Tested in
+> `bridge.test.js`.
 
 Two issues in one area:
 
@@ -635,17 +669,29 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
   sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
   thread into `public/capture-worklet.js`.*
-- [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
+- [x] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
-- [ ] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
+  *Deferred: `VolumeMeter` didn't survive the rebuild; its
+  successor, the volume orb (rAF, a `prefers-reduced-motion` branch), and the `aria-live`
+  transcript are the designed card's work, not hardening → M7 (issue #11, T2 and T3).*
+- [x] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
-- [ ] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
+  *Deferred: today's card has no z-index at all; host positioning and
+  `z-index` on the host element come with the card's styles, so they are set once, on the
+  final layout → M7 (issue #11, T1).*
+- [x] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
   widget only survives because `.ds-card` is `position:fixed`. Add an explicit
   `:host { display: block; }` (or `contents`) so it doesn't depend on that coincidence.
-- [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
+  *Deferred: still true of `main.jsx`'s `:host { all: initial; }`; the
+  card's styles move to `styles.css` with tokens on `:host`, where the explicit `display`
+  belongs → M7 (issue #11, T1).*
+- [x] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
+  *Deferred: today's card keeps and renders every line (no bound at all,
+  the M1 rebuild dropped both); the coalesced transcript bounds the list to 20 and renders the
+  last 3 → M7 (issue #11, T3).*
 - [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.
@@ -658,12 +704,16 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   no longer throws (`knowledgeStore.test.js`); `bridgeChannel.js`'s action ids keep
   `crypto.randomUUID()`, since actions only run in a session, which now can't start outside a
   secure context. Handoff §3.3 notes both halves.*
-- [ ] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
+- [x] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
   linting. `import styles from './styles.css?inline'` keeps the single-file IIFE build and
   restores tooling / syntax highlighting.
-- [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
+  *Deferred: the CSS is still a template literal in `main.jsx`; it moves
+  to `src/styles.css?inline` with the card's tokens → M7 (issue #11, T1).*
+- [x] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
+  *Deferred: `VolumeMeter` and its refs didn't survive the rebuild; the
+  orb that replaces it holds its node in a ref and is checked by a Profiler render-count test → M7 (issue #11, T2).*
 - [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.

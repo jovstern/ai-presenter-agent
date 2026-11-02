@@ -178,7 +178,11 @@ test.describe('when the server has no API key', () => {
   // The stubbed 500 is logged by the browser as a failed resource load.
   test.use({ allowedConsoleErrors: [/status of 500/] });
 
-  test('a not_configured token error offers a reload and never retries', async ({ page }) => {
+  // A reload can't fix a missing key, so there is no Reload page: Try again,
+  // on the same focused button, asks the server again (M6 T6).
+  test('a not_configured token error offers Try again, not a reload, and never retries by itself', async ({
+    page,
+  }) => {
     const token = await stubToken(page, {
       status: 500,
       body: {
@@ -189,16 +193,49 @@ test.describe('when the server has no API key', () => {
     const { status, alert, button } = card(page);
 
     await page.goto('/');
-    await button('Connect').click();
+    await button('Connect').focus();
+    await page.keyboard.press('Enter');
 
     await expect(status).toHaveText('Connection lost');
     await expect(alert).toHaveText(
-      "The server isn't configured to connect. Contact the site owner, then reload this page.",
+      "The server isn't configured to connect. Contact the site owner, then press Try again.",
     );
-    await expect(button('Reload page')).toBeVisible();
+    await expect(button('Try again')).toBeFocused();
+    await expect(button('Reload page')).toHaveCount(0);
     // The backoff's first retry is immediate; give it room to (wrongly) happen.
     await page.waitForTimeout(1500);
     expect(token.count).toBe(1);
     expect(live.sockets).toHaveLength(0);
+
+    // Try again asks the server once more, and fails the same way.
+    await page.keyboard.press('Enter');
+    await expect.poll(() => token.count).toBe(2);
+    await expect(button('Try again')).toBeFocused();
+    expect(live.sockets).toHaveLength(0);
+  });
+});
+
+test.describe('when the page nonce is rejected', () => {
+  test.use({ allowedConsoleErrors: [/status of 403/] });
+
+  // A rejected nonce is this page's own problem: a reload brings a fresh one.
+  test('a 403 token error offers Reload page and never retries', async ({ page }) => {
+    const token = await stubToken(page, {
+      status: 403,
+      body: { error: { code: 'invalid_nonce', message: 'Unknown or expired nonce' } },
+    });
+    const { status, alert, button } = card(page);
+
+    await page.goto('/');
+    await button('Connect').focus();
+    await page.keyboard.press('Enter');
+
+    await expect(status).toHaveText('Connection lost');
+    await expect(alert).toHaveText(
+      'This page can no longer get a connection token. Reload the page to reconnect.',
+    );
+    await expect(button('Reload page')).toBeFocused();
+    await page.waitForTimeout(1500);
+    expect(token.count).toBe(1);
   });
 });

@@ -179,16 +179,29 @@ function contentSecurityPolicy(production) {
   };
 }
 
+/** @type {Record<string, string>} */
+const HTML_ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/**
+ * Text made safe for an HTML element or a quoted attribute.
+ * @param {string} text
+ */
+export function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (char) => HTML_ENTITIES[char] ?? char);
+}
+
 /**
  * The one look for the server's own HTML pages (the 404 and the page-load
  * 429), so they match: a heading, a line of text and a link back to the
- * demo. Static text only (callers pass constants), no script, under the same
- * CSP as everything else.
- * @param {string} title
- * @param {string} text
- * @param {string} linkText
+ * demo. Today's callers pass constants, but every argument is escaped anyway,
+ * so a later caller passing a path or a message can't inject markup. No
+ * script, under the same CSP as everything else.
+ * @param {string} rawTitle
+ * @param {string} rawText
+ * @param {string} rawLinkText
  */
-function errorPage(title, text, linkText) {
+export function errorPage(rawTitle, rawText, rawLinkText) {
+  const [title, text, linkText] = [rawTitle, rawText, rawLinkText].map(escapeHtml);
   return `<!doctype html>
 <html lang="en">
   <head>

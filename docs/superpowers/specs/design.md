@@ -48,7 +48,12 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       included, no force pushes.)*
 
 **M6: hardening and tuning (issue #5)**
-- [ ] R14 Every remaining M and L item is closed or deferred with a reason.
+- [x] R14 Every remaining M and L item is closed or deferred with a reason. *(M6 T6: every M
+      item and L1, L6, L9–L12 are fixed; L2, L3, L4, L5, L7 and L8 are card items, deferred
+      → M7 (its T1–T3 name them). The M4 and M5 re-review items are fixed too:
+      `fatal: 'config' | 'token'`, a 10 s setup timeout, the resume handle kept on a network
+      failure, the backoff reset after 5 s or the first content, `labelFor`'s order and cap,
+      `errorPage` escaping.)*
 - [x] R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
       same-origin under `script-src 'self'`; 16 kHz Int16 80 ms frames; `e2e/audio.spec.js`.)*
 - [x] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
@@ -172,8 +177,9 @@ fails with `… has no option "X"; options: A, B, C` and leaves the selection as
 Routes: `target-app/routes.json` (`{name: path}`) is the one list. The server templates it into
 the sandbox page as `<script type="application/json" id="ds-routes">` (`<` escaped), the bridge
 reads that block (and throws at load without it), and `actionTools.js` imports the file as
-`navigate`'s enum (M6 T1, `code-review-notes.md` M1). A control with no `<label>` falls back to its text, then (for a button-like
-input) its value, then `aria-labelledby`'s text, its placeholder and its title.
+`navigate`'s enum (M6 T1, `code-review-notes.md` M1). A node's name follows the accessible-name
+order: `aria-labelledby`'s text, `aria-label`, its `<label>`, its text, (for a button-like
+input) its value, its placeholder, its title — every source cut to 60 characters (M6 T6).
 
 Local storage stays as it is in `knowledgeStore.js`.
 
@@ -194,7 +200,7 @@ come from `status`.
 | connecting | pending button, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
-| failed | "Connection lost" plus a Retry button (or "Reload page" when the failure is fatal), and a Radix toast once |
+| failed | "Connection lost" and the reason (`role="alert"`) plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it). A Radix toast once |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |

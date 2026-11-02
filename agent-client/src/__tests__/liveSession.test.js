@@ -120,7 +120,8 @@ describe('createLiveSession', () => {
     const first = await connectAndEstablish(liveSession);
 
     drop(first);
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Long, but under SETUP_TIMEOUT_MS, which would fail the still-pending retry.
+    await vi.advanceTimersByTimeAsync(9_000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(live.calls).toHaveLength(2);
@@ -144,7 +145,7 @@ describe('createLiveSession', () => {
 
     // Late callbacks from the stale socket don't schedule anything either.
     stale.params.callbacks.onclose({});
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(9_000); // under SETUP_TIMEOUT_MS: `current` is still pending
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await establish(current);
@@ -374,6 +375,7 @@ describe('createLiveSession', () => {
     drop(first);
     await flush();
     await establish(live.calls[1]);
+    await vi.advanceTimersByTimeAsync(5_000); // stable for STABLE_SESSION_MS: the backoff resets
 
     expect(statusNames()).toEqual(['connecting', 'open', 'reconnecting', 'open']);
     expect(statuses[2]).toMatchObject({ attempt: 1, maxAttempts: MAX_ATTEMPTS });
@@ -487,25 +489,132 @@ describe('createLiveSession', () => {
     expect(statuses.map((s) => s.status)).not.toContain('open'); // the server never answered
   });
 
-  it('resets the backoff once the server has answered, so the next drop retries immediately', async () => {
-    const { liveSession, statuses } = setup();
-    const first = await connectAndEstablish(liveSession);
-    drop(first);
-    await flush();
-    const second = await (async () => {
-      const call = live.calls[1];
-      await establish(call); // setupComplete arrives → healthy again
-      return call;
-    })();
+  // M6 T6 (the M6 T3 deferral): setupComplete alone no longer resets the
+  // backoff. A server that completes setup and then closes every session
+  // used to retry at 0 ms forever (bounded only by the token rate limit).
+  describe('backoff reset (STABLE_SESSION_MS)', () => {
+    const reconnectAttempts = (statuses) =>
+      statuses.filter((s) => s.status === 'reconnecting').map((s) => s.attempt);
 
-    drop(second);
-    await flush();
+    it('keeps climbing when sessions complete setup and then close', async () => {
+      const { liveSession, statuses } = setup();
+      const setupThenClose = async (call) => {
+        await establish(call);
+        call.params.callbacks.onclose({ code: 1011 });
+      };
+      await setupThenClose(await connectAndEstablish(liveSession)); // → retry 1 at 0 ms
+      await flush();
+      await setupThenClose(live.calls[1]); // → retry 2 at 1 s
+      await vi.advanceTimersByTimeAsync(999);
+      expect(live.calls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await setupThenClose(live.calls[2]); // → retry 3 at 3 s
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(live.calls).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
 
-    expect(live.calls).toHaveLength(3);
-    const reconnectAttempts = statuses
-      .filter((s) => s.status === 'reconnecting')
-      .map((s) => s.attempt);
-    expect(reconnectAttempts).toEqual([1, 1]);
+      expect(live.calls).toHaveLength(4);
+      expect(reconnectAttempts(statuses)).toEqual([1, 2, 3]);
+    });
+
+    it('resets once a session has stayed open for STABLE_SESSION_MS, so the next drop retries immediately', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      drop(second);
+      await flush();
+
+      expect(live.calls).toHaveLength(3);
+      expect(reconnectAttempts(statuses)).toEqual([1, 1]);
+    });
+
+    it('resets on the first real server content, before STABLE_SESSION_MS', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      second.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: 'Welcome back.' } },
+      });
+
+      drop(second);
+      await flush();
+
+      expect(live.calls).toHaveLength(3);
+      expect(reconnectAttempts(statuses)).toEqual([1, 1]);
+    });
+
+    it('does not reset on a session that drops before STABLE_SESSION_MS with no content', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      second.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      drop(second);
+      await flush();
+
+      expect(reconnectAttempts(statuses)).toEqual([1, 2]);
+    });
+  });
+
+  // M6 T6 (M4 re-review): live.connect resolves only on setupComplete, so a
+  // socket that opens and then hears nothing would sit at `connecting` forever.
+  describe('setup timeout (SETUP_TIMEOUT_MS)', () => {
+    it('retries an attempt whose server never completes setup, and closes it if it answers late', async () => {
+      const { liveSession, statuses, statusNames } = setup();
+      liveSession.connect();
+      await flush();
+      const silent = live.calls[0];
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(statusNames()).toEqual(['connecting']);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(statuses.at(-1)).toMatchObject({ status: 'reconnecting', attempt: 1 });
+      expect(statuses.at(-1).reason).toMatch(/did not answer/i);
+      // Retry 1 runs at 0 ms; fake timers run a 0 ms timer set inside another
+      // timer's callback 1 ms later.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(live.calls).toHaveLength(2);
+
+      // The abandoned attempt is a retired generation: closed if it lands late,
+      // and its callbacks are ignored.
+      silent.resolve();
+      await flush();
+      expect(silent.session.close).toHaveBeenCalled();
+      silent.params.callbacks.onclose({ code: 1006 });
+      expect(live.calls).toHaveLength(2);
+      await establish(live.calls[1]);
+      expect(statusNames().at(-1)).toBe('open');
+    });
+
+    it('is cleared once setup completes', async () => {
+      const { liveSession, statusNames } = setup();
+      await connectAndEstablish(liveSession);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(statusNames()).toEqual(['connecting', 'open']);
+      expect(live.calls).toHaveLength(1);
+    });
+
+    it('is cleared by a disconnect', async () => {
+      const { liveSession, statusNames } = setup();
+      liveSession.connect();
+      await flush();
+      liveSession.disconnect();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(statusNames()).toEqual(['connecting', 'closed']);
+      expect(live.calls).toHaveLength(1);
+    });
   });
 
   it("echoes the page nonce on the token request, and reports the server's error message", async () => {
@@ -532,7 +641,7 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1).reason).toMatch(/reload/i);
-    expect(statuses.at(-1).fatal).toBe(true);
+    expect(statuses.at(-1).fatal).toBe('token'); // a reload gets a fresh nonce
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -605,7 +714,7 @@ describe('createLiveSession', () => {
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
   });
-  it('treats a not_configured server error as fatal, with a contact-the-owner reason', async () => {
+  it('treats a not_configured server error as a fatal config failure, with a contact-the-owner reason', async () => {
     fetchMock.mockImplementation(async () =>
       tokenResponse(500, apiError('not_configured', "The server isn't configured to connect")),
     );
@@ -617,10 +726,11 @@ describe('createLiveSession', () => {
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
       reason:
-        "The server isn't configured to connect. Contact the site owner, then reload this page.",
-      fatal: true,
+        "The server isn't configured to connect. Contact the site owner, then press Try again.",
+      fatal: 'config', // a reload can't help; asking the server again can, once it's fixed
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('reports open on the first server message, not when the socket opens', async () => {
@@ -741,6 +851,40 @@ describe('createLiveSession', () => {
     expect(greetings(fresh.session)).toHaveLength(1);
   });
 
+  // M6 T6 (M4 re-review): only the server rejecting the handle clears it. A
+  // resumed attempt that fails on the network says nothing about the handle.
+  describe('a resumed attempt that fails on the network keeps the handle', () => {
+    async function resumedAttempt() {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      await flush();
+      const resumed = live.calls[1];
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      return resumed;
+    }
+
+    it.each([
+      ['a socket error and an abnormal close (1006)', (call) => drop(call)],
+      ['live.connect rejecting', (call) => call.reject(new TypeError('network'))],
+      ['a going-away close (1001)', (call) => call.params.callbacks.onclose({ code: 1001 })],
+    ])('%s', async (_name, fail) => {
+      const resumed = await resumedAttempt();
+      fail(resumed);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(live.calls[2].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    });
+
+    it('the setup timeout', async () => {
+      await resumedAttempt();
+      await vi.advanceTimersByTimeAsync(10_000 + 1_000);
+      expect(live.calls[2].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    });
+  });
+
   it('keeps the resumption handle when the server refuses a resume because the old client is still attached', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -819,7 +963,9 @@ describe('createLiveSession', () => {
         });
       }
       drop(first);
-      await flush();
+      // The backoff hasn't reset (no STABLE_SESSION_MS, no content), so a
+      // second drop's retry waits 1 s.
+      await vi.advanceTimersByTimeAsync(1_000);
       const second = live.calls.at(-1);
       await establish(second);
       return second;

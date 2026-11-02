@@ -59,8 +59,9 @@ corner and allow microphone access: the agent greets you once the session is ope
 speak on page load). Try asking it to increment the counter, search for something, or go to
 Settings, turn on notifications and save. The card's one button follows the connection: Connect,
 Cancel while connecting, Disconnect while live or reconnecting, and Retry if the connection is
-lost for good, or Reload page when retrying can't help (the reason shows under the status
-line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
+lost for good. When retrying can't help, it says what can: Reload page when the page's token
+is rejected, or Try again (asks the server once more) when the server isn't configured, which a
+reload can't fix (the reason shows under the status line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
@@ -98,17 +99,20 @@ The suite in `agent-client/src/__tests__/`:
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
   during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
   retried after 400 ms × the attempt; knowledge not resent to a resumed session (M9); the `ds:*`
-  timing and size marks.
+  timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
+  on a server close; the backoff reset only after 5 s open or the first content; the two fatal
+  kinds (`config`, `token`).
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
-  Reload page on a fatal failure) with focus kept on it, the status line and alerts.
+  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
   isn't a text input, sets the value through the native setter and fires `input` + `change`, and
   picks a select's option by visible text, then value (no match fails and names the options);
   a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
-  checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot.
+  checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
+  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters.
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
@@ -151,7 +155,9 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
-  connected". And a `not_configured` 500 goes straight to "Reload page" with no retries.
+  connected". A `not_configured` 500 goes straight to "Try again" (no Reload page, no automatic
+  retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload page", both
+  driven from the keyboard with focus kept on the button.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
@@ -176,7 +182,7 @@ The suite in `server/__tests__/`:
   error, 200), the error handler (a plain error is a 500 without internals; only an `expose`d
   client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
   with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
-  otherwise), no inline script on any page, the CSP and other headers
+  otherwise), no inline script on any page, `errorPage` escaping its arguments, the CSP and other headers
   (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
   nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.

@@ -160,9 +160,10 @@ needed; this is intentionally the simplest piece.
 ### 5.3 DOM grounding snapshot
 
 - Flattened list of interactive/meaningful nodes only: tag, name, the `data-testid`-based
-  selector, visibility/enabled flags. A form control is named by its `aria-label` or `<label>`
-  (never by a checkbox's `value`, which is "on"), falling back to its text, a button-like
-  input's value, `aria-labelledby`'s text, its placeholder and its title; a checkbox or radio
+  selector, visibility/enabled flags. A node is named in the accessible-name order:
+  `aria-labelledby`'s text, its `aria-label`, its `<label>` (never a checkbox's `value`, which is
+  "on"), its text, a button-like input's value, its placeholder and its title, every source cut
+  to 60 characters; a checkbox or radio
   carries `checked`; a text input, textarea or select carries its `value` (never a hidden
   input's, a password's or a card-number / one-time-code field's; cut to 60 characters), so a
   `fill` shows up in the next snapshot. A select's `value` is its selected option's visible

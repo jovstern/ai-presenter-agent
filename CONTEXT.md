@@ -54,15 +54,23 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   script on this page. Reusable until it expires, not single-use, because every reconnect needs
   a new token.
 - **Attempt** — one try at opening the socket. After a drop the session reconnects with a
-  backoff, up to a fixed number of attempts, then goes `failed` (`liveSession.js`).
+  backoff, up to a fixed number of attempts, then goes `failed` (`liveSession.js`). An attempt
+  the server never answers with `setupComplete` fails after the **setup timeout** (10 s). The
+  attempt count resets only once a session is **stable**: open for 5 s, or the server has sent
+  real content.
 - **Generation** — a counter in `liveSession.js` bumped by every connect, drop and disconnect.
   A callback from an older generation (a late socket event, a tool batch from a dead session)
   sees the mismatch and does nothing.
 - **Resume handle** — the id Gemini sends so a reconnect can resume the same conversation
-  instead of starting over (`liveSession.js`). A resumed session is not greeted again.
-- **Fatal failure** — a `failed` status that Retry can't fix (the token request is rejected,
-  or the server has no key or Google rejects it: `not_configured`), so the card offers Reload page instead, with the reason
-  (`fatal` in `liveSession.js`'s `StatusDetails`).
+  instead of starting over (`liveSession.js`). A resumed session is not greeted again. It is
+  dropped only when the server closes a resumed attempt before setup (a rejection), never on a
+  network failure.
+- **Fatal failure** — a `failed` status the backoff doesn't retry (`fatal` in
+  `liveSession.js`'s `StatusDetails`), of one of two **kinds**: `token` — this page's token
+  request is rejected (an expired nonce), so the card offers Reload page, which brings a fresh
+  nonce; `config` — the server has no key or Google rejects it (`not_configured`), which a
+  reload can't fix, so the card offers Try again, which asks the server again. Either way with
+  the reason.
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`).

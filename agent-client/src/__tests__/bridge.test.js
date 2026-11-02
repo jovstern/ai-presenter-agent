@@ -587,4 +587,29 @@ describe('sandbox/bridge.js snapshots', () => {
       ['by-title', 'Your email'],
     ]);
   });
+
+  // The accessible-name order (accname 1.2): aria-labelledby wins over
+  // aria-label, a <label> and the content.
+  it('names an element by aria-labelledby before aria-label, its label or its text', async () => {
+    const { full } = await loadPage(`
+      <span id="cap">Promo code</span>
+      <label for="f">Code</label>
+      <input id="f" data-testid="field" aria-labelledby="cap" aria-label="Ignored" />
+      <button data-testid="btn" aria-labelledby="cap">Apply</button>`);
+
+    expect(full.map((node) => [node.selector, node.label])).toEqual([
+      ['field', 'Promo code'],
+      ['btn', 'Promo code'],
+    ]);
+  });
+
+  it('caps every name source at 60 characters, placeholder, title and aria-label included', async () => {
+    const long = 'x'.repeat(100);
+    const { full } = await loadPage(`
+      <input data-testid="by-placeholder" placeholder="${long}" />
+      <input data-testid="by-title" title="${long}" />
+      <button data-testid="by-aria-label" aria-label="${long}">Go</button>`);
+
+    expect(full.map((node) => node.label.length)).toEqual([60, 60, 60]);
+  });
 });

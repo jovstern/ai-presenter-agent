@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import pino from 'pino';
 import request from 'supertest';
 import ROUTES from '../../target-app/routes.json' with { type: 'json' };
-import { createApp, jsonForScriptBlock } from '../app.js';
+import { createApp, errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
 
 const HOST = 'agent.test';
 const ORIGIN = `http://${HOST}`;
@@ -357,6 +357,23 @@ describe('jsonForScriptBlock', () => {
 
     expect(text).not.toContain('<');
     expect(JSON.parse(text)).toEqual(value);
+  });
+});
+
+describe('errorPage', () => {
+  it('escapes every argument, so a dynamic caller cannot inject markup', () => {
+    const html = errorPage('<script>a</script>', 'Tom & "Jerry" <b>', "<img src=x onerror='x'>");
+
+    expect(html).not.toMatch(/<script>|<b>|<img/);
+    expect(html).toContain('<title>&lt;script&gt;a&lt;/script&gt;</title>');
+    expect(html).toContain('<p>Tom &amp; &quot;Jerry&quot; &lt;b&gt;</p>');
+    expect(html).toContain('&lt;img src=x onerror=&#39;x&#39;&gt;</a>');
+  });
+
+  it('leaves plain text as it is', () => {
+    expect(escapeHtml('Wait a minute, then reload this page.')).toBe(
+      'Wait a minute, then reload this page.',
+    );
   });
 });
 

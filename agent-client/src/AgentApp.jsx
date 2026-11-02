@@ -30,9 +30,12 @@ function statusText(status, details) {
 
 // One primary button whose job follows the status. It is never disabled: a
 // disabled button drops keyboard focus, and the viewer should always be able
-// to hang up, including during a reconnect's backoff. A fatal failure (the
-// page's token is rejected, or the server is misconfigured) can't be fixed by
-// Retry, so it offers a reload instead.
+// to hang up, including during a reconnect's backoff. A fatal failure isn't
+// retried by the backoff, and its button says what can fix it: a rejected
+// page token (`token`) needs a reload, which brings a fresh nonce; a server
+// with no key (`config`) can't be fixed by a reload, so Try again asks the
+// server again — it connects once the owner has fixed the key, without
+// losing the page (M6 T6, M4 re-review).
 /**
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
@@ -47,9 +50,10 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
     case 'reconnecting':
       return { label: 'Disconnect', onClick: disconnect };
     case 'failed':
-      return details?.fatal
-        ? { label: 'Reload page', onClick: () => location.reload() }
-        : { label: 'Retry', onClick: retry };
+      if (details?.fatal === 'token') {
+        return { label: 'Reload page', onClick: () => location.reload() };
+      }
+      return { label: details?.fatal === 'config' ? 'Try again' : 'Retry', onClick: retry };
     default: // idle, closed
       return { label: 'Connect', onClick: connect };
   }
@@ -107,7 +111,7 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         {statusText(status, details)}
       </span>
       {/* role="alert", not "status": the reason is an error that ends the
-          session and asks the user to act (Retry or Reload page), so it should be
+          session and asks the user to act (Retry, Try again or Reload page), so it should be
           announced at once rather than queued politely like progress text. */}
       {status === 'failed' && details?.reason && (
         <div className="agent-app__error" role="alert">
