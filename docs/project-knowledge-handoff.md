@@ -206,6 +206,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   `session.sendRealtimeInput`, `session.sendToolResponse`, the `toolCall.functionCalls` shape) was
   checked against Google's current docs (`ai.google.dev/gemini-api/docs/live-api/*`) via live web
   search/fetch during this build, not recalled from training data alone.
+  M6 T4 re-checked it against the pinned `@google/genai` 2.32.0 (exact in both packages): the
+  `.d.ts` types, the runtime, and Google's ephemeral-token docs. The token is locked to the
+  model only (`liveConnectConstraints: { model }` plus `lockAdditionalFields: []`, ADR 0004);
+  without the empty `lockAdditionalFields`, a real run showed Gemini dropping the client's tools
+  and system instruction.
 - **The live loop was run by hand in a real browser with a real key (PR #9, M4).** A multi-step
   task across a navigation (increment the counter → go to Settings → toggle notifications → save)
   completed, with the agent reporting DOM state it could only have learned from a live snapshot.
@@ -258,11 +263,13 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (`liveSession.js` stores it in `resumeHandle`), and every reconnect passes that stored handle
   back if one exists, so a 15-minute cutoff is handled by the same reconnect path as a real
   network drop rather than being a separate failure mode. The unit tests check that the handle is
-  passed and that a resumed session isn't greeted again. **Not verified against a live session**:
-  the exact field names (`sessionResumptionUpdate`,
-  `.resumable`, `.newHandle`) are inferred from the SDK's consistent camelCase convention
-  elsewhere (`serverContent`, `toolCall.functionCalls`), not confirmed from an actual received
-  message. If resumption silently doesn't kick in, check these names first.
+  passed and that a resumed session isn't greeted again. The field names
+  (`sessionResumptionUpdate`, `.resumable`, `.newHandle`), once inferred, were **verified against
+  `@google/genai` v2.32.0** (M6 T4): its `LiveServerMessage` types and runtime, plus real runs in
+  which the reconnect resumed (`resumed: true` in `.metrics/live.json`) under the model-locked
+  token (ADR 0004). The same check covered every other field `liveSession.js` reads
+  (`message.data`, transcriptions, `interrupted`, `turnComplete`, `toolCall.functionCalls`,
+  `setupComplete`) and the three send signatures (code-review-notes M8, L10).
 - **`sendKnowledgeContext` and the DOM-snapshot keyframe are both resent on every `connect()`,
   including a resumed reconnect — deliberately, not an oversight.** A (re)connect can't fully
   trust that a resumed session's turn history is intact, so both resend fresh grounding rather
@@ -320,7 +327,8 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   model not to do it.
 - **Ephemeral Gemini Live token, minted server-side, single job for the whole server** — mirrors
   the original system's own `token`/`sessionId` pattern almost exactly, just scoped to Gemini Live
-  specifically instead of a bespoke backend.
+  specifically instead of a bespoke backend. Since M6 T4 the token is locked to the model only
+  ([ADR 0004](./adr/0004-live-token-constraints.md)).
 - **Volume meter bypasses React state entirely** (ref + `requestAnimationFrame`) — the "go
   further" version of the original's isolate-and-memoize fix, backed by a test proving the
   isolation actually holds. Built in the first v2 implementation, lost in the from-scratch

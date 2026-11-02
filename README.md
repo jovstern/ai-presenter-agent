@@ -91,7 +91,8 @@ npm test        # vitest + supertest: 2 files, 50 tests
 The suite in `agent-client/src/__tests__/`:
 
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
-  per drop, superseded connects, in-order tool batches, resumption without re-greeting, the
+  per drop, superseded connects, in-order tool batches, the token and model it connects with,
+  resumption without re-greeting, the
   `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
   per repeated-sentence episode, never sent to a replacement session),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
@@ -177,6 +178,8 @@ The suite in `server/__tests__/`:
   (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
   nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
+- `geminiMint.test.js` — the token config sent to `authTokens.create`: single use, the 60 s
+  session window, locked to `liveModel.json`'s model only (`lockAdditionalFields: []`, ADR 0004).
 
 CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and every push to
 `master`: `npm ci` in the root, `agent-client/` and `server/`, then `npm run check` and

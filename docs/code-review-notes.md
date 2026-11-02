@@ -563,7 +563,17 @@ check(sig) {
 Feed transcript text (normalised) through the same guard, or add a separate cap on spoken turns
 per model turn.
 
-### [ ] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
+### [x] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
+
+> Fixed in M6 T4 ([ADR 0004](./adr/0004-live-token-constraints.md)): model only. `server/geminiMint.js`
+> mints with `liveConnectConstraints: { model }` and `lockAdditionalFields: []`, the model read from
+> `agent-client/src/liveModel.json`, which `liveSession.js` connects with too. The
+> `lockAdditionalFields: []` is load-bearing: left out, Gemini locks every config field to the
+> token's and ignores the client's tools, system instruction and resumption handle (seen in a
+> real run: the agent said it couldn't click). Verified with real mints: three `npm run e2e:live`
+> runs on 2026-11-02 (greeting 3/3, five-step task 2/3 — the miss is the known stall after
+> `navigate` that M6 T5 tunes — reconnect 3/3), tools called every run and every reconnect
+> resumed (`resumed: true`, 1.1–1.2 s, one attempt).
 
 `server/index.js:46-53` locks the token to `{ responseModalities, sessionResumption }`, but the
 client also sends `tools` and `thinkingConfig` (`useLiveAgent.js:248-257`). The in-code comment
@@ -572,7 +582,19 @@ fields are a mismatch and the connect is rejected. Decide: constrain **model onl
 the token being single-use + short-TTL already bounds abuse), or make the constraint an exact
 mirror of what the client sends (and then generate both from one object).
 
-### [ ] M8 — Preview-SDK surface pinned loosely and partly guessed
+### [x] M8 — Preview-SDK surface pinned loosely and partly guessed
+
+> Fixed in M6 T4: `@google/genai` is pinned to exactly `2.32.0` in both packages (from `^2.22.0`;
+> no breaking changes in the 2.23–2.32 release notes), and every other dependency in the three
+> `package.json`s is pinned to the version its lockfile resolved. The Live fields
+> `liveSession.js` reads were checked against 2.32.0's `dist/web/web.d.ts` and runtime, and all
+> held: `message.data`, `serverContent.{interrupted, turnComplete, inputTranscription.text,
+> outputTranscription.text}`, `sessionResumptionUpdate.{resumable, newHandle}`,
+> `toolCall.functionCalls`, `setupComplete` (the first message: `live.connect` resolves only after
+> it), and the `sendRealtimeInput({audio})` / `sendClientContent({turns, turnComplete})` /
+> `sendToolResponse({functionResponses})` signatures. The client sends no `thinkingConfig`, so the
+> `thinkingLevel` question is moot. `goAway` isn't read: the close that follows it takes the
+> normal resume path.
 
 `@google/genai: ^1.0.0` (also `hono: ^4.6.0`, `react: ^18.3.0`) is a very wide range for a
 preview-API integration whose message shapes the handoff doc already admits are inferred
@@ -636,9 +658,13 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.
   *Fixed (M4): `sandbox/bridge.js`'s `buildSnapshotNodes` names the field `tag`.*
-- [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
+- [x] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
+  *Verified in M6 T4: `liveSession.js` reads `message.data`, which in `@google/genai` 2.32.0 is a
+  getter on the `LiveServerMessage` class the SDK builds for every message: it joins the
+  `inlineData` of `serverContent.modelTurn.parts` and returns base64 (undefined when there is
+  none). The real-key live e2e hears the greeting through it.*
 - [x] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.

@@ -93,7 +93,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - The live e2e costs Gemini usage and needs the key. It runs only when `GEMINI_LIVE_E2E=1`,
   at the end of a milestone, never in CI.
 - `@google/genai` is pinned to an exact version (2.31.0 or whatever is current when M6 runs),
-  after the Live message shapes have been verified against it.
+  after the Live message shapes have been verified against it. *Done in M6 T4: `2.32.0`, and
+  every other dependency is pinned exactly too (table below).*
 - Tests stay in `src/__tests__/` (the repo's own pattern).
 
 ## Stack
@@ -112,22 +113,30 @@ Language: JS with checkJs (ADR 0002).
 
 | Package | Where | Why |
 |---|---|---|
-| eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals |
-| eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) |
-| prettier | root | format gate (R8): one formatter for every package and the static dirs |
-| typescript (7.x) | both packages | `tsc -p jsconfig.json` checkJs (R9, ADR 0002) |
-| @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies |
-| @types/node, @types/express | server | Node and Express types for checkJs (R9) |
-| @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) |
-| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) — `^7.2.1` |
-| pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `^10.4.0`, `^11.0.0` |
-| helmet | server | security headers and CSP (H1 remainder) — `^8.3.0` |
-| supertest, vitest | server | token-gate tests (R10) — `^7.3.1`, `^5.0.5` |
-| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `^1.64.1`, `^4.14.0` |
+| eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals — `10.13.0`, `10.0.1`, `17.13.0` |
+| eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) — `7.1.1` |
+| prettier | root | format gate (R8): one formatter for every package and the static dirs — `3.9.10` |
+| typescript (7.x) | both packages | `tsc -p jsconfig.json` checkJs (R9, ADR 0002) — `7.0.2` |
+| @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies — `19.3.0`, `19.3.0` |
+| @types/node, @types/express | server | Node and Express types for checkJs (R9) — `24.19.2`, `5.0.6` |
+| @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) — `1.8.1` |
+| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) — `7.2.1` |
+| pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `10.4.0`, `11.0.0` |
+| helmet | server | security headers and CSP (H1 remainder) — `8.3.0` |
+| supertest, vitest | server | token-gate tests (R10) — `7.3.1`, `5.0.5` |
+| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `1.64.1`, `4.14.0` |
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
-| zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `^4.6.7` |
+| zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |
-| compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile |
+| compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile — `1.8.2` |
+
+Dependencies from before this cycle, pinned exactly in M6 T4 (code-review-notes M8):
+`@google/genai` `2.32.0` (both packages, upgraded from `^2.22.0` after the Live shapes were
+verified against it); agent-client `react` / `react-dom` `19.3.0`, `@radix-ui/react-dialog`
+`1.1.23`, `vite` `8.3.0`, `@vitejs/plugin-react` `6.1.1`, `babel-plugin-react-compiler` `1.0.0`,
+`vitest` `5.0.1`, `@testing-library/react` `16.3.3`, `jsdom` `30.0.1`; server `express` `5.2.1`,
+`dotenv` `17.4.2`. Every `package.json` uses exact versions; add one with
+`npm install --save-exact`.
 
 No `useReducer`, context or state library. `useLiveAgent` keeps `useState` and refs. The
 knowledge store keeps `useSyncExternalStore`. `KnowledgeModal` stops mirroring the store

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLiveSession } from '../liveSession.js';
 import { setRules } from '../knowledgeStore.js';
+import LIVE_MODEL from '../liveModel.json' with { type: 'json' };
 
 // A fake Gemini Live client: every live.connect() is recorded with its
 // callbacks and a fake session, and stays pending until the test resolves or
@@ -335,6 +336,18 @@ describe('createLiveSession', () => {
         second.session.sendToolResponse.mock.calls[0][0].functionResponses.response.page,
       ).toMatch(/B1/);
     });
+  });
+
+  it('connects on v1alpha with the fetched token and the model the token is locked to (M7)', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    expect(call.options).toEqual({
+      apiKey: 'ephemeral-token',
+      httpOptions: { apiVersion: 'v1alpha' },
+    });
+    // server/geminiMint.js constrains the token to this same file's model.
+    expect(call.params.model).toBe(LIVE_MODEL.model);
   });
 
   it('resumes with the stored handle on reconnect and does not greet again', async () => {

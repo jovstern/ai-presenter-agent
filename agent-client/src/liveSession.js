@@ -7,6 +7,10 @@ import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
 import { createLoopGuard, actionSignature } from './loopGuard.js';
 import { INPUT_SAMPLE_RATE } from './pcm.js';
+// The one model name: server/index.js locks every token to it
+// (liveConnectConstraints), so a second copy here could drift and every
+// connect would be rejected (docs/code-review-notes.md M7).
+import LIVE_MODEL from './liveModel.json' with { type: 'json' };
 
 /** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
 /** @import { ActionResult, Snapshot } from './bridgeProtocol.js' */
@@ -46,8 +50,6 @@ import { INPUT_SAMPLE_RATE } from './pcm.js';
  * An Error that says whether retrying can help, and the reason to show if not.
  * @typedef {Error & { retryable: boolean, reason?: string }} TokenError
  */
-
-const MODEL = 'gemini-3.8-live';
 
 // Immediate, 1s, 3s, 7s, 15s, 30s — matches the backoff documented for the
 // original build (docs/project-knowledge-handoff.md §3.3).
@@ -551,7 +553,7 @@ export function createLiveSession({
 
     try {
       const newSession = await ai.live.connect({
-        model: MODEL,
+        model: LIVE_MODEL.model,
         callbacks: {
           // No onopen: a socket opening proves nothing about the session;
           // `open` waits for the first server message (handleMessage).
