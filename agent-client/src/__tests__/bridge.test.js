@@ -6,7 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // run here as the page would run it: a classic script evaluated once against
 // this jsdom window. The iframe is stubbed (jsdom doesn't load frame URLs): a
 // test decides which document the frame holds and when its `load` fires.
-const BRIDGE_SOURCE = readFileSync(path.resolve(import.meta.dirname, '../../../sandbox/bridge.js'), 'utf8');
+const BRIDGE_SOURCE = readFileSync(
+  path.resolve(import.meta.dirname, '../../../sandbox/bridge.js'),
+  'utf8',
+);
 
 let frame;
 let agentPort;
@@ -23,7 +26,10 @@ function stubFrame() {
   };
   Object.defineProperty(iframe, 'contentDocument', { get: () => state.doc });
   Object.defineProperty(iframe, 'contentWindow', {
-    get: () => ({ location: { pathname: state.path }, getComputedStyle: () => ({ display: 'block', visibility: 'visible' }) }),
+    get: () => ({
+      location: { pathname: state.path },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+    }),
   });
   Object.defineProperty(iframe, 'src', {
     get: () => state.srcSets.at(-1) ?? '',
@@ -129,6 +135,74 @@ describe('sandbox/bridge.js navigate', () => {
   });
 });
 
+describe('sandbox/bridge.js fill', () => {
+  it('types into an input and reports success', async () => {
+    frame.doc.body.innerHTML = '<input data-testid="name-input" />';
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({
+      type: 'action',
+      id: 'f1',
+      action: 'fill',
+      args: ['name-input', 'Ada'],
+    });
+
+    expect(await result).toEqual({ type: 'action-result', id: 'f1', success: true });
+    expect(frame.doc.querySelector('input').value).toBe('Ada');
+  });
+
+  // Found by the checkJs pass: an element without `value` got an expando and a
+  // success reply while nothing on the page changed.
+  it('reports failure for an element that is not a text input', async () => {
+    frame.doc.body.innerHTML = '<div data-testid="card"></div>';
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f2', action: 'fill', args: ['card', 'Ada'] });
+
+    expect(await result).toEqual({
+      type: 'action-result',
+      id: 'f2',
+      success: false,
+      error: 'data-testid="card" is not a text input',
+    });
+  });
+
+  it.each([
+    ['a button', '<button data-testid="target">Save</button>'],
+    ['a checkbox', '<input data-testid="target" type="checkbox" />'],
+    ['a submit input', '<input data-testid="target" type="submit" value="Go" />'],
+    ['a hidden input', '<input data-testid="target" type="hidden" />'],
+  ])('reports failure for %s, which has a value but is no text input', async (_name, html) => {
+    frame.doc.body.innerHTML = html;
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f4', action: 'fill', args: ['target', 'Ada'] });
+
+    expect(await result).toEqual({
+      type: 'action-result',
+      id: 'f4',
+      success: false,
+      error: 'data-testid="target" is not a text input',
+    });
+    const target = frame.doc.querySelector('[data-testid="target"]');
+    expect(target.value === 'Ada').toBe(false);
+  });
+
+  it.each([
+    ['a textarea', '<textarea data-testid="target"></textarea>', 'Ada'],
+    ['an email input', '<input data-testid="target" type="email" />', 'ada@example.com'],
+    [
+      'a select',
+      '<select data-testid="target"><option>Bob</option><option>Ada</option></select>',
+      'Ada',
+    ],
+  ])('fills %s', async (_name, html, value) => {
+    frame.doc.body.innerHTML = html;
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'f5', action: 'fill', args: ['target', value] });
+
+    expect(await result).toMatchObject({ id: 'f5', success: true });
+    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe(value);
+  });
+});
+
 describe('sandbox/bridge.js channel', () => {
   it('keeps replying on the port when MessagePort.prototype.postMessage is patched after load', async () => {
     const tap = vi.fn();
@@ -146,5 +220,148 @@ describe('sandbox/bridge.js channel', () => {
     } finally {
       MessagePort.prototype.postMessage = original;
     }
+  });
+});
+
+describe('sandbox/bridge.js snapshots', () => {
+  const SETTINGS = `
+    <label><input data-testid="toggle" type="checkbox" /> Enable notifications</label>
+    <input data-testid="name" value="Ada" />
+    <button data-testid="save">Save</button>`;
+
+  // Resolves with the debounced snapshot of the new content, skipping the
+  // load's own snapshot of the still-empty document.
+  function loadPage(html) {
+    const snapshot = new Promise((resolve) => {
+      agentPort.onmessage = ({ data }) => {
+        if (data?.type === 'snapshot' && data.full.length > 0) resolve(data);
+      };
+    });
+    frame.load('/target-app/settings.html');
+    frame.doc.body.innerHTML = html;
+    return snapshot;
+  }
+
+  it("names a checkbox by its label, never its value, and reports whether it's checked", async () => {
+    const { full } = await loadPage(SETTINGS);
+
+    expect(full).toEqual([
+      {
+        selector: 'toggle',
+        tag: 'input',
+        label: 'Enable notifications',
+        disabled: false,
+        hidden: false,
+        checked: false,
+      },
+      // A text field's content is its value, not its name.
+      { selector: 'name', tag: 'input', label: '', disabled: false, hidden: false, value: 'Ada' },
+      { selector: 'save', tag: 'button', label: 'Save', disabled: false, hidden: false },
+    ]);
+  });
+
+  // Toggling a checkbox changes a property, not an attribute: without the
+  // change listener the MutationObserver never sends this snapshot.
+  it('sends a snapshot when a checkbox is toggled', async () => {
+    await loadPage(SETTINGS);
+    const toggle = frame.doc.querySelector('[data-testid="toggle"]');
+    const next = nextMessage(agentPort, 'snapshot');
+
+    toggle.click();
+
+    const { changed } = await next;
+    expect(changed).toEqual([expect.objectContaining({ selector: 'toggle', checked: true })]);
+  });
+
+  it('reports a filled value in the next snapshot, under the field’s label', async () => {
+    await loadPage(`
+      <label for="q">Search</label><input id="q" data-testid="search" type="text" />
+      <button data-testid="go">Go</button>`);
+    const next = nextMessage(agentPort, 'snapshot');
+
+    agentPort.postMessage({
+      type: 'action',
+      id: 'f6',
+      action: 'fill',
+      args: ['search', 'pricing'],
+    });
+
+    const { changed } = await next;
+    expect(changed).toEqual([
+      {
+        selector: 'search',
+        tag: 'input',
+        label: 'Search',
+        disabled: false,
+        hidden: false,
+        value: 'pricing',
+      },
+    ]);
+  });
+
+  it('never reports a password’s value, even as its name', async () => {
+    const { full } = await loadPage(
+      '<input data-testid="pw" type="password" value="hunter2" /><button data-testid="b">B</button>',
+    );
+
+    expect(full[0]).toEqual({
+      selector: 'pw',
+      tag: 'input',
+      label: '',
+      disabled: false,
+      hidden: false,
+    });
+  });
+
+  it('reports a textarea’s and a select’s value, a long one cut to 60 characters', async () => {
+    const long = 'x'.repeat(100);
+    const { full } = await loadPage(`
+      <textarea data-testid="notes">${long}</textarea>
+      <select data-testid="plan"><option>Free</option><option selected>Pro</option></select>`);
+
+    expect(full.map((node) => node.value)).toEqual([`${'x'.repeat(60)}…`, 'Pro']);
+  });
+
+  it('names a submit input by its value, which is its caption', async () => {
+    const { full } = await loadPage('<input data-testid="send" type="submit" value="Send" />');
+
+    expect(full).toEqual([
+      { selector: 'send', tag: 'input', label: 'Send', disabled: false, hidden: false },
+    ]);
+  });
+
+  it('never reports a hidden input’s value', async () => {
+    const { full } = await loadPage(
+      '<input data-testid="csrf" type="hidden" value="secret-token" /><button data-testid="b">B</button>',
+    );
+
+    expect(full[0]).not.toHaveProperty('value');
+    expect(JSON.stringify(full)).not.toContain('secret-token');
+  });
+
+  it.each(['cc-number', 'cc-csc', 'one-time-code', 'current-password', 'new-password'])(
+    'never reports the value of a field with autocomplete="%s"',
+    async (autocomplete) => {
+      const { full } = await loadPage(
+        `<input data-testid="f" type="text" autocomplete="${autocomplete}" value="4111111111111111" />`,
+      );
+
+      expect(full[0]).not.toHaveProperty('value');
+      expect(JSON.stringify(full)).not.toContain('4111');
+    },
+  );
+
+  it('names an unlabelled field by aria-labelledby, then placeholder, then title', async () => {
+    const { full } = await loadPage(`
+      <span id="cap">Promo code</span>
+      <input data-testid="by-ref" aria-labelledby="cap" />
+      <input data-testid="by-placeholder" placeholder="Search" />
+      <input data-testid="by-title" title="Your email" />`);
+
+    expect(full.map((node) => [node.selector, node.label])).toEqual([
+      ['by-ref', 'Promo code'],
+      ['by-placeholder', 'Search'],
+      ['by-title', 'Your email'],
+    ]);
   });
 });

@@ -33,6 +33,8 @@ function tokenResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 const okToken = () => tokenResponse(200, { token: 'ephemeral-token' });
+// The server's one error shape (server/app.js).
+const apiError = (code, message) => ({ error: { code, message } });
 
 const fetchMock = vi.fn();
 
@@ -43,7 +45,8 @@ function fakeBridge() {
     dispatchAction: vi.fn(async () => ({ success: true })),
     requestSnapshot: vi.fn(),
     // Lets a test play the bridge pushing a snapshot over the channel.
-    emitSnapshot: (snapshot) => bridge.onSnapshot.mock.calls.forEach(([listener]) => listener(snapshot)),
+    emitSnapshot: (snapshot) =>
+      bridge.onSnapshot.mock.calls.forEach(([listener]) => listener(snapshot)),
     onSnapshot: vi.fn(() => unsubscribeSnapshot),
     onNavigated: vi.fn(() => unsubscribeNavigated),
     close: vi.fn(),
@@ -60,6 +63,7 @@ function setup() {
   const statuses = [];
   const liveSession = createLiveSession({
     bridge,
+    nonce: 'page-nonce',
     onStatusChange: (status, details) => statuses.push({ status, ...details }),
   });
   created.push(liveSession);
@@ -166,7 +170,9 @@ describe('createLiveSession', () => {
     const { liveSession, bridge } = setup();
     const call = await connectAndEstablish(liveSession);
     let finishNavigate;
-    bridge.dispatchAction.mockImplementationOnce(() => new Promise((resolve) => (finishNavigate = resolve)));
+    bridge.dispatchAction.mockImplementationOnce(
+      () => new Promise((resolve) => (finishNavigate = resolve)),
+    );
 
     call.params.callbacks.onmessage({
       toolCall: {
@@ -187,7 +193,9 @@ describe('createLiveSession', () => {
 
     expect(bridge.dispatchAction).toHaveBeenCalledTimes(2);
     expect(bridge.dispatchAction).toHaveBeenLastCalledWith('click', ['#buy']);
-    const responseIds = call.session.sendToolResponse.mock.calls.map(([arg]) => arg.functionResponses.id);
+    const responseIds = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses.id,
+    );
     expect(responseIds).toEqual(['nav', 'buy']);
   });
 
@@ -195,7 +203,9 @@ describe('createLiveSession', () => {
     const { liveSession, bridge } = setup();
     const first = await connectAndEstablish(liveSession);
     let finishNavigate;
-    bridge.dispatchAction.mockImplementationOnce(() => new Promise((resolve) => (finishNavigate = resolve)));
+    bridge.dispatchAction.mockImplementationOnce(
+      () => new Promise((resolve) => (finishNavigate = resolve)),
+    );
 
     first.params.callbacks.onmessage({
       toolCall: {
@@ -220,13 +230,122 @@ describe('createLiveSession', () => {
     expect(bridge.dispatchAction).toHaveBeenCalledTimes(1); // the rest of the stale batch is dropped
   });
 
+  describe('a snapshot held by a batch whose session is replaced', () => {
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const page = [node('a', 'A'), node('b', 'B'), node('c', 'C')];
+
+    // Starts a navigate that stays in flight, with a snapshot held behind it.
+    async function holdASnapshotMidBatch(liveSession, bridge) {
+      const first = await connectAndEstablish(liveSession);
+      bridge.emitSnapshot({ full: page, changed: page, removed: [] });
+      let finishNavigate;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishNavigate = resolve)),
+      );
+      first.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'nav', name: 'navigate', args: { route: 'settings' } }] },
+      });
+      await flush();
+      bridge.emitSnapshot({ full: page, changed: [node('a', 'A1')], removed: [] }); // held
+      return { first, finishNavigate: () => finishNavigate({ success: true }) };
+    }
+
+    async function firstToolResponseOn(call) {
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      return call.session.sendToolResponse.mock.calls[0][0].functionResponses;
+    }
+
+    it('after a drop: the old session gets no response and the new one no stale page', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      finishNavigate();
+      await flush();
+
+      expect(first.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(second.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(await firstToolResponseOn(second)).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true },
+      });
+    });
+
+    it('after disconnect() and connect(): the same', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+
+      liveSession.disconnect();
+      const second = await connectAndEstablish(liveSession);
+      finishNavigate();
+      await flush();
+
+      expect(first.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(second.session.sendToolResponse).not.toHaveBeenCalled();
+      expect(await firstToolResponseOn(second)).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true },
+      });
+    });
+
+    it('a snapshot that arrives after the reconnect, during a new batch, does ride along', async () => {
+      const { liveSession, bridge } = setup();
+      const { first, finishNavigate } = await holdASnapshotMidBatch(liveSession, bridge);
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      bridge.emitSnapshot({ full: page, changed: page, removed: [] }); // the reconnect's keyframe
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+
+      second.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      finishNavigate(); // the old batch ends while the new one is still running
+      await flush();
+      bridge.emitSnapshot({ full: page, changed: [node('b', 'B1')], removed: [] });
+      finishClick({ success: true });
+      await flush();
+
+      expect(second.session.sendToolResponse.mock.calls).toHaveLength(1);
+      expect(second.session.sendToolResponse.mock.calls[0][0].functionResponses).toEqual({
+        id: 'tap',
+        name: 'click',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(delta\)/) },
+      });
+      expect(
+        second.session.sendToolResponse.mock.calls[0][0].functionResponses.response.page,
+      ).toMatch(/B1/);
+    });
+  });
+
   it('resumes with the stored handle on reconnect and does not greet again', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
     expect(first.params.config.sessionResumption).toEqual({});
     expect(greetings(first.session)).toHaveLength(1);
 
-    first.params.callbacks.onmessage({ sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' } });
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
     drop(first);
     await flush();
     const second = live.calls[1];
@@ -247,20 +366,29 @@ describe('createLiveSession', () => {
     expect(statuses[2]).toMatchObject({ attempt: 1, maxAttempts: MAX_ATTEMPTS });
 
     // Now every token request fails with a retryable 503.
-    fetchMock.mockImplementation(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     drop(live.calls[1]);
     await vi.advanceTimersByTimeAsync(120_000);
 
     const afterSecondDrop = statuses.slice(4);
-    expect(afterSecondDrop.map((s) => s.status)).toEqual([...Array(MAX_ATTEMPTS).fill('reconnecting'), 'failed']);
-    expect(afterSecondDrop.slice(0, MAX_ATTEMPTS).map((s) => s.attempt)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(afterSecondDrop.map((s) => s.status)).toEqual([
+      ...Array(MAX_ATTEMPTS).fill('reconnecting'),
+      'failed',
+    ]);
+    expect(afterSecondDrop.slice(0, MAX_ATTEMPTS).map((s) => s.attempt)).toEqual([
+      1, 2, 3, 4, 5, 6,
+    ]);
     expect(statusNames().filter((s) => s === 'failed')).toHaveLength(1);
     expect(statuses.at(-1).fatal).toBeFalsy(); // exhausted retries can still be retried by hand
     expect(vi.getTimerCount()).toBe(0);
   });
 
   it('shows reconnecting, not failed, while a retry is scheduled after an error', async () => {
-    fetchMock.mockImplementationOnce(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     const { liveSession, statusNames } = setup();
 
     liveSession.connect();
@@ -281,14 +409,18 @@ describe('createLiveSession', () => {
     await flush();
 
     expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
-    const responses = call.session.sendToolResponse.mock.calls.map(([arg]) => arg.functionResponses);
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
     expect(responses).toHaveLength(4);
     expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
     expect(responses[3].response.error).toMatch(/repeated/i);
   });
 
   it('a manual connect() after failed resets the attempts and really retries', async () => {
-    fetchMock.mockImplementation(async () => tokenResponse(503, { error: 'unavailable' }));
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
     const { liveSession, statuses, statusNames } = setup();
     liveSession.connect();
     await vi.advanceTimersByTimeAsync(120_000);
@@ -335,7 +467,9 @@ describe('createLiveSession', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(live.calls).toHaveLength(3);
 
-    const reconnectAttempts = statuses.filter((s) => s.status === 'reconnecting').map((s) => s.attempt);
+    const reconnectAttempts = statuses
+      .filter((s) => s.status === 'reconnecting')
+      .map((s) => s.attempt);
     expect(reconnectAttempts).toEqual([1, 2]);
     expect(statuses.map((s) => s.status)).not.toContain('open'); // the server never answered
   });
@@ -355,12 +489,29 @@ describe('createLiveSession', () => {
     await flush();
 
     expect(live.calls).toHaveLength(3);
-    const reconnectAttempts = statuses.filter((s) => s.status === 'reconnecting').map((s) => s.attempt);
+    const reconnectAttempts = statuses
+      .filter((s) => s.status === 'reconnecting')
+      .map((s) => s.attempt);
     expect(reconnectAttempts).toEqual([1, 1]);
   });
 
+  it("echoes the page nonce on the token request, and reports the server's error message", async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(503, apiError('internal', 'Internal server error')),
+    );
+    const { liveSession, statuses } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/live-token?nonce=page-nonce');
+    expect(statuses.find((s) => s.status === 'reconnecting').reason).toBe('Internal server error');
+  });
+
   it('fails immediately on a 4xx token response, tells the user to reload, and schedules no retry', async () => {
-    fetchMock.mockImplementation(async () => tokenResponse(403, { error: 'Invalid or expired nonce' }));
+    fetchMock.mockImplementation(async () =>
+      tokenResponse(403, apiError('invalid_nonce', 'Unknown or expired nonce')),
+    );
     const { liveSession, statuses, statusNames } = setup();
 
     liveSession.connect();
@@ -376,7 +527,9 @@ describe('createLiveSession', () => {
 
   it('still retries 5xx and network errors', async () => {
     fetchMock
-      .mockImplementationOnce(async () => tokenResponse(500, { error: 'Server misconfigured' }))
+      .mockImplementationOnce(async () =>
+        tokenResponse(500, apiError('internal', 'Internal server error')),
+      )
       .mockImplementationOnce(async () => {
         throw new TypeError('Failed to fetch');
       });
@@ -388,6 +541,40 @@ describe('createLiveSession', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(statusNames()).toEqual(['connecting', 'reconnecting', 'reconnecting']);
     expect(live.calls).toHaveLength(1);
+  });
+
+  // server/app.js answers a mint the voice service didn't answer (a 5xx,
+  // quota, network) with 502 upstream_error: worth retrying.
+  it('retries a 502 upstream_error token response', async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(502, apiError('upstream_error', 'The voice service did not answer')),
+    );
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(statusNames()).toEqual(['connecting', 'reconnecting']);
+    expect(statuses.at(-1).fatal).toBeFalsy();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await establish(live.calls[0]);
+    expect(statusNames().at(-1)).toBe('open');
+  });
+
+  // Found by the checkJs pass: the token went unchecked into `new GoogleGenAI`,
+  // which sits outside openSession's try, so a throw there left the status at
+  // `connecting` with an unhandled rejection instead of retrying.
+  it('treats a 200 token response without a token as a retryable failure', async () => {
+    fetchMock.mockImplementationOnce(async () => tokenResponse(200, {}));
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(statusNames()).toEqual(['connecting', 'reconnecting']);
+    expect(statuses.at(-1).reason).toBe('The token response had no token.');
+    // Only the immediate retry, with a real token, reached live.connect.
+    expect(live.calls.map((call) => call.options.apiKey)).toEqual(['ephemeral-token']);
   });
 
   it('dispose() unsubscribes everything and closes the session, but never the bridge channel', async () => {
@@ -405,9 +592,9 @@ describe('createLiveSession', () => {
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
   });
-  it('treats a server response marked retryable:false as fatal, with a contact-the-owner reason', async () => {
+  it('treats a not_configured server error as fatal, with a contact-the-owner reason', async () => {
     fetchMock.mockImplementation(async () =>
-      tokenResponse(500, { error: 'GEMINI_API_KEY is not set on the server', retryable: false }),
+      tokenResponse(500, apiError('not_configured', "The server isn't configured to connect")),
     );
     const { liveSession, statuses, statusNames } = setup();
 
@@ -416,7 +603,8 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
-      reason: "The server isn't configured to connect. Contact the site owner.",
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then reload this page.",
       fatal: true,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -456,7 +644,9 @@ describe('createLiveSession', () => {
     const page = [1, 2, 3, 4, 5].map((n) => ({ selector: `n${n}`, tag: 'button', label: `${n}` }));
     const smallDelta = { full: page, changed: [page[0]], removed: [] };
     const snapshotTexts = (session) =>
-      session.sendClientContent.mock.calls.map(([arg]) => arg.turns).filter((t) => t.startsWith('Page snapshot'));
+      session.sendClientContent.mock.calls
+        .map(([arg]) => arg.turns)
+        .filter((t) => t.startsWith('Page snapshot'));
 
     const first = await connectAndEstablish(liveSession);
     expect(bridge.requestSnapshot).toHaveBeenCalledTimes(1);
@@ -474,7 +664,9 @@ describe('createLiveSession', () => {
     expect(bridge.requestSnapshot).toHaveBeenCalledTimes(2);
 
     bridge.emitSnapshot(smallDelta); // a small delta, but the reconnect forces a keyframe
-    expect(snapshotTexts(second.session)).toEqual([expect.stringMatching(/^Page snapshot \(full\)/)]);
+    expect(snapshotTexts(second.session)).toEqual([
+      expect.stringMatching(/^Page snapshot \(full\)/),
+    ]);
   });
 
   it('buffers audio sent while connecting and flushes the newest 20 frames once connected', async () => {
@@ -509,13 +701,17 @@ describe('createLiveSession', () => {
     await flush();
 
     expect(bridge.dispatchAction).toHaveBeenCalledTimes(4);
-    expect(second.session.sendToolResponse.mock.calls[0][0].functionResponses.response).toEqual({ success: true });
+    expect(second.session.sendToolResponse.mock.calls[0][0].functionResponses.response).toEqual({
+      success: true,
+    });
   });
 
   it('drops the resumption handle when a resumed attempt closes before the server answers', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
-    first.params.callbacks.onmessage({ sessionResumptionUpdate: { resumable: true, newHandle: 'stale-handle' } });
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'stale-handle' },
+    });
     drop(first);
     await flush();
 
@@ -532,6 +728,127 @@ describe('createLiveSession', () => {
     expect(greetings(fresh.session)).toHaveLength(1);
   });
 
+  it('keeps the resumption handle when the server refuses a resume because the old client is still attached', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+
+    const early = live.calls[1];
+    early.resolve();
+    await flush();
+    // What Gemini answers an immediate resume with (seen in the live e2e).
+    early.params.callbacks.onclose({
+      code: 1008,
+      reason: 'BidiGenerateContent session is already connected to an existing client',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const retried = live.calls[2];
+    expect(retried.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    await establish(retried);
+    expect(greetings(retried.session)).toHaveLength(0);
+  });
+
+  it('drops the resumption handle when a close that is not 1008 carries the still-attached text', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+
+    const early = live.calls[1];
+    early.resolve();
+    await flush();
+    early.params.callbacks.onclose({
+      code: 1011,
+      reason: 'BidiGenerateContent session is already connected to an existing client',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(live.calls[2].params.config.sessionResumption).toEqual({});
+  });
+
+  it('sends a snapshot that arrives mid-batch inside the next tool response, as a keyframe when several were held', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const page = [node('a', 'A'), node('b', 'B'), node('c', 'C'), node('d', 'D')];
+    bridge.emitSnapshot({ full: page, changed: page, removed: [] }); // the first keyframe
+    const snapshotMessages = () =>
+      call.session.sendClientContent.mock.calls.filter(([arg]) =>
+        arg.turns.startsWith('Page snapshot'),
+      );
+    expect(snapshotMessages()).toHaveLength(1);
+    const finishers = [];
+    bridge.dispatchAction.mockImplementation(
+      () => new Promise((resolve) => finishers.push(resolve)),
+    );
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'nav', name: 'navigate', args: { route: 'settings' } },
+          { id: 'tap', name: 'click', args: { selector: 'a' } },
+        ],
+      },
+    });
+    await flush();
+    // Two small deltas while the navigate is in flight: neither goes out alone.
+    bridge.emitSnapshot({ full: page, changed: [node('a', 'A1')], removed: [] });
+    bridge.emitSnapshot({ full: page, changed: [node('b', 'B1')], removed: [] });
+    finishers[0]({ success: true });
+    await flush();
+    // One while the click is in flight.
+    bridge.emitSnapshot({ full: page, changed: [node('c', 'C1')], removed: [] });
+    finishers[1]({ success: true });
+    await flush();
+
+    expect(snapshotMessages()).toHaveLength(1);
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    // The first carries a keyframe: a lone delta would lose what the first
+    // held one changed. The second is a plain delta again.
+    expect(responses).toEqual([
+      {
+        id: 'nav',
+        name: 'navigate',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\)/) },
+      },
+      {
+        id: 'tap',
+        name: 'click',
+        response: { success: true, page: expect.stringMatching(/^Page snapshot \(delta\)/) },
+      },
+    ]);
+  });
+
+  it('answers a tool call without a page when no snapshot arrived during it', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'a' } }] },
+    });
+    await flush();
+
+    expect(call.session.sendToolResponse).toHaveBeenCalledWith({
+      functionResponses: { id: 'tap', name: 'click', response: { success: true } },
+    });
+  });
+
   it('a sendToolResponse that throws on a closing socket is handled, not an unhandled rejection', async () => {
     const { liveSession, statusNames } = setup();
     const call = await connectAndEstablish(liveSession);
@@ -545,5 +862,105 @@ describe('createLiveSession', () => {
     await flush();
 
     expect(statusNames().at(-1)).toBe('reconnecting');
+  });
+});
+
+// The opt-in live e2e reads these off the page's performance timeline
+// (e2e/live.spec.js, docs/metrics/README.md). Fake timers fake `performance`
+// too, so the calls are read off a spy rather than the timeline.
+describe('timing marks', () => {
+  let markSpy;
+  const dsMarks = () =>
+    markSpy.mock.calls
+      .filter(([name]) => name.startsWith('ds:'))
+      .map(([name, options]) => ({ name, detail: options?.detail }));
+  const markNames = () => dsMarks().map((entry) => entry.name);
+
+  beforeEach(() => {
+    markSpy = vi.spyOn(performance, 'mark');
+  });
+
+  afterEach(() => markSpy.mockRestore());
+
+  it('marks connect-start, open on the first server message, and only the first audio chunk', async () => {
+    const { liveSession } = setup();
+    liveSession.connect();
+    await flush();
+    expect(markNames()).toEqual(['ds:connect-start']);
+
+    const call = live.calls.at(-1);
+    await establish(call);
+    call.params.callbacks.onmessage({ data: 'AAAA' });
+    call.params.callbacks.onmessage({ data: 'BBBB' });
+
+    expect(markNames()).toEqual(['ds:connect-start', 'ds:open', 'ds:first-audio']);
+  });
+
+  it('marks the start and end of each tool call with its id, name and outcome', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    bridge.dispatchAction
+      .mockResolvedValueOnce({ success: true })
+      .mockResolvedValueOnce({ success: false, error: 'not found' });
+    markSpy.mockClear();
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'nav', name: 'navigate', args: { route: 'settings' } },
+          { id: 'tap', name: 'click', args: { selector: 'missing' } },
+        ],
+      },
+    });
+    await flush();
+
+    expect(dsMarks()).toEqual([
+      { name: 'ds:tool-start:nav', detail: { name: 'navigate' } },
+      { name: 'ds:tool-end:nav', detail: { name: 'navigate', success: true } },
+      { name: 'ds:tool-start:tap', detail: { name: 'click' } },
+      { name: 'ds:tool-end:tap', detail: { name: 'click', success: false } },
+    ]);
+  });
+
+  // Marks live in a page-lifetime buffer; a tool mark per call would grow it
+  // without bound. They are cleared on disconnect(), never mid-session: the
+  // live e2e reads them after its scenario, while the session is still open.
+  it('clears its marks on disconnect(), and not before', async () => {
+    const clearSpy = vi.spyOn(performance, 'clearMarks');
+    try {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'tap', name: 'click', args: { selector: 'a' } }] },
+      });
+      await flush();
+      expect(clearSpy).not.toHaveBeenCalled();
+
+      liveSession.disconnect();
+
+      const cleared = clearSpy.mock.calls.map(([name]) => name);
+      expect(cleared.sort()).toEqual(
+        ['ds:connect-start', 'ds:open', 'ds:tool-end:tap', 'ds:tool-start:tap'].sort(),
+      );
+    } finally {
+      clearSpy.mockRestore();
+    }
+  });
+
+  it('marks reconnected when a dropped session is open again, not on a first or manual connect', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    expect(markNames()).not.toContain('ds:reconnected');
+
+    drop(first);
+    await flush();
+    await establish(live.calls[1]);
+    expect(markNames().filter((name) => name === 'ds:reconnected')).toHaveLength(1);
+    expect(markNames().at(-1)).toBe('ds:reconnected');
+
+    liveSession.disconnect();
+    markSpy.mockClear();
+    await connectAndEstablish(liveSession);
+    expect(markNames()).toEqual(['ds:connect-start', 'ds:open']);
   });
 });

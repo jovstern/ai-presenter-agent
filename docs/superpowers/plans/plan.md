@@ -25,6 +25,10 @@ ADRs: `docs/adr/0001–0003`.
 - Do not commit or push to `master`. One commit per task. `cd` into the package before npm.
 - Every task touching `liveSession.js`, `useLiveAgent.js` or `bridge.js` is checked in a
   real browser at milestone end. Unit tests alone are not enough.
+- **CSP rule (from M5 T3):** any task that adds a resource type (a worklet, a stylesheet, a
+  font, a beacon, another origin) updates the CSP in `server/app.js` (`contentSecurityPolicy()`)
+  and its test in `server/__tests__/app.test.js` in the same commit. No inline script on any
+  served page.
 
 ---
 
@@ -196,7 +200,7 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 4. `gh api …/branches/master/protection` shows the required check.
 
 **Acceptance tests:**
-- `server/__tests__/token.test.js`;
+- `server/__tests__/app.test.js`;
 - `e2e/bridge.spec.js`;
 - `e2e/a11y.spec.js`;
 - `e2e/live.spec.js` (opt-in);
@@ -263,6 +267,9 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   The rest of `node-api.md` (a services/routes tree) is a recorded deviation, given a
   single-route server.
 - `GET /health`; `x-powered-by` off.
+- Moving the target-app inline scripts into `.js` files: add `target-app` to agent-client's
+  `lint` script (its `eslint.config.js` already matches `target-app/**/*.js`; T1 left it out
+  because ESLint errors on a path with no files).
 - Supertest tests, written first:
   - 403 cross-origin, and 403 without Referer/Origin;
   - 403 bad nonce;
@@ -275,9 +282,26 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - `zod` moves from M8 into this task.
 - Docs: checklist H1 ticked (CSP point); handoff §5.3; target-app file list.
 
+*Done notes (T3):*
+- The services/routes tree from `node-api.md` is a recorded deviation (spec, Assumptions).
+- The error shape changed the client contract: `retryable: false` became
+  `code: 'not_configured'`, and `liveSession.js` reads `error.message`.
+- The nonce is threaded `main.jsx` → `AgentApp` → `useLiveAgent` → `createLiveSession({ nonce })`
+  rather than read from the DOM inside `liveSession.js`, so it is testable; `globals.d.ts` is gone.
+- Beyond the listed directives the CSP also sets `object-src 'none'`, `base-uri 'self'`,
+  `form-action 'self'` and `frame-ancestors 'self'`. `Referrer-Policy` is `same-origin`, not
+  helmet's `no-referrer`, which the real-browser check showed breaks the Referer fallback of
+  the same-origin gate.
+- A malformed or missing nonce is a 400 (`invalid_request`, Zod); a well-formed unknown or
+  expired one is a 403 (`invalid_nonce`). The client treats both as "reload".
+- Map pruning is on access (no interval to clear on shutdown): `server/expiringMap.js`.
+- `audioIO.js` still uses `ScriptProcessorNode` (no worklet, no `blob:`), so the CSP needs no
+  `worker-src`; M6 T3's worklet is served from `'self'`.
+
 *(medium, 20 min)*
 
 **T4 — Deterministic Playwright e2e (R11).**
+- Adds the root `e2e` script (T1 left it out rather than ship a placeholder).
 - Root `playwright.config.js` starts the server on a free port with a dummy key.
 - `e2e/fixtures.js` fails a test on any console error or page error.
 - `e2e/bridge.spec.js` runs on a fixture sandbox page served through `page.route`. The page
@@ -307,6 +331,23 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   - a viewport meta on the sandbox and the target-app pages;
   - the knowledge button's empty state signalled without `opacity:.5`.
 - Docs: README test section; CLAUDE.md test layout.
+
+*Done notes (T4):*
+- The fake Gemini is `page.routeWebSocket` on `wss://generativelanguage.googleapis.com/…`: the
+  SDK's own browser WebSocket is intercepted, so no init-script fake is needed.
+- The e2e server runs `node server/index.js` with `DOTENV_CONFIG_PATH=/dev/null`, so dotenv
+  never loads `server/.env`; port 3971, `reuseExistingServer: false`.
+- The iframe title, viewport metas, the empty state's ring (not opacity) and the search
+  input's id/name were already in place from M4. axe 4.14 found one new violation:
+  `label-content-name-mismatch` on the knowledge button (its `aria-label` "Knowledge files (0)"
+  left out the visible text). It is now named by its content, a visually hidden "Knowledge
+  files:" before the visible count.
+- The CSP fixture listens on `window`, not `document`: an iframe's first document reuses the
+  Window of its initial about:blank, where the init script ran.
+- The bridge fixture page is served with the real `/` response's headers, so it runs under the
+  shipped CSP.
+- `e2e/` is formatted by Prettier but not linted: no root ESLint config, and adding one is a
+  lint-config change left for the user to decide.
 
 *(large, 25 min)*
 
@@ -372,6 +413,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   - An e2e asserts that the bridge accepts exactly the enum's routes.
 - `fill` picks the native value setter per element type (`input` / `textarea` / `select`)
   and fires `input` + `change`. The target app gets a textarea and a select to prove it.
+- A select is reported and matched by its options' visible text, not only their `value`
+  (the snapshot lists the option texts; `fill` matches the text, then the value), and a
+  `fill` that matches no option fails with the options named, rather than setting `value`
+  to nothing and clearing the select (today's behaviour, found in the M5 fix-wave review).
 - e2e cases are added.
 
 *(medium, 10 min)*
@@ -413,6 +458,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 
 **T5 — Measure, then tune the knobs (M9, R16).**
 - Run the live e2e 5× at the current knobs and record the numbers.
+- Baseline from M5 T5 (11 live runs): task success 8/11 (budget ≥ 80 %; the 3 misses end the
+  turn right after navigate), and reconnect worst 3.37 s (budget ≤ 3 s; a resume refused with
+  1008 "already connected" waits the full 1 s backoff). Candidate knobs: a short retry for
+  that refusal, and the system instruction's multi-step wording.
 - Then decide from the data:
   - `MAX_SNAPSHOT_NODES`;
   - `FULL_REFRESH_RATIO`;
@@ -436,6 +485,11 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
     only when the server rejects the handle;
   - the T3 deferral: setupComplete-then-close resets the backoff each cycle (bounded today
     by the 429 limit).
+- Accepted from the M5 re-review (round 2), fixed here:
+  - `bridge.js` `labelFor` puts `aria-labelledby` first, as the accessible-name spec does;
+  - placeholder and title names are capped at 60 characters like every other name source;
+  - `server/app.js` `errorPage` escapes its arguments, so a later dynamic caller can't
+    inject markup.
 - Issue #5's "done when" is met.
 
 *(small, 6 min)*
@@ -541,7 +595,12 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 **T1 — Config, proxy and blueprint (R22, ADR 0003).**
 - `server/config.js` parses the env with Zod (PORT, GEMINI_API_KEY, NODE_ENV) and fails fast
   with a clear message.
-- `trust proxy` in production.
+- `trust proxy` in production. Without it the same-origin check compares an `https` Referer
+  with `req.protocol` `http` behind Render's TLS proxy and rejects every token request, and
+  every user shares the proxy's IP in both rate limiters: the token route's and the sandbox
+  page-load limit (M5 fix wave), so one busy proxy IP would 429 every viewer's page. A
+  supertest case with `X-Forwarded-Proto: https` covers the origin check, and one with
+  `X-Forwarded-For` shows two client IPs get separate buckets in both limiters.
 - `render.yaml`:
   - build: `npm --prefix agent-client ci --include=dev && npm --prefix agent-client run
     build && npm --prefix server ci --omit=dev`;
@@ -607,7 +666,7 @@ What pushes it to the worst case:
 
 | Milestone | Estimated | Actual | Why it differed |
 |---|---|---|---|
-| M4 | ~110 min | | |
+| M4 | ~110 min | ~127 min (1.15×) | Real-browser checks in every task; a larger fix wave (6 Important, 2 Must fix, the LCP miss); two re-review rounds. Remaining milestones re-scaled by 1.15×: M5 ~175, M6 ~150, M7 ~115, M8 ~80 (~8.7 h). |
 | M5 | ~150 min | | |
 | M6 | ~130 min | | |
 | M7 | ~100 min | | |

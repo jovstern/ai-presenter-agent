@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+# A newer push to the same PR cancels the run it supersedes; runs on master are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# No secrets anywhere: `npm run e2e` runs the server with a dummy key and stubs the token
+# endpoint and the Live socket (playwright.config.js). The live e2e (`npm run e2e:live`) needs
+# the real key and macOS `say`, and never runs here.
+jobs:
+  # The job id is the status check's name; master's branch protection requires `check`.
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          # Two npm packages and a thin root, no workspaces: three lockfiles.
+          cache-dependency-path: |
+            package-lock.json
+            agent-client/package-lock.json
+            server/package-lock.json
+      - run: npm ci
+      - run: npm ci
+        working-directory: agent-client
+      - run: npm ci
+        working-directory: server
+      # Prettier, then lint + typecheck + tests + build in agent-client, then lint + typecheck
+      # + tests in server.
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 14

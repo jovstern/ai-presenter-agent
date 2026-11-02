@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H2–H5, M2–M4, L9 and L12 are done; H1 waits for the CSP
-> in M5; the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9, L11 and L12 are done (H1 with the
+> M5 T3 CSP); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -36,14 +36,16 @@
 >   reconnect-timer guard so `onerror`+`onclose` firing together can't race two `connect()` calls.
 > - **H3** (no barge-in) — fixed. `serverContent.interrupted` now stops every scheduled playback
 >   source (`audioIO.js`'s `createPlayer().interrupt()`) instead of letting buffered audio play out.
-> - **H1** (open token-vending endpoint) — partly mitigated; open until the M5 CSP (#13). `server/
->   index.js` gates `/api/live-token` on same-origin (`Origin`, falling back to `Referer` since
->   Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per IP, and now (M4)
->   also requires a nonce that `sandbox/index.html` embeds at serve time (`window.__DS_NONCE__`,
->   templated in by the server) and `liveSession.js` echoes back as a query param. This closes the
+> - **H1** (open token-vending endpoint) — closed in M5 T3 (see H1's "Fixed" note). `server/
+>   app.js` (was `index.js`) gates `/api/live-token` on same-origin (`Origin`, falling back to
+>   `Referer` since Chrome's `fetch()` omits `Origin` on same-origin requests), rate-limits per
+>   IP, and since M4 also requires a nonce that `sandbox/index.html` carries at serve time (since
+>   M5 T3 a `data-ds-nonce` attribute on the agent-client script tag, templated in by the server;
+>   in M4 an inline `window.__DS_NONCE__` script) and `liveSession.js` echoes back as a query
+>   param. This closes the
 >   cross-origin-frame/other-window vector cleanly. It does **not** close the co-resident-script
 >   vector H1 actually describes — a hostile script already running on this origin can read
->   `window.__DS_NONCE__` off the page exactly like `agent-client` does. What the nonce actually
+>   the nonce off the page (now the `data-ds-nonce` attribute) exactly like `agent-client` does. What the nonce actually
 >   buys against that script: a request must come from a script that loaded on this exact page, not
 >   an arbitrary cross-origin/cross-frame caller. This residual gap is inherent to the "hostile
 >   script running on the same origin" threat model, not a missing implementation step — closing it
@@ -110,6 +112,13 @@ fragments into one bubble rather than pushing a new entry per fragment.
 > one. Covered by `liveSession.test.js` (one drop → exactly one reconnect; superseded connects)
 > and `useLiveAgent.test.jsx` (no stacked mic). PR #9 force-closed the socket in a real browser:
 > one token request, one reconnect.
+>
+> **M5 T5 (found by the live e2e).** The immediate resume after a drop is often refused with
+> `1008 "… session is already connected to an existing client"`: Gemini still holds the dropped
+> client. Treating that as a rejected handle started a fresh session on every such reconnect,
+> which lost the conversation. `liveSession.js` now keeps the handle for that close reason
+> (`SESSION_STILL_ATTACHED`), and the backoff's next attempt, 1 s later, resumes. Tested in
+> `liveSession.test.js`. The live numbers are in `docs/metrics/README.md`.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -209,7 +218,27 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 
 ## High
 
-### [ ] H1 — `/api/live-token` is an open token vending machine on the origin that hosts the "clone"
+### [x] H1 — `/api/live-token` is an open token vending machine on the origin that hosts the "clone"
+
+> **Fixed (M4 endpoint half + M5 T3 CSP).** `server/app.js`: same-origin check, per-IP rate
+> limit, page nonce (validated with Zod), all in `GET /api/live-token`; and helmet now sends a
+> CSP on every response (`contentSecurityPolicy()` in `server/app.js`): `default-src 'self'`,
+> `script-src 'self'` (no inline script remains on any served page — the target app's scripts
+> moved to `target-app/home.js` / `settings.js`, and the nonce moved from an inline script to a
+> `data-ds-nonce` attribute that `main.jsx` reads), `connect-src` limited to `'self'` and the
+> Gemini Live origins, `frame-src 'self'`, `object-src 'none'`, plus HSTS in production. This
+> narrows what a compromised clone can load or reach, as suggested. Residual, documented and
+> out of scope: a hostile script already on this origin can still read the nonce and call the
+> endpoint (see the editorial note at the top and ADR 0001). The two in-memory gate maps are
+> also TTL-pruned and size-capped now (`server/expiringMap.js`), so a flood can't grow them
+> without limit, and serving the nonce-templated page is rate-limited per IP (M5 fix wave).
+> Deliberate gap: `style-src` allows `'unsafe-inline'`. The agent-client's shadow root gets its
+> stylesheet as a runtime `<style>` element (`main.jsx`), and Radix Dialog's react-remove-scroll
+> injects a `<style>` and inline style attributes when the knowledge dialog opens; neither can
+> carry a per-response nonce from a prebuilt bundle. Script injection is still blocked
+> (`script-src 'self'`); style injection can restyle the page but not run code. Revisit if the
+> styles move to a constructable stylesheet and Radix stops injecting. Tests:
+> `server/__tests__/app.test.js`.
 
 `server/index.js:35` returns an ephemeral Gemini token to any GET — no origin/referer check, no
 rate limit, no per-page nonce. In the real product the iframe holds a crawled clone of a
@@ -243,9 +272,8 @@ Suggested, in rough order of value:
 > ends capture that method at load, which closes tampering after load. Residual risks: tampering
 > before load, and a hostile script that runs before the handshake and connects first.
 >
-> **Still open (M4 T5):** the endpoint half is done (`server/index.js`: same-origin check,
-> per-IP rate limit, page nonce — see the editorial note at the top). H1 stays unticked until the
-> CSP on the sandbox page lands in M5 (#13).
+> **Was open (M4 T5):** the endpoint half was done in M4; H1 stayed unticked until the CSP
+> landed in M5 T3 (see the "Fixed" note above).
 
 ### [x] H2 — The riskiest file has zero tests and three `exhaustive-deps` escape hatches
 
@@ -349,6 +377,19 @@ if (message.toolCall) {
 > runs a 250 ms-debounced `MutationObserver` on the iframe body, reattached on every new document,
 > so user clicks and async DOM changes re-ground the model too. (3) Each snapshot node carries a
 > `hidden` flag (`el.hidden`, `display: none` or `visibility: hidden`).
+>
+> **M5 T5 (found by the live e2e).** Two more grounding gaps:
+> - A navigate's keyframe reached the model before the navigate's own result, as a user turn
+>   between the function call and its response, and the multi-step task stalled there.
+>   `liveSession.js` now holds a snapshot that arrives during a tool batch and sends it inside
+>   the batch's next tool response as `page`; the system instruction mentions `page` and asks
+>   for every step of a multi-step request.
+> - `bridge.js` named the notifications checkbox "on" (its default `value`) and the model once
+>   took that for its state. A form control is now named by its `<label>`, checkboxes and radios
+>   carry `checked`, and `input`/`change` events schedule a snapshot, since a toggle changes no
+>   attribute.
+>
+> Tested in `liveSession.test.js`, `bridge.test.js` and `e2e/loop.spec.js`.
 
 Two issues in one area:
 
@@ -450,6 +491,12 @@ rest.
 
 ### [ ] M5 — `fill` only works for `<input>`
 
+> Partly addressed. The rebuilt `sandbox/bridge.js` `fill` sets `el.value` directly, which covers
+> `<input>`, `<textarea>` and `<select>`. Since M5 T2 (checkJs) it replies `{success:false}` for an
+> element with no `value` instead of reporting success while nothing changed
+> (`agent-client/src/__tests__/bridge.test.js`). Still open: `contenteditable`, and the
+> native-setter trick a framework's controlled input would need.
+
 `bridge.js:136-138` hardcodes the `HTMLInputElement.prototype` value setter. Wrong for
 `<textarea>` and `<select>`; `contenteditable` unsupported. Fine for the current mock — worth a
 one-line note in the bridge that this is input-only for now. If generalised: pick the setter by
@@ -541,9 +588,13 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 - [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
-- [ ] **L11** — No root `package.json`, no single command to install/run the three parts, no
+- [x] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.
+  *Fixed (M5 T1, T6): a thin root `package.json` (no workspaces) runs every package's gate with
+  `npm run check`, builds and starts with `npm run dev`, and runs the e2e; `.nvmrc` pins Node 24
+  and each `package.json` has `engines: { node: ">=24" }`. Installs stay one `npm ci` per
+  package (no workspaces, by design); CI (`.github/workflows/ci.yml`) runs all three.*
 - [x] **L12** — Typo "sandbard" in `README.md` and `docs/sandbox-simulation.md` §2 ("sandbard
   operating on it").
   *Fixed (M4 T5): `docs/sandbox-simulation.md` §2 now reads "sandbox"; the rewritten README no

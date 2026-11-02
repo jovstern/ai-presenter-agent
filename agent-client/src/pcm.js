@@ -1,6 +1,11 @@
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 
+/**
+ * @param {Float32Array} float32
+ * @param {number} fromRate
+ * @param {number} toRate
+ */
 function resampleTo(float32, fromRate, toRate) {
   if (fromRate === toRate) return float32;
   const ratio = fromRate / toRate;
@@ -16,6 +21,7 @@ function resampleTo(float32, fromRate, toRate) {
   return out;
 }
 
+/** @param {Float32Array} float32 */
 function float32ToInt16(float32) {
   const int16 = new Int16Array(float32.length);
   for (let i = 0; i < float32.length; i++) {
@@ -25,6 +31,10 @@ function float32ToInt16(float32) {
   return int16;
 }
 
+/**
+ * @param {Int16Array} int16
+ * @returns {Float32Array<ArrayBuffer>}
+ */
 function int16ToFloat32(int16) {
   const float32 = new Float32Array(int16.length);
   for (let i = 0; i < int16.length; i++) {
@@ -33,12 +43,14 @@ function int16ToFloat32(int16) {
   return float32;
 }
 
+/** @param {Uint8Array} bytes */
 function bytesToBase64(bytes) {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
   return btoa(binary);
 }
 
+/** @param {string} base64 */
 function base64ToBytes(base64) {
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);
@@ -48,6 +60,11 @@ function base64ToBytes(base64) {
 
 // Encodes a Float32 audio frame (captured at `sourceSampleRate`) down to the
 // 16kHz 16-bit PCM mono the Live API expects for realtime audio input.
+/**
+ * @param {Float32Array} float32
+ * @param {number} sourceSampleRate
+ * @returns {string} base64
+ */
 export function encodeInputFrame(float32, sourceSampleRate) {
   const resampled = resampleTo(float32, sourceSampleRate, INPUT_SAMPLE_RATE);
   const int16 = float32ToInt16(resampled);
@@ -56,6 +73,10 @@ export function encodeInputFrame(float32, sourceSampleRate) {
 
 // Decodes a base64 chunk of 24kHz 16-bit PCM mono (the Live API's output
 // format) into a Float32Array suitable for an AudioBuffer.
+/**
+ * @param {string} base64
+ * @returns {Float32Array<ArrayBuffer>}
+ */
 export function decodeOutputChunk(base64) {
   const bytes = base64ToBytes(base64);
   const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);

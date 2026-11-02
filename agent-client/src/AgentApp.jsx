@@ -3,8 +3,16 @@ import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import * as knowledgeStore from './knowledgeStore.js';
 
+/** @import { BridgeChannel } from './bridgeChannel.js' */
+/** @import { StatusDetails } from './liveSession.js' */
+/** @import { AgentStatus, LiveAgent } from './useLiveAgent.js' */
+
 // Minimal status wording from the spec's Screens table; the designed card
 // (orb, Talk/End, toast) is M7.
+/**
+ * @param {AgentStatus} status
+ * @param {StatusDetails | null} details
+ */
 function statusText(status, details) {
   switch (status) {
     case 'connecting':
@@ -25,6 +33,12 @@ function statusText(status, details) {
 // to hang up, including during a reconnect's backoff. A fatal failure (the
 // page's token is rejected, or the server is misconfigured) can't be fixed by
 // Retry, so it offers a reload instead.
+/**
+ * @param {AgentStatus} status
+ * @param {StatusDetails | null} details
+ * @param {Pick<LiveAgent, 'connect' | 'disconnect' | 'retry'>} agent
+ * @returns {{ label: string, onClick: () => void }}
+ */
 function primaryAction(status, details, { connect, disconnect, retry }) {
   switch (status) {
     case 'connecting':
@@ -44,6 +58,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 // getUserMedia rejects with NotAllowedError when the permission is blocked,
 // which the viewer can fix; anything else (no device, device busy) can't be
 // fixed from here, so it is reported as it is.
+/** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
     return 'Microphone blocked — allow it in the address bar, then press Connect.';
@@ -51,8 +66,13 @@ function micErrorText(error) {
   return `Microphone unavailable: ${error.message || String(error)}`;
 }
 
-export function AgentApp({ bridge, portalContainer }) {
-  const agent = useLiveAgent(bridge);
+/**
+ * @param {{ bridge: BridgeChannel, nonce: string, portalContainer: HTMLElement }} props
+ *   `nonce` is the page nonce for the token request; `portalContainer` keeps
+ *   Radix portals inside the shadow root (both from main.jsx).
+ */
+export function AgentApp({ bridge, nonce, portalContainer }) {
+  const agent = useLiveAgent(bridge, nonce);
   const { status, details, transcript, micError } = agent;
   const action = primaryAction(status, details, agent);
 
@@ -65,12 +85,15 @@ export function AgentApp({ bridge, portalContainer }) {
   return (
     <div className="agent-app">
       <button onClick={action.onClick}>{action.label}</button>
+      {/* Named by its content, not an aria-label: the visible count has to be
+          part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
+          and the emoji is decoration. The name reads "Knowledge files: 0". */}
       <button
         className={`agent-app__knowledge-btn${hasContent ? '' : ' agent-app__knowledge-btn--empty'}`}
-        aria-label={`Knowledge files (${fileCount})`}
         onClick={() => setKnowledgeOpen(true)}
       >
-        <span aria-hidden="true">📄</span> {fileCount}
+        <span aria-hidden="true">📄</span> <span className="visually-hidden">Knowledge files:</span>{' '}
+        {fileCount}
       </button>
       <span className="agent-app__status" role="status">
         {statusText(status, details)}
@@ -97,7 +120,11 @@ export function AgentApp({ bridge, portalContainer }) {
           ))}
         </ul>
       )}
-      <KnowledgeModal open={knowledgeOpen} onOpenChange={setKnowledgeOpen} portalContainer={portalContainer} />
+      <KnowledgeModal
+        open={knowledgeOpen}
+        onOpenChange={setKnowledgeOpen}
+        portalContainer={portalContainer}
+      />
     </div>
   );
 }
