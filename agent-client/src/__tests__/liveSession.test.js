@@ -960,6 +960,75 @@ describe('timing marks', () => {
     }
   });
 
+  it('marks each keyframe with its UTF-8 size and node count, and no delta', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const first = [node('a', 'Añadir'), node('b', 'B'), node('c', 'C')];
+    bridge.emitSnapshot({ full: first, changed: first, removed: [] });
+    const changedB = node('b', 'B2');
+    bridge.emitSnapshot({ full: [first[0], changedB, first[2]], changed: [changedB], removed: [] });
+
+    const keyframes = dsMarks().filter((entry) => entry.name === 'ds:keyframe');
+    expect(keyframes).toHaveLength(1);
+    const sent = call.session.sendClientContent.mock.calls
+      .map(([arg]) => arg.turns)
+      .find((turns) => String(turns).startsWith('Page snapshot (full)'));
+    expect(keyframes[0].detail).toEqual({
+      bytes: new TextEncoder().encode(sent).length,
+      nodes: 3,
+    });
+    // 'ñ' is two bytes: the size is bytes on the wire, not characters.
+    expect(keyframes[0].detail.bytes).toBe(sent.length + 1);
+  });
+
+  it('marks every loop-guard trip with its kind, and nothing for calls it lets through', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const sameClick = (id) => ({ id, name: 'click', args: { selector: '#buy' } });
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [sameClick('1'), sameClick('2'), sameClick('3')] },
+    });
+    await flush();
+    expect(markNames()).not.toContain('ds:loop-trip');
+
+    call.params.callbacks.onmessage({ toolCall: { functionCalls: [sameClick('4')] } });
+    await flush();
+    const sentence = 'I will now open the settings page for you.';
+    for (let turn = 0; turn < 3; turn += 1) {
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: sentence } },
+      });
+      call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+    }
+
+    expect(dsMarks().filter((entry) => entry.name === 'ds:loop-trip')).toEqual([
+      { name: 'ds:loop-trip', detail: { kind: 'action' } },
+      { name: 'ds:loop-trip', detail: { kind: 'utterance' } },
+    ]);
+  });
+
+  it('marks the knowledge context it sends with its size, and nothing when there is none', async () => {
+    const { liveSession } = setup();
+    await connectAndEstablish(liveSession);
+    expect(markNames()).not.toContain('ds:knowledge');
+
+    setRules('Be brief.');
+    const knowledge = dsMarks().filter((entry) => entry.name === 'ds:knowledge');
+    expect(knowledge).toEqual([
+      {
+        name: 'ds:knowledge',
+        detail: { bytes: 'STRICT RULES (must always follow):\nBe brief.'.length },
+      },
+    ]);
+  });
+
   it('marks reconnected when a dropped session is open again, not on a first or manual connect', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);

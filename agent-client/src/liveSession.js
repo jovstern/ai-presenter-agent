@@ -141,7 +141,9 @@ const MAX_PENDING_FRAMES = 20; // ~1.6 s of the capture worklet's 80 ms frames
 // Timing marks on the page's performance timeline, read by the opt-in live
 // e2e (e2e/live.spec.js, docs/metrics/README.md): `ds:connect-start`,
 // `ds:open`, `ds:first-audio`, `ds:tool-start:<id>` / `ds:tool-end:<id>` and
-// `ds:reconnected`. A mark is a timestamp in a buffer nobody reads in
+// `ds:reconnected`, plus `ds:keyframe` and `ds:knowledge` with the `bytes` (UTF-8)
+// each sent message cost and `ds:loop-trip` with its `kind` (M6 T5 tunes from
+// them). A mark is a timestamp in a buffer nobody reads in
 // production: no logging, no network. The buffer lasts as long as the page and
 // gets two marks per tool call, so the names are kept and cleared on
 // disconnect() (never mid-session: the live e2e reads them after its scenario,
@@ -156,6 +158,13 @@ const markNames = new Set();
 function mark(name, detail) {
   markNames.add(name);
   performance.mark(name, { detail });
+}
+
+const encoder = new TextEncoder();
+
+/** @param {string} text */
+function byteLength(text) {
+  return encoder.encode(text).length;
 }
 
 function clearMarks() {
@@ -209,7 +218,9 @@ export function createLiveSession({
   function sendKnowledgeContext() {
     if (!session) return;
     const message = buildContextMessage();
-    if (message) session.sendClientContent({ turns: message, turnComplete: false });
+    if (!message) return;
+    mark('ds:knowledge', { bytes: byteLength(message) });
+    session.sendClientContent({ turns: message, turnComplete: false });
   }
 
   window.addEventListener(CHANGE_EVENT, sendKnowledgeContext);
@@ -245,6 +256,7 @@ export function createLiveSession({
     const turn = agentTurn;
     agentTurn = '';
     if (!loopGuard.checkUtterance(turn)) return;
+    mark('ds:loop-trip', { kind: 'utterance' });
     if (runningBatches.size > 0) correctivePending = true;
     else sendCorrective();
   }
@@ -275,10 +287,19 @@ export function createLiveSession({
   let heldCount = 0;
 
   /** @param {Snapshot} snapshot */
+  function snapshotMessage(snapshot) {
+    const decision = snapshotContext.decide(snapshot);
+    const message = formatSnapshotMessage(decision);
+    if (decision.type === 'keyframe') {
+      mark('ds:keyframe', { bytes: byteLength(message), nodes: decision.nodes.length });
+    }
+    return message;
+  }
+
+  /** @param {Snapshot} snapshot */
   function sendSnapshot(snapshot) {
     if (!session) return;
-    const decision = snapshotContext.decide(snapshot);
-    session.sendClientContent({ turns: formatSnapshotMessage(decision), turnComplete: false });
+    session.sendClientContent({ turns: snapshotMessage(snapshot), turnComplete: false });
   }
 
   /** @returns {string | undefined} The held snapshot as a message, if any. */
@@ -287,10 +308,10 @@ export function createLiveSession({
     // Each held snapshot is a diff against the one before it, so only the
     // last one, sent as a keyframe, carries everything the others changed.
     if (heldCount > 1) snapshotContext.markNavigated();
-    const decision = snapshotContext.decide(heldSnapshot);
+    const message = snapshotMessage(heldSnapshot);
     heldSnapshot = null;
     heldCount = 0;
-    return formatSnapshotMessage(decision);
+    return message;
   }
 
   const unsubscribeSnapshot = bridge.onSnapshot((snapshot) => {
@@ -317,8 +338,10 @@ export function createLiveSession({
       const id = fc.id ?? name;
       const signature = actionSignature(name, fc.args);
       mark(`ds:tool-start:${id}`, { name });
+      const tripped = loopGuard.check(signature);
+      if (tripped) mark('ds:loop-trip', { kind: 'action' });
       /** @type {ActionResult} */
-      const result = loopGuard.check(signature)
+      const result = tripped
         ? {
             success: false,
             error:

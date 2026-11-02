@@ -246,7 +246,7 @@ App metrics, from the live e2e, averaged over 5 runs:
 | First agent audio after `open` (greeting) | ≤ 2.0 s |
 | Tool round-trip, bridge only: click / fill / scroll | ≤ 300 ms |
 | Tool round-trip, bridge only: navigate | ≤ 1.5 s |
-| Scripted task success (5-step task) | ≥ 4 of 5 runs |
+| Scripted task success (6-step task since M6 T5, with a `fill`) | ≥ 4 of 5 runs |
 | Reconnect recovery (forced close → `open`) | ≤ 3 s |
 | Keyframe payload | ≤ 4 kB of JSON |
 
