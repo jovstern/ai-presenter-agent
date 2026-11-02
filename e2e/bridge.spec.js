@@ -1,3 +1,5 @@
+import { TOOL_DECLARATIONS } from '../agent-client/src/actionTools.js';
+import ROUTES from '../target-app/routes.json' with { type: 'json' };
 import { test, expect } from './fixtures.js';
 
 // The spec's §5.6 bridge validation test (docs/demostack-ai-presenter-agent.md):
@@ -8,8 +10,10 @@ import { test, expect } from './fixtures.js';
 
 const FIXTURE_PATH = '/e2e/bridge-fixture.html';
 
-// The same frame and script tags as sandbox/index.html, minus agent-client.
-const FIXTURE_HTML = `<!doctype html>
+// The same frame, routes block and script tags as sandbox/index.html, minus
+// agent-client. The routes block is the server's own, cut from its `/`.
+/** @param {string} routesBlock */
+const fixtureHtml = (routesBlock) => `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -18,9 +22,12 @@ const FIXTURE_HTML = `<!doctype html>
   </head>
   <body>
     <iframe id="target-app-frame" title="Target app" src="/target-app/index.html"></iframe>
+    ${routesBlock}
     <script defer src="/sandbox/bridge.js"></script>
   </body>
 </html>`;
+
+const ROUTES_BLOCK = /<script type="application\/json" id="ds-routes">[\s\S]*?<\/script>/;
 
 // How long a message that should be ignored gets to show up anyway, after a
 // round trip on the real port has already proved the bridge is responsive.
@@ -31,7 +38,9 @@ test.beforeEach(async ({ page, baseURL }) => {
   // so the bridge runs under the policy it ships with.
   await page.route(FIXTURE_PATH, async (route) => {
     const response = await route.fetch({ url: `${baseURL}/` });
-    await route.fulfill({ response, body: FIXTURE_HTML });
+    const routesBlock = (await response.text()).match(ROUTES_BLOCK)?.[0];
+    if (!routesBlock) throw new Error('the sandbox page has no #ds-routes block');
+    await route.fulfill({ response, body: fixtureHtml(routesBlock) });
   });
   await page.goto(FIXTURE_PATH); // waits for the iframe's load too
 
@@ -223,4 +232,124 @@ test('a snapshot follows a mutation, with hidden correct for save-confirmation',
     { selector: 'save-confirmation', tag: 'p', label: 'Saved.', disabled: false, hidden: false },
   ]);
   expect(afterSave.removed).toEqual([]);
+});
+
+// docs/code-review-notes.md M1: target-app/routes.json is the one route list.
+// The model's `navigate` enum (actionTools.js) and the routes the bridge
+// accepts (the server's #ds-routes block) both come from it.
+test('the bridge accepts exactly the navigate enum’s routes', async ({ page }) => {
+  const navigate = TOOL_DECLARATIONS.find((tool) => tool.name === 'navigate');
+  const routeEnum = navigate?.parametersJsonSchema?.properties?.route?.enum;
+  expect(routeEnum).toEqual(Object.keys(ROUTES));
+
+  for (const route of [...routeEnum].reverse()) {
+    expect(await act(page, 'navigate', [route]), route).toEqual({ success: true });
+    await expect
+      .poll(() =>
+        page.evaluate(() => document.querySelector('iframe')?.contentWindow?.location.pathname),
+      )
+      .toBe(ROUTES[route]);
+  }
+  expect(await act(page, 'navigate', ['admin'])).toEqual({
+    success: false,
+    error: 'Unknown route "admin"',
+  });
+});
+
+test.describe('fill on Settings', () => {
+  test.beforeEach(async ({ page }) => {
+    expect(await act(page, 'navigate', ['settings'])).toEqual({ success: true });
+    // Every input and change event that reaches the Settings document, in order.
+    await page.evaluate(() => {
+      const doc = document.querySelector('iframe')?.contentDocument;
+      /** @type {string[]} */
+      const events = [];
+      for (const type of ['input', 'change']) {
+        doc?.addEventListener(type, (event) => {
+          const target = /** @type {HTMLElement} */ (event.target);
+          events.push(`${event.type} ${target.dataset.testid} bubbles=${event.bubbles}`);
+        });
+      }
+      window.__fillEvents = events;
+    });
+  });
+
+  /** @param {import('@playwright/test').Page} page */
+  const fillEvents = (page) => page.evaluate(() => window.__fillEvents);
+
+  /**
+   * The latest snapshot node for `selector`, once one matches `expected`.
+   * @param {import('@playwright/test').Page} page
+   * @param {string} selector
+   * @param {Record<string, unknown>} expected
+   */
+  function expectSnapshotNode(page, selector, expected) {
+    return expect
+      .poll(async () =>
+        (await received(page))
+          .filter((message) => message.type === 'snapshot')
+          .flatMap((snapshot) => snapshot.full)
+          .filter((node) => node.selector === selector)
+          .at(-1),
+      )
+      .toMatchObject(expected);
+  }
+
+  test('types into the Notes textarea, firing input and change', async ({ page }) => {
+    expect(await act(page, 'fill', ['notes-input', 'Call back on Monday'])).toEqual({
+      success: true,
+    });
+
+    await expect(frame(page).getByLabel('Notes')).toHaveValue('Call back on Monday');
+    expect(await fillEvents(page)).toEqual([
+      'input notes-input bubbles=true',
+      'change notes-input bubbles=true',
+    ]);
+    await expectSnapshotNode(page, 'notes-input', {
+      tag: 'textarea',
+      label: 'Notes',
+      value: 'Call back on Monday',
+    });
+  });
+
+  test('chooses a Plan option by its visible text, firing input and change', async ({ page }) => {
+    await expectSnapshotNode(page, 'plan-select', {
+      tag: 'select',
+      label: 'Plan',
+      value: 'Free plan',
+      options: ['Free plan', 'Pro plan', 'Team plan'],
+    });
+
+    expect(await act(page, 'fill', ['plan-select', 'pro plan'])).toEqual({ success: true });
+
+    await expect(frame(page).getByLabel('Plan')).toHaveValue('pro');
+    expect(await fillEvents(page)).toEqual([
+      'input plan-select bubbles=true',
+      'change plan-select bubbles=true',
+    ]);
+    await expectSnapshotNode(page, 'plan-select', { value: 'Pro plan' });
+  });
+
+  test('chooses a Plan option by its value', async ({ page }) => {
+    expect(await act(page, 'fill', ['plan-select', 'team'])).toEqual({ success: true });
+
+    await expect(frame(page).getByLabel('Plan')).toHaveValue('team');
+    await expectSnapshotNode(page, 'plan-select', { value: 'Team plan' });
+  });
+
+  test('a Plan that matches no option fails, naming the options, and changes nothing', async ({
+    page,
+  }) => {
+    expect(await act(page, 'fill', ['plan-select', 'Pro plan'])).toEqual({ success: true });
+    const before = (await fillEvents(page)).length;
+
+    expect(await act(page, 'fill', ['plan-select', 'Enterprise'])).toEqual({
+      success: false,
+      error:
+        'data-testid="plan-select" has no option "Enterprise"; options: Free plan, Pro plan, Team plan',
+    });
+
+    await expect(frame(page).getByLabel('Plan')).toHaveValue('pro');
+    expect(await fillEvents(page)).toHaveLength(before);
+  });
 });

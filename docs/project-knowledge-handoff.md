@@ -139,7 +139,8 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 
 ```
 docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/
-target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids
+target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
+                 routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
 agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
 server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)

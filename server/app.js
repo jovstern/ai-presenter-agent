@@ -70,6 +70,22 @@ const GEMINI_ORIGINS = [
 // request, not a wrong nonce.
 const TokenQuery = z.object({ nonce: z.uuid() });
 
+// target-app/routes.json, the one route list (docs/code-review-notes.md M1):
+// route name -> the page's absolute path. bridge.js and actionTools.js both
+// derive from it, so a bad file fails the server's start, not a demo.
+const Routes = z
+  .record(z.string().regex(/^[a-z][a-z0-9-]*$/), z.string().regex(/^\/target-app\/[\w-]+\.html$/))
+  .refine((routes) => Object.keys(routes).length > 0, 'no routes');
+
+/**
+ * JSON for a `<script type="application/json">` data block. Every `<` is
+ * escaped, so no value can close the tag (`</script>`) or open a comment.
+ * @param {unknown} value
+ */
+export function jsonForScriptBlock(value) {
+  return JSON.stringify(value).replaceAll('<', '\\u003c');
+}
+
 /**
  * The one error shape for every JSON error (node-api.md).
  * @param {Response} res
@@ -276,9 +292,16 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
 
   // A1 (assessment): every URL that renders the sandbox page must go through
   // the nonce template, or the page ships the literal %%DS_NONCE%% and every
-  // /api/live-token call fails (see H1 above). Read once: the file only
-  // changes on a deploy, which restarts the process anyway.
-  const sandboxHtml = fs.readFileSync(path.join(ROOT, 'sandbox/index.html'), 'utf8');
+  // /api/live-token call fails (see H1 above). Read once: the files only
+  // change on a deploy, which restarts the process anyway. The route list is
+  // templated in here, once; only the nonce differs per load. A replacer
+  // function, not a string, so a `$&` in the JSON is not a replace pattern.
+  const routes = Routes.parse(
+    JSON.parse(fs.readFileSync(path.join(ROOT, 'target-app/routes.json'), 'utf8')),
+  );
+  const sandboxHtml = fs
+    .readFileSync(path.join(ROOT, 'sandbox/index.html'), 'utf8')
+    .replace('%%DS_ROUTES%%', () => jsonForScriptBlock(routes));
 
   const app = express();
   app.disable('x-powered-by');

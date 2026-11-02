@@ -32,6 +32,11 @@
          its own tag (document.currentScript) while it runs. Deferred scripts keep their
          order and run before DOMContentLoaded: bridge.js (which catches up on an iframe
          that already loaded) before agent-client.js. -->
+    <!-- target-app/routes.json, templated in by the server (a JSON data block: the
+         browser never runs it, so script-src 'self' holds). bridge.js reads it. -->
+    <script type="application/json" id="ds-routes">
+      %%DS_ROUTES%%
+    </script>
     <script defer src="/sandbox/bridge.js"></script>
     <script defer src="/agent-client/agent-client.js" data-ds-nonce="%%DS_NONCE%%"></script>
   </body>

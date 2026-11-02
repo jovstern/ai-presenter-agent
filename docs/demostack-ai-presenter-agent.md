@@ -165,8 +165,12 @@ needed; this is intentionally the simplest piece.
   input's value, `aria-labelledby`'s text, its placeholder and its title; a checkbox or radio
   carries `checked`; a text input, textarea or select carries its `value` (never a hidden
   input's, a password's or a card-number / one-time-code field's; cut to 60 characters), so a
-  `fill` shows up in the next snapshot. `fill` itself accepts only those text controls and
-  refuses a button, checkbox, hidden or other non-text input.
+  `fill` shows up in the next snapshot. A select's `value` is its selected option's visible
+  text, and it lists `options` (the first 20 options' visible text, each cut to 60 characters).
+  `fill` itself accepts only those text controls and refuses a button, checkbox, hidden or other
+  non-text input; it uses the element type's native value setter and fires `input` + `change`,
+  and on a select it matches an option's visible text (trimmed, case-insensitive), then its
+  value — no match fails, naming the options, and changes nothing.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
 - The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
   (changed/removed) against its last snapshot — cheap, same-process port message regardless of page
@@ -187,7 +191,8 @@ events go directly from the browser to Gemini Live.
 ### 5.5 Agent-client
 
 - Connects to Gemini Live with `tools` = function declarations for `click`, `navigate` (enum of
-  known routes — closes v2 goal #4 directly), `scroll`, `fill`.
+  known routes, the keys of `target-app/routes.json` — closes v2 goal #4 directly), `scroll`,
+  `fill`.
 - On a `toolCall` message: dispatch to the bridge over the private channel, await the result
   correlated by id (4 s timeout → failure),
   call `session.sendToolResponse()` with it. This action-result loop is the primary grounding

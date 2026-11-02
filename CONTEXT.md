@@ -22,13 +22,18 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Bridge protocol** — the message types on the channel, as JSDoc typedefs
   (`agent-client/src/bridgeProtocol.js`, copied verbatim into `bridge.js`).
 - **Action** — one thing the bridge does to the target app: click, fill, scroll, navigate. The
-  bridge's **allowlist** is the authority on which actions and routes exist; the model sees
-  them as tools (`agent-client/src/actionTools.js`).
+  bridge's **allowlist** is the authority on which actions exist; the model sees them as tools
+  (`agent-client/src/actionTools.js`). `fill` types into a text field or picks a select's
+  option by its visible text.
+- **Routes** — the pages `navigate` can open, by name: `target-app/routes.json`, the one list.
+  The server templates it into the sandbox page's `#ds-routes` block for the bridge, and
+  `actionTools.js` imports it as `navigate`'s enum.
 
 ## Grounding
 
 - **Snapshot** — the bridge's description of the interactive elements on the current page
-  (each one's name, state, and a text field's `value`): the full node list plus its diff
+  (each one's name, state, a text field's `value`, and a select's `options` by visible text):
+  the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
   after every load, after a debounced DOM mutation, and on request (`sandbox/bridge.js`).
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,

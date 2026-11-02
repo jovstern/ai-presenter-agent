@@ -21,8 +21,10 @@
    * `checked` is set for checkboxes and radio buttons only. `value` is set
    * for text inputs, textareas and selects (never a hidden input, a password
    * or a card-number / one-time-code field), cut to 60 characters plus an
-   * ellipsis.
-   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
+   * ellipsis; a select's is its selected option's visible text. `options` is
+   * set for selects only: the first 20 options' visible text, each cut the
+   * same way. `fill` picks a select's option by that text.
+   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string, options?: string[] }} SnapshotNode
    */
   /**
    * The full node list plus its diff against the bridge's previous snapshot.
@@ -72,12 +74,12 @@
   // see the residual risks below and docs/adr/0001-private-bridge-channel.md).
   const send = MessagePort.prototype.postMessage;
 
-  /** @type {string[]} */
-  const KNOWN_ROUTES = ['home', 'settings'];
-  // Absolute, not relative to target-app/ — iframe.src resolves against the
-  // parent (sandbox) page's URL, not the iframe's current document.
-  /** @type {Record<string, string>} */
-  const ROUTE_PATHS = { home: '/target-app/index.html', settings: '/target-app/settings.html' };
+  // Route name -> page path, from target-app/routes.json: the one route list
+  // (docs/code-review-notes.md M1), which the server templates into this
+  // page's #ds-routes data block and actionTools.js turns into `navigate`'s
+  // enum. Absolute paths, not relative to target-app/: iframe.src resolves
+  // against the parent (sandbox) page's URL, not the iframe's document.
+  const ROUTE_PATHS = readRoutes();
 
   // Size cap so a larger page can't blow the model's context — a guess, not
   // tuned against a real page yet (docs/project-knowledge-handoff.md §3.3).
@@ -96,6 +98,36 @@
     throw new Error('bridge.js: no <iframe id="target-app-frame"> on the page');
   }
   const iframe = frameElement; // narrowed once, for the hoisted functions below
+
+  // Without its routes the bridge can't navigate, and a silent empty list
+  // would turn every navigate into "Unknown route": fail loudly at load.
+  /** @returns {Map<string, string>} */
+  function readRoutes() {
+    const fail = (/** @type {string} */ why) => {
+      throw new Error(`bridge.js: the #ds-routes block ${why}`);
+    };
+    const block = document.getElementById('ds-routes');
+    if (!block) return fail('is missing');
+    /** @type {unknown} */
+    let routes;
+    try {
+      routes = JSON.parse(block.textContent ?? '');
+    } catch {
+      return fail('is not JSON');
+    }
+    if (typeof routes !== 'object' || routes === null || Array.isArray(routes)) {
+      return fail('is not an object');
+    }
+    const entries = Object.entries(routes);
+    if (entries.length === 0) return fail('lists no routes');
+    for (const [name, routePath] of entries) {
+      if (typeof routePath !== 'string' || !routePath.startsWith('/target-app/')) {
+        return fail(`maps "${name}" to something other than a /target-app/ path`);
+      }
+    }
+    // A Map, so a model-supplied "toString" or "__proto__" is no route.
+    return new Map(entries);
+  }
 
   // The action library lives in this closure, never on `window` — a page
   // script reaching `window.dsActions.click(...)` directly would bypass the
@@ -167,11 +199,12 @@
       return { success: true };
     },
     async navigate(route) {
-      if (!KNOWN_ROUTES.includes(route)) {
+      const routePath = ROUTE_PATHS.get(route);
+      if (routePath === undefined) {
         return { success: false, error: `Unknown route "${route}"` };
       }
-      const loaded = waitForLoadOf(ROUTE_PATHS[route]);
-      iframe.src = ROUTE_PATHS[route];
+      const loaded = waitForLoadOf(routePath);
+      iframe.src = routePath;
       // Don't report success until the new document is actually in place, and
       // don't claim it was when it never arrived.
       if (!(await loaded)) return { success: false, error: 'The page did not finish loading.' };
@@ -187,8 +220,25 @@
       if (!isTextControl(el) || !('value' in el)) {
         return { success: false, error: `data-testid="${selector}" is not a text input` };
       }
-      el.value = value;
+      let newValue = String(value);
+      if (isSelect(el)) {
+        // Matched by what the viewer (and the snapshot) sees, then by value.
+        // No match must not set `value`: that clears the selection.
+        const option = matchOption(el, newValue);
+        if (!option) {
+          const options = optionTexts(el).join(', ');
+          return {
+            success: false,
+            error: `data-testid="${selector}" has no option "${newValue}"; options: ${options}`,
+          };
+        }
+        newValue = option.value;
+      }
+      nativeValueSetter(el).call(el, newValue);
+      // Both, bubbling, as a user's edit fires them: a framework listens for
+      // `input`, a plain page (or a select's handler) often for `change`.
       el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true };
     },
   };
@@ -312,6 +362,8 @@
   // An input whose value is its caption, so it names the button.
   const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
   const MAX_VALUE_LENGTH = 60;
+  // A select's options listed in a snapshot (and in a failed fill's error).
+  const MAX_OPTIONS = 20;
 
   // What `fill` may type into, and what a snapshot reports a value for.
   /** @param {Element} el */
@@ -328,14 +380,74 @@
     return inputType(el) === 'password' || tokens.some((token) => SECRET_AUTOCOMPLETE.test(token));
   }
 
+  /** @param {string} text */
+  function cut(text) {
+    return text.length > MAX_VALUE_LENGTH ? `${text.slice(0, MAX_VALUE_LENGTH)}…` : text;
+  }
+
+  // The cast, as in findByTestId: the frame's realm makes `instanceof
+  // HTMLSelectElement` false, so the tag decides.
   /**
+   * @param {Element} el
+   * @returns {el is HTMLSelectElement}
+   */
+  function isSelect(el) {
+    return el.tagName === 'SELECT';
+  }
+
+  /** @param {HTMLSelectElement} select */
+  function optionTexts(select) {
+    return [...select.options].slice(0, MAX_OPTIONS).map((option) => cut(option.text.trim()));
+  }
+
+  /**
+   * The option whose visible text is `wanted` (ignoring case and surrounding
+   * space), else the one whose value is.
+   * @param {HTMLSelectElement} select
+   * @param {string} wanted
+   */
+  function matchOption(select, wanted) {
+    const key = wanted.trim().toLowerCase();
+    const options = [...select.options];
+    return (
+      options.find((option) => option.text.trim().toLowerCase() === key) ??
+      options.find((option) => option.value.trim().toLowerCase() === key)
+    );
+  }
+
+  // The prototype's own `value` setter, from the frame's realm: a framework's
+  // controlled input (React) overrides `value` on the instance to track it,
+  // and only the native setter gets past that so its listener sees the
+  // change (docs/code-review-notes.md M5). Per element type, since each has
+  // its own setter.
+  /**
+   * @param {HTMLElement} el An input, textarea or select (isTextControl).
+   * @returns {(this: HTMLElement, value: string) => void}
+   */
+  function nativeValueSetter(el) {
+    const realm = /** @type {Window & typeof globalThis} */ (iframe.contentWindow);
+    const type =
+      el.tagName === 'TEXTAREA'
+        ? realm.HTMLTextAreaElement
+        : isSelect(el)
+          ? realm.HTMLSelectElement
+          : realm.HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(type.prototype, 'value')?.set;
+    // runAction turns the throw into a failure reply.
+    if (!setter) throw new Error(`No native value setter for <${el.tagName.toLowerCase()}>`);
+    return setter;
+  }
+
+  /**
+   * A select's value is its selected option's visible text, the text `fill`
+   * matches; '' when nothing is selected.
    * @param {Element} el
    * @returns {string | undefined}
    */
   function valueOf(el) {
     if (!isTextControl(el) || isSecret(el)) return undefined;
-    const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
-    return value.length > MAX_VALUE_LENGTH ? `${value.slice(0, MAX_VALUE_LENGTH)}…` : value;
+    if (isSelect(el)) return cut(el.selectedOptions[0]?.text.trim() ?? '');
+    return cut('value' in el && typeof el.value === 'string' ? el.value : '');
   }
 
   // A form control is named by its <label>. A checkbox's `value` is no name
@@ -407,6 +519,7 @@
       if (isCheckable(el)) node.checked = 'checked' in el && el.checked === true;
       const value = valueOf(el);
       if (value !== undefined) node.value = value;
+      if (isSelect(el)) node.options = optionTexts(el);
       return node;
     });
   }

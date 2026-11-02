@@ -23,7 +23,8 @@ performance — see the docs for why.
 
 ```
 docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/)
-target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements)
+target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
+                 routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
@@ -72,18 +73,18 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 3 specs, 13 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 3 specs, 18 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 118 tests
+npm test        # vitest: 10 files, 144 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
 npm run build   # single-file IIFE bundle in agent-client/dist/
 
 cd ../server
-npm test        # vitest + supertest: 2 files, 46 tests
+npm test        # vitest + supertest: 2 files, 50 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -97,13 +98,16 @@ The suite in `agent-client/src/__tests__/`:
   Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
   Reload page on a fatal failure) with focus kept on it, the status line and alerts.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
-  own page and reports a page that never loads as a failure; `fill` refuses an element that
-  isn't a text input; replies survive a later patch of `MessagePort.prototype.postMessage`; a
+  own page and reports a page that never loads as a failure; the routes come from the page's
+  `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
+  isn't a text input, sets the value through the native setter and fires `input` + `change`, and
+  picks a select's option by visible text, then value (no match fails and names the options);
+  a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
   checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot.
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
-  inherited names (`toString`) get none.
+  inherited names (`toString`) get none; `navigate`'s enum is `target-app/routes.json`'s keys.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
@@ -121,8 +125,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 - `bridge.spec.js` — `sandbox/bridge.js` in a real browser on a fixture page (the bridge and the
   iframe, no agent-client, served with the real CSP). The test does the real handshake and port
   transfer itself, then checks that click / fill / scroll / navigate change the iframe (the fill's
-  value showing in the next snapshot), that an unknown action, an unknown route and `fill` on a
-  non-input are rejected, that a second
+  value showing in the next snapshot), that the bridge accepts exactly `navigate`'s enum, that
+  `fill` works on the Settings textarea and select (by text and by value, firing `input` and
+  `change`; no matching option leaves the selection alone), that an unknown action, an unknown
+  route and `fill` on a non-input are rejected, that a second
   `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
   snapshot with `hidden` right for `save-confirmation`.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the

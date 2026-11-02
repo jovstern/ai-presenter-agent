@@ -58,12 +58,17 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any
   page), `style-src 'self' 'unsafe-inline'` (runtime `<style>` from the shadow root and Radix),
   `connect-src` adds the Gemini `wss:`/`https:` origins, `frame-src 'self'`, `img-src 'self'
-  data:`; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
+  data:`; the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
+  never runs; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
   adds a resource type updates the CSP in the same commit.
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
-  DOM snapshots). No build step.
+  DOM snapshots; reads the routes from the page's `#ds-routes` block, which the server
+  templates in). No build step.
 - `target-app/` (static) — 2-page mock app used as the demo target: `index.html` + `home.js`
-  (counter), `settings.html` + `settings.js` (Save confirmation), `style.css`. No build step.
+  (counter), `settings.html` + `settings.js` (Save confirmation; also a Notes textarea and a
+  Plan select for `fill`), `style.css`, and `routes.json` — the one route list (route name →
+  page path): the server templates it into the sandbox page for `bridge.js`, and
+  `actionTools.js` imports it for `navigate`'s enum. No build step.
 
 ## Commands and gates
 
@@ -113,7 +118,7 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
 - `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Done: B1–B4, H1–H5, M2–M4, L9, L11, L12; the rest are open. Its original
+  M1–M9, L1–L12). Done: B1–B4, H1–H5, M1–M5, L9, L11, L12; the rest are open. Its original
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
@@ -145,19 +150,20 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (118 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 10 vitest files (144 tests): `actionTools`,
   `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
   `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
   `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
-  Library). `server/__tests__/` has 2 vitest files (46 tests): `app` (supertest against
+  Library). `server/__tests__/` has 2 vitest files (50 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts, the CSP and other headers, `/health`, the HTML and JSON 404s, the nonce cap)
-  and `expiringMap` (expiry, pruning on access, the cap). `e2e/` has 3 Playwright specs (13
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, the nonce cap)
+  and `expiringMap` (expiry, pruning on access, the cap). `e2e/` has 3 Playwright specs (18
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
-  violation in any frame: `bridge.spec.js` (7: `sandbox/bridge.js` on a fixture page, the test
-  doing the real handshake and port transfer — the actions, the allowlist, unknown routes, a
-  second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (2: the real
+  violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
+  doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
+  bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (2: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; and the fatal `not_configured` path) and
   `a11y.spec.js` (4: axe with zero violations on `/` idle, with the knowledge dialog open —

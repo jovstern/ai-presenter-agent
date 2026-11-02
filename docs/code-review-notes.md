@@ -3,8 +3,8 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9, L11 and L12 are done (H1 with the
-> M5 T3 CSP); the rest are open.
+> code instead. Status at a glance: B1–B4, H1–H5, M1–M5, L9, L11 and L12 are done (H1 with the
+> M5 T3 CSP; M1 and M5 in M6 T1); the rest are open.
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -427,7 +427,18 @@ return { selector, tag: el.tagName.toLowerCase(), label: labelFor(el),
 
 ## Medium
 
-### [ ] M1 — `KNOWN_ROUTES` is hand-duplicated across the security boundary
+### [x] M1 — `KNOWN_ROUTES` is hand-duplicated across the security boundary
+
+> Fixed in M6 T1: `target-app/routes.json` (route name → page path) is the only route list.
+> `server/app.js` validates it with Zod at startup and templates it into the sandbox page as a
+> `<script type="application/json" id="ds-routes">` data block (`<` escaped, by
+> `jsonForScriptBlock`; a data block never runs, so `script-src 'self'` holds);
+> `sandbox/bridge.js`'s `readRoutes()` reads and validates that block and throws at load if it is
+> missing or malformed; `agent-client/src/actionTools.js` imports the file (a JSON import), so
+> `navigate`'s enum is its keys. Tests: `bridge.test.js` (each route, unknown routes, a bad
+> block), `actionTools.test.js` (enum = file keys), `server/__tests__/app.test.js` (the block on
+> every sandbox URL, the escaping), and `e2e/bridge.spec.js` (the bridge accepts exactly the
+> enum's routes and rejects another).
 
 `actionTools.js:9` (the enum that *is* the guardrail for v1 bug #4) and `bridge.js:17` each define
 the list, with a code comment that says "Keep this list in sync." If they drift, the model gets an
@@ -489,7 +500,18 @@ and never stores it — so removing `<ds-agent-avatar>` from the DOM leaves the 
 mic live. Store the root, unmount it in `disconnectedCallback`, and have `teardown()` (B2) do the
 rest.
 
-### [ ] M5 — `fill` only works for `<input>`
+### [x] M5 — `fill` only works for `<input>`
+
+> Fixed in M6 T1: `sandbox/bridge.js` `fill` calls the native `value` setter of the element's own
+> prototype (`HTMLInputElement` / `HTMLTextAreaElement` / `HTMLSelectElement`, taken from the
+> iframe's realm, `nativeValueSetter()`), so a framework's controlled input sees the change, then
+> fires bubbling `input` and `change`. A select is matched by its options' visible text (trimmed,
+> case-insensitive), then by value (`matchOption()`); no match replies
+> `{success:false, error:'… has no option "X"; options: A, B, C'}` and leaves the selection as it
+> was. Its snapshot node carries `options` (≤ 20 texts, each ≤ 60 characters) and its `value` is
+> the selected option's text. The target app's Settings page has a Notes textarea and a Plan
+> select to prove it (`bridge.test.js`, `e2e/bridge.spec.js`). `contenteditable` stays out of
+> scope: the target app has none.
 
 > Partly addressed. The rebuilt `sandbox/bridge.js` `fill` sets `el.value` directly, which covers
 > `<input>`, `<textarea>` and `<select>`. Since M5 T2 (checkJs) it replies `{success:false}` for an
