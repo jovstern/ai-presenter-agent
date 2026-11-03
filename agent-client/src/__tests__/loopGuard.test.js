@@ -95,6 +95,40 @@ describe('loopGuard: cycles', () => {
   });
 });
 
+// A loop is the model acting again and again with no new input from the user
+// (I1): the user speaking starts a new request, so the window starts afresh.
+describe('loopGuard: the user speaking ends the action window', () => {
+  it('passes A, user speaks, B, A, user speaks, B (no A-B-A-B across requests)', () => {
+    const guard = createLoopGuard();
+    expect(guard.check(goHome)).toBe(false);
+    guard.userSpoke();
+    expect(guard.check(goSettings)).toBe(false);
+    expect(guard.check(goHome)).toBe(false);
+    guard.userSpoke();
+    expect(guard.check(goSettings)).toBe(false);
+  });
+
+  it('passes four separate spoken "click increment" requests', () => {
+    const guard = createLoopGuard();
+    const results = [1, 2, 3, 4].map(() => {
+      guard.userSpoke();
+      return guard.check(increment);
+    });
+    expect(results).toEqual([false, false, false, false]);
+  });
+
+  it('still trips a loop within one request', () => {
+    const guard = createLoopGuard();
+    guard.userSpoke();
+    expect([goHome, goSettings, goHome, goSettings].map((s) => guard.check(s))).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+});
+
 describe('loopGuard: normal varied use passes', () => {
   const sequences = {
     'the live e2e five-step task (increment ×2, settings, toggle, save)': [
@@ -180,6 +214,35 @@ describe('loopGuard: utterances', () => {
     expect(guard.checkUtterance(line)).toBe(false);
     expect(guard.checkUtterance(line)).toBe(false);
     expect(guard.checkUtterance(line)).toBe(true);
+  });
+
+  // m11: narration of the steps of one request ("Clicking the increment
+  // button now." before each click) is not talk going in circles; a repeat of
+  // the action itself is the action guard's to catch.
+  it('a tool call between turns ends the episode: narration of each step passes', () => {
+    const guard = createLoopGuard();
+    const narration = 'Clicking the increment button now.';
+    const results = [1, 2, 3, 4].map(() => {
+      const tripped = guard.checkUtterance(narration);
+      guard.agentActed();
+      return tripped;
+    });
+    expect(results).toEqual([false, false, false, false]);
+    // With no action in between, the same line three times is a loop again.
+    expect(guard.checkUtterance(narration)).toBe(false);
+    expect(guard.checkUtterance(narration)).toBe(false);
+    expect(guard.checkUtterance(narration)).toBe(true);
+  });
+
+  it('acting does not clear the action window', () => {
+    const guard = createLoopGuard();
+    expect([increment, increment, increment].map((s) => guard.check(s))).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    guard.agentActed();
+    expect(guard.check(increment)).toBe(true);
   });
 
   it('ignores short acknowledgements like "Done." that a multi-step task repeats', () => {

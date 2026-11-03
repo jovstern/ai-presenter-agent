@@ -7,7 +7,7 @@ import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
 import { createLoopGuard, actionSignature } from './loopGuard.js';
 import { INPUT_SAMPLE_RATE } from './pcm.js';
-// The one model name: server/index.js locks every token to it
+// The one model name: server/geminiMint.js locks every token to it
 // (liveConnectConstraints), so a second copy here could drift and every
 // connect would be rejected (docs/code-review-notes.md M7).
 import LIVE_MODEL from './liveModel.json' with { type: 'json' };
@@ -97,10 +97,11 @@ const SESSION_STILL_ATTACHED = /already connected/i;
 // ramp still gives Gemini ~6 s in all to let go before the budget runs out.
 const STILL_ATTACHED_RETRY_MS = 400;
 // Close codes that say nothing against a resume handle: no close frame at all
-// (1006, the network), or the server going away or asking to come back later
-// (1001, 1012–1014). Any other close of a resumed attempt before setup
-// completes is the server rejecting the handle (M4 re-review).
-const TRANSIENT_CLOSE_CODES = new Set([1001, 1006, 1012, 1013, 1014]);
+// (1006, the network), the server going away, failing internally or asking to
+// come back later (1001, 1011, 1012–1014). Any other close of a resumed
+// attempt before setup completes is the server rejecting the handle (M4
+// re-review).
+const TRANSIENT_CLOSE_CODES = new Set([1001, 1006, 1011, 1012, 1013, 1014]);
 
 /** @param {number} status */
 function isRetryableStatus(status) {
@@ -164,29 +165,14 @@ const MAX_PENDING_FRAMES = 20; // ~1.6 s of the capture worklet's 80 ms frames
 // production: no logging, no network. The buffer lasts as long as the page and
 // gets two marks per tool call, so the names are kept and cleared on
 // disconnect() (never mid-session: the live e2e reads them after its scenario,
-// with the session still open).
-/** @type {Set<string>} */
-const markNames = new Set();
-
-/**
- * @param {string} name
- * @param {Record<string, unknown>} [detail]
- */
-function mark(name, detail) {
-  markNames.add(name);
-  performance.mark(name, { detail });
-}
+// with the session still open). Each session keeps its own names (mark() in
+// createLiveSession), so one session's disconnect clears only its own marks.
 
 const encoder = new TextEncoder();
 
 /** @param {string} text */
 function byteLength(text) {
   return encoder.encode(text).length;
-}
-
-function clearMarks() {
-  markNames.forEach((name) => performance.clearMarks(name));
-  markNames.clear();
 }
 
 /**
@@ -201,6 +187,23 @@ export function createLiveSession({
   onTranscript,
   onInterrupted,
 }) {
+  /** @type {Set<string>} */
+  const markNames = new Set();
+
+  /**
+   * @param {string} name
+   * @param {Record<string, unknown>} [detail]
+   */
+  function mark(name, detail) {
+    markNames.add(name);
+    performance.mark(name, { detail });
+  }
+
+  function clearMarks() {
+    markNames.forEach((name) => performance.clearMarks(name));
+    markNames.clear();
+  }
+
   /** @type {Session | null} */
   let session = null;
   let generation = 0;
@@ -238,23 +241,32 @@ export function createLiveSession({
   // session's context, knowledge included, so a resend only stacked another
   // copy (up to MAX_TOTAL_BYTES, 4 MB) into it on every drop. The live e2e
   // showed the resumed session still naming the seeded knowledge without it
-  // (docs/code-review-notes.md M9, docs/metrics/m06.md). A change made while
-  // no session was up is the exception: the resumed session never saw it.
-  let knowledgeChangedOffline = false;
+  // (docs/code-review-notes.md M9, docs/metrics/m06.md).
+  // A handle restores the session as it was when the handle was issued, so a
+  // resume resends whenever the store has changed since the knowledge that
+  // handle's session held: a change made while no session was up, or one sent
+  // into the session after its newest handle. Revisions count store changes;
+  // `sentRevision` is what the live session holds, `handleRevision` what the
+  // handle in use restores.
+  let knowledgeRevision = 0;
+  let sentRevision = 0;
+  let handleRevision = 0;
+
+  function onKnowledgeChange() {
+    knowledgeRevision += 1;
+    sendKnowledgeContext();
+  }
 
   function sendKnowledgeContext() {
-    if (!session) {
-      knowledgeChangedOffline = true;
-      return;
-    }
-    knowledgeChangedOffline = false;
+    if (!session) return;
+    sentRevision = knowledgeRevision;
     const message = buildContextMessage();
     if (!message) return;
     mark('ds:knowledge', { bytes: byteLength(message) });
     session.sendClientContent({ turns: message, turnComplete: false });
   }
 
-  window.addEventListener(CHANGE_EVENT, sendKnowledgeContext);
+  window.addEventListener(CHANGE_EVENT, onKnowledgeChange);
 
   // --- DOM grounding + tool-calling ---
   const snapshotContext = createDomSnapshotContext();
@@ -264,7 +276,8 @@ export function createLiveSession({
   // streams the agent's speech as outputTranscription fragments and ends each
   // turn with turnComplete, so a turn is the fragments in between, checked
   // once complete; an interrupted turn is dropped unchecked, and the user's
-  // own transcription ends any loop episode. A loop gets one corrective turn,
+  // own transcription or a tool call ends any loop episode (the user speaking
+  // also clears the action window: a new request). A loop gets one corrective turn,
   // which prompts a reply (turnComplete true): like a snapshot, it can't sit
   // between a function call and its response, so while a tool batch runs it
   // waits for the batch's end. A drop discards both: they belong to the dead
@@ -313,6 +326,9 @@ export function createLiveSession({
   // continues from it.
   /** @type {Set<symbol>} */
   const runningBatches = new Set();
+  // Calls that arrived before live.connect() resolved (handleMessage).
+  /** @type {FunctionCall[]} */
+  let earlyToolCalls = [];
   /** @type {Snapshot | null} */
   let heldSnapshot = null;
   let heldCount = 0;
@@ -516,10 +532,20 @@ export function createLiveSession({
     const resumption = message.sessionResumptionUpdate;
     if (resumption?.resumable && resumption.newHandle) {
       resumeHandle = resumption.newHandle;
+      handleRevision = sentRevision;
     }
 
-    if (message.toolCall?.functionCalls?.length) {
-      runToolCallBatch(message.toolCall.functionCalls, gen); // fire-and-forget; internally serialized
+    const functionCalls = message.toolCall?.functionCalls;
+    if (functionCalls?.length) {
+      // Narration between the steps of one request is no talk loop.
+      loopGuard.agentActed();
+      // The SDK delivers what the server queued behind setupComplete before
+      // live.connect() resolves, so a call can arrive before `session` is
+      // ours: it waits for openSession to start it rather than being answered
+      // into nothing.
+      if (session)
+        runToolCallBatch(functionCalls, gen); // fire-and-forget; internally serialized
+      else earlyToolCalls.push(...functionCalls);
     }
   }
 
@@ -600,6 +626,7 @@ export function createLiveSession({
     runningBatches.clear();
     heldSnapshot = null;
     heldCount = 0;
+    earlyToolCalls = [];
     agentTurn = '';
     correctivePending = false;
     serverAnswered = false;
@@ -619,7 +646,10 @@ export function createLiveSession({
     attemptResumed = Boolean(resumeHandle);
     // The abandoned socket can't be closed from here (live.connect hasn't
     // returned it); the generation check below closes it if it ever lands,
-    // and ignores its callbacks until then.
+    // and ignores its callbacks until then. The same holds for a disconnect()
+    // during a pending live.connect: if the server never completes setup,
+    // the SDK never hands the socket over, and it stays open, ignored, until
+    // the server or the network closes it (an orphan socket, no traffic sent).
     setupTimer = setTimeout(() => {
       setupTimer = null;
       handleFailure(gen, new Error('The voice service did not answer in time.'));
@@ -638,8 +668,11 @@ export function createLiveSession({
           onerror: () =>
             handleFailure(gen, new Error('The connection to the voice service failed.')),
           onclose: (event) => {
+            // Only a resume can be refused for a still-attached client.
             const stillAttached =
-              event?.code === 1008 && SESSION_STILL_ATTACHED.test(event.reason ?? '');
+              attemptResumed &&
+              event?.code === 1008 &&
+              SESSION_STILL_ATTACHED.test(event.reason ?? '');
             const transient = event?.code === undefined || TRANSIENT_CLOSE_CODES.has(event.code);
             handleFailure(gen, new Error('The connection to the voice service closed.'), {
               stillAttached,
@@ -665,7 +698,7 @@ export function createLiveSession({
       session = newSession;
       pendingFrames.forEach(sendFrame);
       pendingFrames = [];
-      if (!attemptResumed || knowledgeChangedOffline) sendKnowledgeContext();
+      if (!attemptResumed || knowledgeRevision !== handleRevision) sendKnowledgeContext();
       // The page, unlike the knowledge, may have changed during the drop, and
       // a keyframe is small (≤ 855 B in the live e2e) — force a fresh one
       // rather than assuming the model still has the page right, and ask
@@ -675,11 +708,18 @@ export function createLiveSession({
       // Greet once per fresh session, not on a resumed reconnect — otherwise
       // a mid-conversation resumption would restart the conversation with a
       // fresh "hello" (the same class of bug as docs/code-review-notes.md B3).
-      if (!resumeHandle) {
+      // By this attempt, not by resumeHandle: a handle can arrive before
+      // live.connect() resolves (the SDK's queue), on a fresh session too.
+      if (!attemptResumed) {
         session.sendClientContent({
           turns: 'Greet the user with a brief hello.',
           turnComplete: true,
         });
+      }
+      if (earlyToolCalls.length > 0) {
+        const calls = earlyToolCalls;
+        earlyToolCalls = [];
+        runToolCallBatch(calls, gen);
       }
     } catch (error) {
       handleFailure(gen, error);
@@ -714,7 +754,7 @@ export function createLiveSession({
   function dispose() {
     unsubscribeNavigated();
     unsubscribeSnapshot();
-    window.removeEventListener(CHANGE_EVENT, sendKnowledgeContext);
+    window.removeEventListener(CHANGE_EVENT, onKnowledgeChange);
     disconnect();
   }
 

@@ -77,10 +77,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
   **action signature** (tool name + normalised arguments) that is the 4th identical one in a
   row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
-  try something else. An **agent turn** (its transcription fragments up to `turnComplete`)
-  whose normalised sentence fills 3 of the last 5 turns is an **utterance loop**: `liveSession`
-  sends one **corrective turn** per episode, which ends when the agent says something else or
-  the user speaks. Reset on every manual connect.
+  try something else. The window covers one request: the user speaking clears it. An **agent
+  turn** (its transcription fragments up to `turnComplete`) whose normalised sentence fills 3
+  of the last 5 turns is an **utterance loop**: `liveSession` sends one **corrective turn** per
+  episode, which ends when the agent says something else, calls a tool (narrating each step of
+  a task is no loop) or the user speaks. Reset on every manual connect.
 
 - **Capture worklet** — the AudioWorklet that turns the mic into what the Live API takes:
   `agent-client/public/capture-worklet.js`, served as a same-origin file at

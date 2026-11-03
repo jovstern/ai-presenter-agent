@@ -574,6 +574,13 @@ a framework's controlled input needs it.
 > dropped with the session on a reconnect; it fires once per episode, which ends on a turn that
 > isn't a repeat or on the user's own transcription. The thresholds are named constants that
 > M6 T5 may tune. Tested in `loopGuard.test.js` and `liveSession.test.js`.
+>
+> Refined in the M6 fix wave: the action window spans one request — the user's own
+> transcription clears it (`userSpoke()`), since a loop is the model acting with no new input,
+> so four separately spoken "click increment" requests, or A, *user*, B, A, *user*, B, all run.
+> A tool call ends an utterance episode (`agentActed()`): narration before each step of one
+> request ("Clicking the increment button now." ×3) is no talk loop, and an action that really
+> repeats is the action rules' to catch. Only turns with no tool call between them count.
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says
@@ -647,13 +654,24 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 
 > Fixed in M6 T5: the greeting was already guarded (`openSession` greets only a fresh session).
 > `agent-client/src/liveSession.js` now sends the knowledge context only to a fresh session, or
-> to a resumed one when the store changed while no session was up (`knowledgeChangedOffline`).
+> to a resumed one when the store changed while no session was up (then `knowledgeChangedOffline`;
+> since the fix wave, revisions, below).
 > Measured in the live e2e (`docs/metrics/m06.md`): the reconnect scenario seeds a 386 B knowledge
 > file and asks for its code name after the drop. With the resend, 5 of 5 resumed sessions named
 > it, and without it 10 of 10, so the resend only stacked a copy of the knowledge (up to 4 MB)
 > into the context per drop. The handoff's "deliberate" stance (§3.3) is reversed. The keyframe
 > is still forced on every reconnect, because the page can change during a drop. Tests:
 > `liveSession.test.js` "knowledge on a reconnect (M9)".
+>
+> **Assumption (M6 fix wave):** skipping the resend relies on a resume either really restoring
+> the session the handle names, or Gemini closing the attempt (which drops the handle, so the
+> next attempt is fresh and gets the knowledge). A resume that "succeeds" into an empty context
+> would lose the knowledge silently; nothing seen in the live e2e does that. A handle restores
+> the session as it was when the handle was issued, so knowledge sent after it isn't in the
+> resumed session: `liveSession.js` counts store changes (`knowledgeRevision`), remembers which
+> one the live session holds (`sentRevision`) and which one the newest handle captured
+> (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
+> while no session was up, or one sent into the session after its newest handle.
 
 ---
 

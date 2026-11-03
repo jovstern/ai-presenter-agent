@@ -3,7 +3,8 @@
 // what a trip does: a tripped action is not dispatched and is answered with a
 // failure telling the model to try something else; a tripped utterance gets
 // one corrective context turn. liveSession calls reset() on every manual
-// connect(), so a new conversation starts clean.
+// connect(), so a new conversation starts clean, userSpoke() on the user's
+// own transcription and agentActed() on every tool call.
 
 // --- Actions ---
 // Each rule trips on the call that completes `repeats` back-to-back copies of
@@ -17,6 +18,9 @@
 // - Period 3 (A-B-C-A-B-C): on the second C. A three-step routine (fill,
 //   toggle, save) is one task; doing it all again, unchanged, is a loop.
 // A cycle needs at least two different calls; a constant run is period 1's.
+// The window covers one request: the user speaking clears it, since a loop is
+// the model acting with no new input. Four separate "click increment"
+// requests, or home → settings asked for twice, are no loop.
 // Kept as they are in M6 T5: in 14 live runs with the `ds:loop-trip` mark
 // (and 5 more where a refused action would show as a failed tool) nothing
 // tripped, and the six-step task's longest repeat is the counter's two
@@ -38,6 +42,11 @@ const ACTION_WINDOW = Math.max(...CYCLE_RULES.map(({ period, repeats }) => perio
 // Turns under MIN_UTTERANCE_WORDS words ("Done.", "Okay.") are ignored: a
 // multi-step task acknowledges each step that way, and a short repeat costs
 // little even when it is a loop.
+// A tool call ends the episode too: narrating each step of one request
+// ("Clicking the increment button now." before every click) is the model
+// working, not talking in circles, and an action that really repeats is the
+// action rules' to catch. So only turns with no tool call between them count
+// towards a repeat.
 const UTTERANCE_WINDOW = 5;
 const UTTERANCE_REPEATS = 3;
 const MIN_UTTERANCE_WORDS = 4;
@@ -104,19 +113,25 @@ export function createLoopGuard() {
     return true;
   }
 
-  // The user taking the floor ends any utterance episode: what the agent said
-  // before no longer counts towards a loop.
-  function userSpoke() {
+  // The agent acting ends any utterance episode: its turns either side of a
+  // tool call are steps of a task, not a repeat.
+  function agentActed() {
     utterances = [];
     armed = true;
   }
 
-  function reset() {
+  // The user taking the floor starts a new request: what the agent said or
+  // did before no longer counts towards a loop.
+  function userSpoke() {
     actions = [];
+    agentActed();
+  }
+
+  function reset() {
     userSpoke();
   }
 
-  return { check, checkUtterance, userSpoke, reset };
+  return { check, checkUtterance, agentActed, userSpoke, reset };
 }
 
 /**

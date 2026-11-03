@@ -102,10 +102,11 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
       onFrame: (frame) => session.sendAudioFrame(frame),
       onError: (err) => {
         setMicError(err); // AgentApp words it by err.name
-        // A blocked mic means the agent can never hear the user: end the
-        // session instead of showing "Live", so the card offers Connect —
-        // the action its guidance names.
-        if (err?.name === 'NotAllowedError') disconnect();
+        // Any capture failure (a blocked or missing mic, a worklet that
+        // didn't load) means the agent can never hear the user: end the
+        // session instead of showing "Live" while deaf, so the card offers
+        // Connect — the action the guidance names.
+        disconnect();
       },
     });
     await session.connect();

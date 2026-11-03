@@ -333,6 +333,44 @@ describe('AgentApp + useLiveAgent', () => {
     );
   });
 
+  // I7: whatever stops the mic from starting, the agent can't hear the user,
+  // so the card never shows Live while deaf: the session ends, and the alert
+  // says why in the error's own words.
+  it.each([
+    [
+      'the worklet failing to load',
+      Object.assign(new Error("Unable to load a worklet's module."), { name: 'AbortError' }),
+      "Microphone unavailable: Unable to load a worklet's module.",
+    ],
+    [
+      'no microphone',
+      Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
+      'Microphone unavailable: Requested device not found',
+    ],
+    [
+      'the microphone busy',
+      Object.assign(new Error('Could not start audio source'), { name: 'NotReadableError' }),
+      'Microphone unavailable: Could not start audio source',
+    ],
+  ])('ends the session when capture fails with %s', async (_name, error, text) => {
+    const { startCapture } = await import('../audioIO.js');
+    const stop = vi.fn();
+    startCapture.mockImplementationOnce(({ onError }) => {
+      const ready = Promise.resolve().then(() => onError(error));
+      return { ready, stop };
+    });
+    renderApp();
+    await click('Connect');
+    const session = fakes.sessions.at(-1);
+    await act(async () => {});
+
+    expect(session.disconnect).toHaveBeenCalled();
+    expect(stop).toHaveBeenCalled();
+    emitStatus('closed');
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe(text);
+  });
+
   it('renders the transcript list only once it has entries', async () => {
     const { container } = renderApp();
     await click('Connect');
