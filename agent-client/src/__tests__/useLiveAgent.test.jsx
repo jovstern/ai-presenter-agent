@@ -342,13 +342,13 @@ describe('AgentApp + useLiveAgent', () => {
   it.each([
     [
       'the worklet failing to load',
-      Object.assign(new Error("Unable to load a worklet's module."), { name: 'AbortError' }),
-      "Microphone unavailable: Unable to load a worklet's module.",
+      Object.assign(new Error("Unable to load a worklet's module."), { name: 'WorkletLoadError' }),
+      "Voice couldn't start. Reload the page, then press Connect.",
     ],
     [
       'no microphone',
       Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
-      'Microphone unavailable: Requested device not found',
+      'No microphone found. Connect one, then press Connect.',
     ],
     [
       'the microphone busy',

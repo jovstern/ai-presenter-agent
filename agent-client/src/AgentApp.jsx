@@ -63,9 +63,10 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 }
 
 // getUserMedia rejects with NotAllowedError when the permission is blocked,
-// which the viewer can fix. The two voiceSupportError() names (audioIO.js)
-// say what would fix them. Anything else (no device, device busy) can't be
-// fixed from here, so it is reported as it is.
+// and NotFoundError when there is no mic, both of which the viewer can fix.
+// The two voiceSupportError() names and WorkletLoadError (audioIO.js) say
+// what would fix them. Anything else (a busy device) can't be fixed from
+// here, so it is reported as it is.
 /** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
@@ -76,6 +77,14 @@ function micErrorText(error) {
   }
   if (error.name === 'AudioUnsupportedError') {
     return "This browser can't capture voice. Use a current Chrome, Edge, Firefox or Safari.";
+  }
+  // audioIO.js's own name for the capture worklet failing to load: nothing
+  // the viewer did, and a reload fetches the file again.
+  if (error.name === 'WorkletLoadError') {
+    return "Voice couldn't start. Reload the page, then press Connect.";
+  }
+  if (error.name === 'NotFoundError') {
+    return 'No microphone found. Connect one, then press Connect.';
   }
   return `Microphone unavailable: ${error.message || String(error)}`;
 }

@@ -191,7 +191,7 @@ describe('startCapture', () => {
     expect(made.contexts).toHaveLength(0);
   });
 
-  it('a worklet that fails to load is reported, and the mic and context are released', async () => {
+  it('a worklet that fails to load is reported as a WorkletLoadError, and the mic and context are released', async () => {
     const onError = vi.fn();
     const loadError = Object.assign(new Error("Unable to load a worklet's module."), {
       name: 'AbortError',
@@ -200,7 +200,10 @@ describe('startCapture', () => {
     const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn(), onError });
     await capture.ready;
 
-    expect(onError).toHaveBeenCalledWith(loadError);
+    const [[reported]] = onError.mock.calls;
+    // Its own name, so the card doesn't word it as a microphone problem.
+    expect(reported.name).toBe('WorkletLoadError');
+    expect(reported.cause).toBe(loadError);
     expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
     expect(made.contexts[0].close).toHaveBeenCalledTimes(1);
     expect(made.nodes).toHaveLength(0);

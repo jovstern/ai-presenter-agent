@@ -57,7 +57,15 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       // The device's own rate: the worklet resamples (see its header for why
       // not a 16 kHz context).
       audioContext = new AudioContext();
-      await audioContext.audioWorklet.addModule(workletUrl);
+      await audioContext.audioWorklet.addModule(workletUrl).catch((/** @type {unknown} */ err) => {
+        // Named as this file's own, so the card words it as voice failing to
+        // start (a reload fetches the file again), not as a microphone problem.
+        const reason = err instanceof Error ? err.message : String(err);
+        throw Object.assign(
+          new Error(`The capture worklet failed to load: ${reason}`, { cause: err }),
+          { name: 'WorkletLoadError' },
+        );
+      });
       if (stopped) return release();
       // Created after awaits, the context is outside the click's user
       // activation, and Safari starts such a context suspended: a suspended

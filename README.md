@@ -138,7 +138,8 @@ The suite in `agent-client/src/__tests__/`:
   16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing).
 - `audioIO.test.js` — the secure-context / AudioWorklet check, the context resumed after the
   worklet loads (Safari), and that capture releases the port, nodes, mic track and context once,
-  including on a stop mid-setup, a worklet that fails to load or a context that won't resume.
+  including on a stop mid-setup, a worklet that fails to load (reported as a `WorkletLoadError`)
+  or a context that won't resume.
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
