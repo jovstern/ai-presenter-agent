@@ -24,7 +24,8 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Action** — one thing the bridge does to the target app: click, fill, scroll, navigate. The
   bridge's **allowlist** is the authority on which actions exist; the model sees them as tools
   (`agent-client/src/actionTools.js`). `fill` types into a text field or picks a select's
-  option by its visible text.
+  option by its visible text, and refuses what a user couldn't do: a disabled or read-only
+  field, a disabled option, a value longer than the field's `maxlength`.
 - **Routes** — the pages `navigate` can open, by name: `target-app/routes.json`, the one list.
   The server templates it into the sandbox page's `#ds-routes` block for the bridge, and
   `actionTools.js` imports it as `navigate`'s enum.

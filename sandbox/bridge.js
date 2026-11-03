@@ -152,7 +152,9 @@
    * @returns {HTMLElement | null}
    */
   function findByTestId(testId) {
-    const el = iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
+    // Escaped, so a quote or backslash in the id can't break the selector.
+    const selector = `[data-testid="${CSS.escape(testId)}"]`;
+    const el = iframe.contentDocument?.querySelector(selector) ?? null;
     return /** @type {HTMLElement | null} */ (el);
   }
 
@@ -222,7 +224,15 @@
       if (!isTextControl(el) || !('value' in el)) {
         return { success: false, error: `data-testid="${selector}" is not a text input` };
       }
-      let newValue = String(value);
+      // What a user couldn't do, the agent doesn't either: a disabled field
+      // (itself, or in a disabled fieldset) or a read-only one is refused.
+      if (el.matches(':disabled')) {
+        return { success: false, error: `data-testid="${selector}" is disabled` };
+      }
+      if ('readOnly' in el && el.readOnly === true) {
+        return { success: false, error: `data-testid="${selector}" is read-only` };
+      }
+      const newValue = String(value);
       if (isSelect(el)) {
         // Matched by what the viewer (and the snapshot) sees, then by value.
         // No match must not set `value`: that clears the selection.
@@ -234,9 +244,30 @@
             error: `data-testid="${selector}" has no option "${newValue}"; options: ${options}`,
           };
         }
-        newValue = option.value;
+        // A disabled option (or one in a disabled optgroup) can't be picked.
+        if (option.matches(':disabled')) {
+          return {
+            success: false,
+            error: `data-testid="${selector}" has option "${option.text.trim()}", but it is disabled`,
+          };
+        }
+        // The option itself, not `value`: with two options sharing a value,
+        // `value` would pick the first, not the one matched by its text.
+        // React tracks no select value of its own, so the change event below
+        // is all a controlled select needs.
+        option.selected = true;
+      } else {
+        // Refused rather than cut short, so the model never believes it typed
+        // text the field dropped. `maxLength` is -1 when there's no limit.
+        const limit = 'maxLength' in el && typeof el.maxLength === 'number' ? el.maxLength : -1;
+        if (limit >= 0 && newValue.length > limit) {
+          return {
+            success: false,
+            error: `data-testid="${selector}" takes at most ${limit} characters; the value has ${newValue.length}`,
+          };
+        }
+        nativeValueSetter(el).call(el, newValue);
       }
-      nativeValueSetter(el).call(el, newValue);
       // Both, bubbling, as a user's edit fires them: a framework listens for
       // `input`, a plain page (or a select's handler) often for `change`.
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -425,17 +456,12 @@
   // change (docs/code-review-notes.md M5). Per element type, since each has
   // its own setter.
   /**
-   * @param {HTMLElement} el An input, textarea or select (isTextControl).
+   * @param {HTMLElement} el An input or textarea (a select is set through its option).
    * @returns {(this: HTMLElement, value: string) => void}
    */
   function nativeValueSetter(el) {
     const realm = /** @type {Window & typeof globalThis} */ (iframe.contentWindow);
-    const type =
-      el.tagName === 'TEXTAREA'
-        ? realm.HTMLTextAreaElement
-        : isSelect(el)
-          ? realm.HTMLSelectElement
-          : realm.HTMLInputElement;
+    const type = el.tagName === 'TEXTAREA' ? realm.HTMLTextAreaElement : realm.HTMLInputElement;
     const setter = Object.getOwnPropertyDescriptor(type.prototype, 'value')?.set;
     // runAction turns the throw into a failure reply.
     if (!setter) throw new Error(`No native value setter for <${el.tagName.toLowerCase()}>`);

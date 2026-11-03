@@ -339,13 +339,6 @@ describe('sandbox/bridge.js fill', () => {
       'Ada',
       'Ada',
     ],
-    [
-      'a select',
-      PLAN.replace('data-testid="plan"', 'data-testid="target"'),
-      'HTMLSelectElement',
-      'Pro plan',
-      'pro',
-    ],
   ])(
     'sets %s through its prototype’s native value setter',
     async (_name, html, type, value, set) => {
@@ -372,6 +365,116 @@ describe('sandbox/bridge.js fill', () => {
       }
     },
   );
+});
+
+describe('sandbox/bridge.js fill refuses what a user could not do', () => {
+  function fill(id, selector, value) {
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
+    return result;
+  }
+
+  it.each([
+    ['a disabled input', '<input data-testid="target" disabled value="old" />', 'is disabled'],
+    [
+      'an input in a disabled fieldset',
+      '<fieldset disabled><input data-testid="target" value="old" /></fieldset>',
+      'is disabled',
+    ],
+    ['a read-only input', '<input data-testid="target" readonly value="old" />', 'is read-only'],
+    [
+      'a read-only textarea',
+      '<textarea data-testid="target" readonly>old</textarea>',
+      'is read-only',
+    ],
+  ])('refuses %s and leaves it alone', async (_name, html, why) => {
+    frame.doc.body.innerHTML = html;
+    const events = vi.fn();
+    frame.doc.body.addEventListener('input', events);
+
+    expect(await fill('d1', 'target', 'new')).toEqual({
+      type: 'action-result',
+      id: 'd1',
+      success: false,
+      error: `data-testid="target" ${why}`,
+    });
+    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe('old');
+    expect(events).not.toHaveBeenCalled();
+  });
+
+  it('refuses a disabled select', async () => {
+    frame.doc.body.innerHTML = `<select data-testid="plan" disabled>
+      <option value="free">Free plan</option><option value="pro">Pro plan</option></select>`;
+    expect(await fill('d2', 'plan', 'Pro plan')).toMatchObject({
+      success: false,
+      error: 'data-testid="plan" is disabled',
+    });
+    expect(frame.doc.querySelector('select').value).toBe('free');
+  });
+
+  it.each([
+    ['a disabled option', '<option value="team" disabled>Team plan</option>'],
+    [
+      'an option in a disabled optgroup',
+      '<optgroup label="Paid" disabled><option value="team">Team plan</option></optgroup>',
+    ],
+  ])('refuses %s', async (_name, option) => {
+    frame.doc.body.innerHTML = `<select data-testid="plan">
+      <option value="free">Free plan</option>${option}</select>`;
+    expect(await fill('d3', 'plan', 'Team plan')).toMatchObject({
+      success: false,
+      error: 'data-testid="plan" has option "Team plan", but it is disabled',
+    });
+    expect(frame.doc.querySelector('select').value).toBe('free');
+  });
+
+  it('selects the matched option itself when two options share a value', async () => {
+    frame.doc.body.innerHTML = `<select data-testid="size">
+      <option value="m">Medium</option>
+      <option value="m">Medium (fitted)</option>
+    </select>`;
+    expect(await fill('d4', 'size', 'Medium (fitted)')).toMatchObject({ success: true });
+    expect(frame.doc.querySelector('select').selectedIndex).toBe(1);
+  });
+
+  // maxlength: failing, not truncating, so the model never believes it typed
+  // text the field cut short.
+  it('refuses a value longer than the field’s maxlength, naming the limit', async () => {
+    frame.doc.body.innerHTML = '<input data-testid="target" maxlength="5" />';
+    expect(await fill('d5', 'target', 'Ada Lovelace')).toEqual({
+      type: 'action-result',
+      id: 'd5',
+      success: false,
+      error: 'data-testid="target" takes at most 5 characters; the value has 12',
+    });
+    expect(frame.doc.querySelector('input').value).toBe('');
+  });
+
+  it('fills a value that fits the maxlength', async () => {
+    frame.doc.body.innerHTML = '<textarea data-testid="target" maxlength="5"></textarea>';
+    expect(await fill('d6', 'target', 'Ada')).toMatchObject({ success: true });
+    expect(frame.doc.querySelector('textarea').value).toBe('Ada');
+  });
+});
+
+describe('sandbox/bridge.js selectors', () => {
+  // The test id goes into a CSS attribute selector: a quote in it used to
+  // break the selector (a SyntaxError, reported as a failure).
+  it('finds an element whose data-testid has a quote and a backslash in it', async () => {
+    frame.doc.body.innerHTML = '<button data-testid=\'say "hi" \\ bye\'>Hi</button>';
+    const clicked = vi.fn();
+    frame.doc.querySelector('button').addEventListener('click', clicked);
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({
+      type: 'action',
+      id: 's1',
+      action: 'click',
+      args: ['say "hi" \\ bye'],
+    });
+
+    expect(await result).toEqual({ type: 'action-result', id: 's1', success: true });
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('sandbox/bridge.js channel', () => {

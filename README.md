@@ -108,8 +108,10 @@ The suite in `agent-client/src/__tests__/`:
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
-  isn't a text input, sets the value through the native setter and fires `input` + `change`, and
-  picks a select's option by visible text, then value (no match fails and names the options);
+  isn't a text input, a disabled or read-only field, a disabled option and a value over the
+  field's `maxlength`, sets the value through the native setter and fires `input` + `change`, and
+  picks a select's option by visible text, then value, selecting that option itself (no match
+  fails and names the options); a test id with a quote in it is found (`CSS.escape`);
   a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
   checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
   names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters.
