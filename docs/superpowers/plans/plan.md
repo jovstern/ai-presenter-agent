@@ -550,6 +550,18 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   pending state, the reconnect attempt text, mic-denied guidance and the failed toast (once
   per failure).
 - Docs: handoff §5.2 made true.
+- The minors accepted from the M6 re-review (session and audio robustness, each with a test
+  first):
+  - On a resume with changed knowledge, start the early tool-call batch (the calls queued
+    before `live.connect()` resolved, `liveSession.js`) before the knowledge and greeting
+    sends, or hold those sends until the batch ends, so no client turn lands between a
+    function call and its response.
+  - A note in `loopGuard.js`'s header: echo transcribed as user speech (speaker into mic)
+    resets the action window; decide, from the live e2e's transcripts, whether to gate
+    `userSpoke()` on transcript length (a short fragment not counting as a new request).
+  - A timeout on `audioContext.resume()` in `audioIO.js` (Safari may hang rather than
+    reject), surfaced as a capture failure, so the card ends the session instead of
+    showing Live while deaf.
 
 *(medium, 12 min)*
 
