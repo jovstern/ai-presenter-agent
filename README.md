@@ -74,19 +74,19 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 4 specs, 19 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 4 specs, 21 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 12 files, 212 tests
+npm test        # vitest: 12 files, 259 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 3 files, 52 tests
+npm test        # vitest + supertest: 3 files, 54 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -95,10 +95,13 @@ The suite in `agent-client/src/__tests__/`:
   per drop, superseded connects, in-order tool batches, the token and model it connects with,
   resumption without re-greeting, the
   `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
-  per repeated-sentence episode, never sent to a replacement session),
+  per repeated-sentence episode, never sent to a replacement session; the user speaking clears
+  the action window, and narration between tool calls is no loop), the SDK's real order
+  (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
+  the greeting by whether the attempt resumed),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
   during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
-  retried after 400 ms × the attempt; knowledge not resent to a resumed session (M9); the `ds:*`
+  retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
   timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
   on a server close; the backoff reset only after 5 s open or the first content; the two fatal
   kinds (`config`, `token`).
@@ -125,16 +128,17 @@ The suite in `agent-client/src/__tests__/`:
 - `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, file
   ids without `crypto.randomUUID` (plain http), the context blob it builds.
 - `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
-  sentences, realistic sequences that must pass.
+  sentences, realistic sequences that must pass, the window cleared by the user speaking and the
+  utterance episode by a tool call.
 - `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack
   overflow), a subarray encodes only its own samples, Int16 from an odd byte offset or with a
   trailing half sample.
 - `captureWorklet.test.js` — `public/capture-worklet.js` under a stubbed AudioWorklet scope:
   80 ms Int16 frames of 1280 at 16 kHz, posted with the buffer transferred; from 48 and 44.1 kHz,
   16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing).
-- `audioIO.test.js` — the secure-context / AudioWorklet check, and that capture releases the
-  port, nodes, mic track and context once, including on a stop mid-setup or a worklet that
-  fails to load.
+- `audioIO.test.js` — the secure-context / AudioWorklet check, the context resumed after the
+  worklet loads (Safari), and that capture releases the port, nodes, mic track and context once,
+  including on a stop mid-setup, a worklet that fails to load or a context that won't resume.
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
@@ -172,7 +176,7 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the
 real Gemini Live API, with spoken prompts (`e2e/make-prompts.sh`, macOS `say`) played by
-Chromium's fake mic. Three scenarios: the greeting, the scripted five-step task checked in the
+Chromium's fake mic. Three scenarios: the greeting, the scripted six-step task checked in the
 iframe, and a forced socket close that must recover. It records the app metrics (connect time,
 first audio, tool round trips, reconnect time, pass rate) in `.metrics/live.json`. Never in CI.
 How to run it, what each number means and the current baseline: `docs/metrics/README.md`.

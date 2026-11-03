@@ -48,7 +48,8 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Live session** — one Gemini Live socket and its state (`agent-client/src/liveSession.js`).
   Its **status** is `connecting`, `open`, `reconnecting`, `failed` or `closed`.
 - **Token** — a short-lived, single-use Gemini Live credential the server mints per connect
-  and per reconnect (`server/index.js`, `/api/live-token` in `server/app.js`). The real API key
+  and per reconnect (`server/geminiMint.js`, locked to the one model in
+  `agent-client/src/liveModel.json`; `/api/live-token` in `server/app.js`). The real API key
   never reaches the browser.
 - **Nonce** — a random id the server writes into the sandbox page at serve time; the agent
   sends it back with every token request (`server/app.js`). Proves the request came from a

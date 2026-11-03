@@ -32,15 +32,17 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`).
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
-  - `AgentApp.jsx` — a minimal card: one never-disabled Connect/Cancel/Disconnect/Retry/Reload
-    page button, a status line, an alert on `failed`, the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
+  - `AgentApp.jsx` — a minimal card (an `<aside aria-label="AI presenter">` landmark): one
+    never-disabled Connect/Cancel/Disconnect/Retry/Try again/Reload page button, a status line
+    ("Can't connect" on a fatal failure), an alert on `failed` (keyed by the connect attempt, so
+    a repeat is announced), the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
     `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
     successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
     with the designed card in M7 (issue #11).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`.
   - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by
-    `server/index.js` for the token's constraint.
+    `server/geminiMint.js` for the token's constraint.
   - `bridgeProtocol.js` — types only: the bridge messages as JSDoc `@typedef`s. `sandbox/bridge.js`
     holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
     they drift, so edit both together.
@@ -132,7 +134,8 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
 - `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Closed out in M6 T6: B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12 done; L2, L3, L4, L5, L7 and L8 deferred to M7 (card items). Its original
+  M1–M9, L1–L12). Done: B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12. Open: L2, L3, L4, L5, L7 and
+  L8, card items deferred to M7 (issue #11), each marked "Deferred → M7". Its original
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
@@ -166,7 +169,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 12 vitest files (225 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 12 vitest files (259 tests): `actionTools`,
   `audioIO` (the secure-context check; capture releases everything once), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
@@ -176,7 +179,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (20
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (21
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
@@ -187,9 +190,10 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   Reload page; a rejected nonce offers Reload page),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after Disconnect) and
-  `a11y.spec.js` (4: axe with zero violations on `/` idle, with the knowledge dialog open —
-  inside the shadow root — and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
-  Gemini: greeting, the five-step task, a forced close → recovery) runs only under
+  `a11y.spec.js` (5: axe with zero violations on `/` idle, with the knowledge dialog open —
+  inside the shadow root —, connected with a transcript line (the fake-Live harness in
+  `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
+  Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.

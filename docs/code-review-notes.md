@@ -3,11 +3,12 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance (M6 T6): **closed out.** B1–B4, H1–H5, M1–M9, L1, L6 and
-> L9–L12 are done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3;
-> M7, M8 and L10 in M6 T4; M9 in M6 T5). L2, L3, L4, L5, L7 and L8 are deferred to M7 (issue
-> #11): each is a card item the designed card replaces, and M7's T1–T3 name them. The M4 and M5
-> re-review items accepted for M6 are fixed in M6 T6 (see B2, H1 and H5).
+> code instead. Status at a glance (M6 fix wave): B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12 are
+> done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and
+> L10 in M6 T4; M9 in M6 T5; M6 and M9 refined in the fix wave). **Six items are still open:**
+> L2, L3, L4, L5, L7 and L8, unticked and marked "Deferred → M7 (issue #11, Tn)": each is a card
+> item the designed card replaces. The M4 and M5 re-review items accepted for M6 are fixed in M6
+> T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -636,6 +637,12 @@ mirror of what the client sends (and then generate both from one object).
 > `sendToolResponse({functionResponses})` signatures. The client sends no `thinkingConfig`, so the
 > `thinkingLevel` question is moot. `goAway` isn't read: the close that follows it takes the
 > normal resume path.
+>
+> Fix wave: `live.connect` delivers `setupComplete`, and anything the server queued behind it,
+> through `onmessage` *before* it resolves, while `liveSession.js` holds no session yet. A tool
+> call in that queue now waits for the session and is answered (it was dropped), and the greeting
+> is decided by whether the attempt resumed, not by whether a handle has arrived by then.
+> `liveSession.test.js` drives both orders.
 
 `@google/genai: ^1.0.0` (also `hono: ^4.6.0`, `react: ^18.3.0`) is a very wide range for a
 preview-API integration whose message shapes the handoff doc already admits are inferred
@@ -687,27 +694,27 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
   sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
   thread into `public/capture-worklet.js`.*
-- [x] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
+- [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
-  *Deferred: `VolumeMeter` didn't survive the rebuild; its
+  *Deferred → M7 (issue #11, T2, T3): `VolumeMeter` didn't survive the rebuild; its
   successor, the volume orb (rAF, a `prefers-reduced-motion` branch), and the `aria-live`
   transcript are the designed card's work, not hardening → M7 (issue #11, T2 and T3).*
-- [x] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
+- [ ] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
-  *Deferred: today's card has no z-index at all; host positioning and
+  *Deferred → M7 (issue #11, T1): today's card has no z-index at all; host positioning and
   `z-index` on the host element come with the card's styles, so they are set once, on the
   final layout → M7 (issue #11, T1).*
-- [x] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
+- [ ] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
   widget only survives because `.ds-card` is `position:fixed`. Add an explicit
   `:host { display: block; }` (or `contents`) so it doesn't depend on that coincidence.
-  *Deferred: still true of `main.jsx`'s `:host { all: initial; }`; the
+  *Deferred → M7 (issue #11, T1): still true of `main.jsx`'s `:host { all: initial; }`; the
   card's styles move to `styles.css` with tokens on `:host`, where the explicit `display`
   belongs → M7 (issue #11, T1).*
-- [x] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
+- [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
-  *Deferred: today's card keeps and renders every line (no bound at all,
+  *Deferred → M7 (issue #11, T3): today's card keeps and renders every line (no bound at all,
   the M1 rebuild dropped both); the coalesced transcript bounds the list to 20 and renders the
   last 3 → M7 (issue #11, T3).*
 - [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
@@ -722,15 +729,15 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   no longer throws (`knowledgeStore.test.js`); `bridgeChannel.js`'s action ids keep
   `crypto.randomUUID()`, since actions only run in a session, which now can't start outside a
   secure context. Handoff §3.3 notes both halves.*
-- [x] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
+- [ ] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
   linting. `import styles from './styles.css?inline'` keeps the single-file IIFE build and
   restores tooling / syntax highlighting.
-  *Deferred: the CSS is still a template literal in `main.jsx`; it moves
+  *Deferred → M7 (issue #11, T1): the CSS is still a template literal in `main.jsx`; it moves
   to `src/styles.css?inline` with the card's tokens → M7 (issue #11, T1).*
-- [x] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
+- [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
-  *Deferred: `VolumeMeter` and its refs didn't survive the rebuild; the
+  *Deferred → M7 (issue #11, T2): `VolumeMeter` and its refs didn't survive the rebuild; the
   orb that replaces it holds its node in a ref and is checked by a Profiler render-count test → M7 (issue #11, T2).*
 - [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
