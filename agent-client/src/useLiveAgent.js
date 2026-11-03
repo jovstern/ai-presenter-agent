@@ -16,6 +16,8 @@ import { decodeOutputChunk } from './pcm.js';
  * @property {TranscriptEntry[]} transcript Every line so far, in order.
  * @property {Error | null} micError Why the mic couldn't start (or can't on this page), until
  *   the next connect.
+ * @property {number} connectCount How many times connect() has run: a key for the alerts, so
+ *   an identical alert after a new attempt is a new node, which screen readers announce.
  * @property {() => Promise<void>} connect Starts mic, playback and the session.
  * @property {() => void} disconnect
  * @property {() => Promise<void>} retry The same as connect.
@@ -48,6 +50,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
   );
   const [transcript, setTranscript] = useState(/** @type {TranscriptEntry[]} */ ([]));
   const [micError, setMicError] = useState(/** @type {Error | null} */ (null));
+  const [connectCount, setConnectCount] = useState(0);
   const sessionRef = useRef(/** @type {LiveSession | null} */ (null));
   const captureRef = useRef(/** @type {ReturnType<typeof startCapture> | null} */ (null));
   const playerRef = useRef(/** @type {ReturnType<typeof createPlayer> | null} */ (null));
@@ -88,6 +91,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
   // Idempotent: whatever pipeline a previous connect() left is stopped before
   // a new one starts, so a double press or a Retry never stacks a second mic.
   async function connect() {
+    setConnectCount((count) => count + 1);
     stopAudio();
     // Over plain http (or without AudioWorklet) the mic can never start, so
     // no session is opened and no token minted: the card stays on Connect
@@ -135,6 +139,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     details: connection.details,
     transcript,
     micError,
+    connectCount,
     connect,
     disconnect,
     retry: connect,

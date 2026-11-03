@@ -22,7 +22,8 @@ function statusText(status, details) {
     case 'reconnecting':
       return `Reconnecting (attempt ${details?.attempt} of ${details?.maxAttempts})…`;
     case 'failed':
-      return 'Connection lost';
+      // A fatal failure never had a connection to lose.
+      return details?.fatal ? "Can't connect" : 'Connection lost';
     default: // idle, closed
       return 'Not connected';
   }
@@ -35,7 +36,9 @@ function statusText(status, details) {
 // page token (`token`) needs a reload, which brings a fresh nonce; a server
 // with no key (`config`) can't be fixed by a reload, so Try again asks the
 // server again — it connects once the owner has fixed the key, without
-// losing the page (M6 T6, M4 re-review).
+// losing the page (M6 T6, M4 re-review). Unless fixing the key restarted the
+// server: that wipes its in-memory nonces, the retry comes back a rejected
+// `token`, and the button becomes Reload page (the reason warns of it).
 /**
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
@@ -85,7 +88,7 @@ function micErrorText(error) {
  */
 export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const agent = useLiveAgent(bridge, nonce, workletUrl);
-  const { status, details, transcript, micError } = agent;
+  const { status, details, transcript, micError, connectCount } = agent;
   const action = primaryAction(status, details, agent);
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -95,7 +98,9 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const hasContent = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.hasContent);
 
   return (
-    <div className="agent-app">
+    // A named landmark: the transcript and the alerts sit outside the host
+    // page's <main>, and axe's `region` rule wants all content in one.
+    <aside className="agent-app" aria-label="AI presenter">
       <button onClick={action.onClick}>{action.label}</button>
       {/* Named by its content, not an aria-label: the visible count has to be
           part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
@@ -112,14 +117,16 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
       </span>
       {/* role="alert", not "status": the reason is an error that ends the
           session and asks the user to act (Retry, Try again or Reload page), so it should be
-          announced at once rather than queued politely like progress text. */}
+          announced at once rather than queued politely like progress text.
+          Keyed by the connect attempt: the same reason after Try again is a new
+          node, so it is announced again. */}
       {status === 'failed' && details?.reason && (
-        <div className="agent-app__error" role="alert">
+        <div key={connectCount} className="agent-app__error" role="alert">
           {details.reason}
         </div>
       )}
       {micError && (
-        <div className="agent-app__mic-error" role="alert">
+        <div key={connectCount} className="agent-app__mic-error" role="alert">
           {micErrorText(micError)}
         </div>
       )}
@@ -137,6 +144,6 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         onOpenChange={setKnowledgeOpen}
         portalContainer={portalContainer}
       />
-    </div>
+    </aside>
   );
 }

@@ -238,7 +238,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
   no longer accepted: the reason tells the user to reload. Every server error has one shape,
   `{ error: { code, message } }`, and a 500 with the code `not_configured` also fails at once,
-  with a "contact the site owner, then press Try again" reason: the server sends it when it has no
+  with a "contact the site owner, then try again (you may need to reload the page)" reason —
+  fixing the key often restarts the server, which wipes its in-memory nonces, and then Try again
+  comes back a rejected token and turns into Reload page. The server sends it when it has no
   `GEMINI_API_KEY` and when Google rejects the key it has (an upstream 400/401/403 from the
   mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. The
   fatal cases carry their kind (M6 T6): `fatal: 'token'` (a rejected nonce) makes the card offer
@@ -459,7 +461,8 @@ Decisions actually made (the open questions from the plan, resolved):
 `@radix-ui/react-dialog` powers the knowledge modal (§5.1); it is the only Radix package in
 `agent-client/package.json`. There is no toast on this branch. Connection status (v1 gap #6) is
 shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
-/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost), one primary button whose
+/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost, or Can't connect for a
+fatal failure), one primary button whose
 job follows the status and is never disabled (Connect; Cancel while connecting; Disconnect while
 live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, Reload
 page when the page's token is rejected, or Try again when the server isn't configured — a reload

@@ -82,7 +82,11 @@ const STABLE_SESSION_MS = 5_000;
 /** @type {Record<FatalKind, string>} */
 const FATAL_REASONS = {
   token: 'This page can no longer get a connection token. Reload the page to reconnect.',
-  config: "The server isn't configured to connect. Contact the site owner, then press Try again.",
+  // Try again works once the key is fixed, unless the fix restarted the
+  // server: that wipes its in-memory nonces, so the retry is rejected as a
+  // stale page and the card turns Try again into Reload page.
+  config:
+    "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
 };
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 

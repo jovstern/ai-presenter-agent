@@ -104,7 +104,7 @@ The suite in `agent-client/src/__tests__/`:
   kinds (`config`, `token`).
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
-  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line and alerts.
+  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
@@ -157,15 +157,17 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
-  connected". A `not_configured` 500 goes straight to "Try again" (no Reload page, no automatic
+  connected". A `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no automatic
   retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload page", both
   driven from the keyboard with focus kept on the button.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
   none after Disconnect.
-- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle and
-  with the knowledge dialog open, and on both target-app pages: zero violations. axe walks the
+- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle,
+  with the knowledge dialog open, and connected (the fake-Live harness, `e2e/fakeLive.js`, shared
+  with `loop.spec.js`) with a transcript line on screen, and on both target-app pages: zero
+  violations. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the

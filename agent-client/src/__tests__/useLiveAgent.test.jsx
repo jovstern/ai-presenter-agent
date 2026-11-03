@@ -256,6 +256,7 @@ describe('AgentApp + useLiveAgent', () => {
     });
 
     expect(screen.getByRole('alert').textContent).toMatch(/Reload the page/);
+    expect(screen.getByRole('status').textContent).toBe("Can't connect");
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await click('Reload page');
     expect(reload).toHaveBeenCalledTimes(1);
@@ -276,11 +277,13 @@ describe('AgentApp + useLiveAgent', () => {
       attempt: 0,
       maxAttempts: 6,
       reason:
-        "The server isn't configured to connect. Contact the site owner, then press Try again.",
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
       fatal: 'config',
     });
 
     expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    // Fatal: nothing was lost, the session never connected.
+    expect(screen.getByRole('status').textContent).toBe("Can't connect");
     expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull();
     expect(document.activeElement).toBe(button);
     expect(button.textContent).toBe('Try again');
@@ -369,6 +372,62 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('closed');
     expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe(text);
+  });
+
+  // A screen reader announces a role="alert" when it is inserted: the same
+  // alert after Try again must be a new node, or the second failure is silent.
+  it('re-announces an identical failure after Try again: the alert is a new node', async () => {
+    renderApp();
+    await click('Connect');
+    const failed = {
+      attempt: 0,
+      maxAttempts: 6,
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+      fatal: 'config',
+    };
+    emitStatus('failed', failed);
+    const first = screen.getByRole('alert');
+
+    await click('Try again');
+    emitStatus('failed', failed);
+
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+  });
+
+  it('re-announces an identical microphone error after Connect: the alert is a new node', async () => {
+    const { startCapture } = await import('../audioIO.js');
+    const blocked = () =>
+      startCapture.mockImplementationOnce(({ onError }) => ({
+        ready: Promise.resolve().then(() =>
+          onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
+        ),
+        stop: vi.fn(),
+      }));
+    blocked();
+    renderApp();
+    await click('Connect');
+    await act(async () => {});
+    const first = screen.getByRole('alert');
+
+    blocked();
+    await click('Connect');
+    await act(async () => {});
+
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+  });
+
+  it('is a landmark named "AI presenter", so its transcript is inside a region', async () => {
+    renderApp();
+    await click('Connect');
+    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    const card = screen.getByRole('complementary', { name: 'AI presenter' });
+    expect(card.querySelector('ul').textContent).toBe('Hello!');
   });
 
   it('renders the transcript list only once it has entries', async () => {

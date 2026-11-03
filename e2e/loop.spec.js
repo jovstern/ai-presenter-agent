@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { card, fakeGeminiLive, pageNonce, stubToken } from './fakeLive.js';
 
 // The M4 demo flow on the real `/` page, with no key: the real agent-client
 // bundle, the real @google/genai socket code, the real bridge and target app.
@@ -7,89 +8,6 @@ import { test, expect } from './fixtures.js';
 // WebSocket that Playwright answers instead of Google). The mic is Chromium's
 // fake device (playwright.config.js). This puts B2 (one reconnect and one
 // token per drop), H4 (in-order tool batches) and the tool loop in CI.
-
-const LIVE_SOCKET = /^wss:\/\/generativelanguage\.googleapis\.com\//;
-const TOKEN_PATH = '/api/live-token?*';
-
-/**
- * A fake Gemini Live server. Each socket the page opens is answered here;
- * `setupComplete` goes out when the SDK sends its `setup`, unless the test
- * holds it back to watch the page wait.
- * @param {import('@playwright/test').Page} page
- */
-async function fakeGeminiLive(page) {
-  /** @type {import('@playwright/test').WebSocketRoute[]} */
-  const sockets = [];
-  // Client frames, parsed, per socket.
-  const sent = [];
-  let holdSetup = false;
-
-  await page.routeWebSocket(LIVE_SOCKET, (ws) => {
-    const frames = [];
-    sockets.push(ws);
-    sent.push(frames);
-    ws.onMessage((message) => {
-      const frame = JSON.parse(String(message));
-      frames.push(frame);
-      if (frame.setup && !holdSetup) ws.send(JSON.stringify({ setupComplete: {} }));
-    });
-  });
-
-  return {
-    sockets,
-    /** @param {boolean} hold */
-    holdSetup(hold) {
-      holdSetup = hold;
-    },
-    /** @param {object} message */
-    sendToLatest(message) {
-      sockets.at(-1)?.send(JSON.stringify(message));
-    },
-    /** The `toolResponse` frames the page sent, across every socket, in order. */
-    toolResponses() {
-      return sent.flat().flatMap((frame) => frame.toolResponse?.functionResponses ?? []);
-    },
-  };
-}
-
-/**
- * Stubs the token endpoint and records the nonce each call carried.
- * @param {import('@playwright/test').Page} page
- * @param {{ status: number, body: object }} reply
- */
-async function stubToken(page, reply) {
-  /** @type {(string | null)[]} */
-  const nonces = [];
-  await page.route(TOKEN_PATH, async (route) => {
-    nonces.push(new URL(route.request().url()).searchParams.get('nonce'));
-    await route.fulfill({ status: reply.status, json: reply.body });
-  });
-  return {
-    get count() {
-      return nonces.length;
-    },
-    nonces,
-  };
-}
-
-/**
- * The nonce the server templated into this page (server/app.js, H1).
- * @param {import('@playwright/test').Page} page
- */
-function pageNonce(page) {
-  return page.locator('script[data-ds-nonce]').getAttribute('data-ds-nonce');
-}
-
-/** @param {import('@playwright/test').Page} page */
-function card(page) {
-  const host = page.locator('#ai-presenter-agent-host');
-  return {
-    status: host.getByRole('status'),
-    alert: host.getByRole('alert'),
-    /** @param {string} name */
-    button: (name) => host.getByRole('button', { name, exact: true }),
-  };
-}
 
 test('a tool batch drives the iframe and the session survives a dropped socket', async ({
   page,
@@ -196,9 +114,9 @@ test.describe('when the server has no API key', () => {
     await button('Connect').focus();
     await page.keyboard.press('Enter');
 
-    await expect(status).toHaveText('Connection lost');
+    await expect(status).toHaveText("Can't connect");
     await expect(alert).toHaveText(
-      "The server isn't configured to connect. Contact the site owner, then press Try again.",
+      "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
     );
     await expect(button('Try again')).toBeFocused();
     await expect(button('Reload page')).toHaveCount(0);
@@ -230,7 +148,7 @@ test.describe('when the page nonce is rejected', () => {
     await button('Connect').focus();
     await page.keyboard.press('Enter');
 
-    await expect(status).toHaveText('Connection lost');
+    await expect(status).toHaveText("Can't connect");
     await expect(alert).toHaveText(
       'This page can no longer get a connection token. Reload the page to reconnect.',
     );

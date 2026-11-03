@@ -735,8 +735,10 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
+      // A server restart (often how the key gets fixed) wipes its nonces, so
+      // Try again may turn into Reload page: the reason says so.
       reason:
-        "The server isn't configured to connect. Contact the site owner, then press Try again.",
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
       fatal: 'config', // a reload can't help; asking the server again can, once it's fixed
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);

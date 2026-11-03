@@ -200,7 +200,7 @@ come from `status`.
 | connecting | pending button, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
-| failed | "Connection lost" and the reason (`role="alert"`) plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it). A Radix toast once |
+| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) and the reason (`role="alert"`, keyed by the connect attempt so the same reason after Try again is announced again) plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
