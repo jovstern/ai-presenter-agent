@@ -59,6 +59,12 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       audioContext = new AudioContext();
       await audioContext.audioWorklet.addModule(workletUrl);
       if (stopped) return release();
+      // Created after awaits, the context is outside the click's user
+      // activation, and Safari starts such a context suspended: a suspended
+      // context never runs the worklet, so no frame would ever arrive. A
+      // refusal rejects, and is reported like any other capture failure.
+      await audioContext.resume();
+      if (stopped) return release();
       source = audioContext.createMediaStreamSource(stream);
       // No outputs: the node is a sink, so nothing reaches the speakers, and
       // the browser still runs it because its input is live.
@@ -73,8 +79,8 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       };
       source.connect(worklet);
     } catch (err) {
-      // A DOMException from getUserMedia (NotAllowedError, NotFoundError, ...)
-      // or from addModule (the worklet file failed to load): an Error either
+      // A DOMException from getUserMedia (NotAllowedError, NotFoundError, ...),
+      // from addModule (the worklet file failed to load) or from resume(): an Error either
       // way, which AgentApp words by its name. Whatever was acquired goes. A
       // failure caused by stop() itself (addModule on a context it closed) is
       // not reported: nobody is waiting for this capture any more.

@@ -22,14 +22,27 @@ function fakeStream() {
 }
 
 beforeEach(() => {
-  // `addModule` is what every context's audioWorklet.addModule() does; a
-  // test swaps it before startCapture() to hold or fail the load.
-  made = { tracks: [], contexts: [], nodes: [], addModule: vi.fn(async () => {}) };
+  // `addModule` is what every context's audioWorklet.addModule() does, and
+  // `resume` every context's resume(); a test swaps one before startCapture()
+  // to hold or fail it. `events` records their order.
+  made = {
+    tracks: [],
+    contexts: [],
+    nodes: [],
+    events: [],
+    addModule: vi.fn(async () => {
+      made.events.push('addModule');
+    }),
+    resume: vi.fn(async () => {
+      made.events.push('resume');
+    }),
+  };
   vi.stubGlobal('isSecureContext', true);
 
   class FakeAudioContext {
     constructor() {
       this.close = vi.fn(async () => {});
+      this.resume = made.resume;
       this.audioWorklet = { addModule: made.addModule };
       this.source = { connect: vi.fn(), disconnect: vi.fn() };
       made.contexts.push(this);
@@ -44,6 +57,7 @@ beforeEach(() => {
       this.options = options;
       this.port = { onmessage: null, close: vi.fn() };
       this.disconnect = vi.fn();
+      made.events.push('node');
       made.nodes.push(this);
     }
   }
@@ -88,6 +102,29 @@ describe('startCapture', () => {
     expect(node.name).toBe('capture-processor');
     expect(node.options).toMatchObject({ numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
     expect(context.source.connect).toHaveBeenCalledWith(node);
+  });
+
+  // Safari starts a context created after an await (outside the click's user
+  // activation) suspended, and a suspended context never runs the worklet.
+  it('resumes the context once the worklet has loaded, before building the node', async () => {
+    const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
+    await capture.ready;
+
+    expect(made.resume).toHaveBeenCalledTimes(1);
+    expect(made.events).toEqual(['addModule', 'resume', 'node']);
+  });
+
+  it('a context that refuses to resume is reported, and everything is released', async () => {
+    const onError = vi.fn();
+    const refused = Object.assign(new Error('not allowed to start'), { name: 'NotAllowedError' });
+    made.resume.mockRejectedValueOnce(refused);
+    const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn(), onError });
+    await capture.ready;
+
+    expect(onError).toHaveBeenCalledWith(refused);
+    expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
+    expect(made.contexts[0].close).toHaveBeenCalledTimes(1);
+    expect(made.nodes).toHaveLength(0);
   });
 
   it('base64-encodes each posted Int16 frame for the session', async () => {

@@ -302,8 +302,18 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   suppressed below −40 dB), `e2e/audio.spec.js` (Chromium's fake mic at 48 kHz through the real
   worklet under the real CSP: 2560-byte `audio/pcm;rate=16000` frames at ~12.5/s), and one
   `npm run e2e:live` run on 2026-11-02 in which all three live scenarios passed, the spoken
-  five-step task included — so Gemini heard the worklet's audio. Not verified: Firefox and
-  Safari (the e2e is Chromium only).
+  five-step task included — so Gemini heard the worklet's audio. `startCapture` resumes the
+  context after `addModule` (M6 fix wave): it is created after awaits, outside the click's user
+  activation, and Safari starts such a context suspended. Not verified: Firefox and Safari (the
+  e2e is Chromium only). Manual checks for them, with a real mic:
+  - **Safari / WebKit:** the capture node has **0 outputs** (a sink), and WebKit has been known
+    not to pull a node that isn't connected toward the destination, so `process()` might never
+    run. Check that a user transcript line appears after speaking; if not, give the node one
+    output and connect it through a muted `GainNode` to the destination.
+  - **Firefox:** the AudioContext runs at the device rate on purpose (Firefox refuses to connect
+    a mic to a context at another rate). Check on a 44.1 kHz device (many USB headsets) and a
+    48 kHz one that the agent hears you and the frames are 2560 bytes at ~12.5/s (DevTools →
+    Network → WS).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size is measured on the mock target app only** (M6 T5, the `ds:keyframe`

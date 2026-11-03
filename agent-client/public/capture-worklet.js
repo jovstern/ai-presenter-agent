@@ -24,7 +24,11 @@ const TARGET_RATE = 16000;
 // device rate.
 const FRAME_SAMPLES = 1280;
 // The low-pass: cut at 7 kHz, under the 8 kHz Nyquist of the output, with 63
-// Blackman-windowed taps (a ~4 kHz transition at 48 kHz, ~74 dB stopband).
+// Blackman-windowed taps. At 48 kHz the transition is ~4 kHz wide, centred on
+// the cutoff, so the ~74 dB stopband holds only above ~9.2 kHz: the response
+// is -6 dB at 7 kHz, -22 dB at 8 kHz and -65 dB at 9 kHz. What gets through
+// between 8 and 9 kHz aliases back into 7–8 kHz less suppressed; speech has
+// little energy there.
 const CUTOFF_HZ = 7000;
 const TAPS = 63;
 

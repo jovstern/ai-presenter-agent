@@ -34,15 +34,22 @@ test('the capture worklet loads under the CSP and streams 16 kHz frames in real 
   await expect(host.getByRole('status')).toHaveText('Live');
 
   // Frames queued while connecting are flushed in a burst at setupComplete,
-  // so the rate is measured from a frame that arrives after that.
+  // so the rate is measured from a frame that arrives after that. The check
+  // is the audio the frames carry (80 ms each) against the wall-clock window
+  // they arrived in, over a fixed 4 s window: a loaded runner that stalls the
+  // page for a moment only moves frames past the window's end, which costs
+  // a few percent, not the 2-3x a wrong resampling ratio would.
   await expect.poll(() => audioFrames.length).toBeGreaterThan(0);
   const from = audioFrames.length;
-  await page.waitForTimeout(2000);
-  const measured = audioFrames.slice(from);
-  const seconds = (measured.at(-1).at - measured[0].at) / 1000;
-  const rate = (measured.length - 1) / seconds;
-  expect(rate).toBeGreaterThan(FRAMES_PER_SECOND * 0.75);
-  expect(rate).toBeLessThan(FRAMES_PER_SECOND * 1.25);
+  await expect.poll(() => audioFrames.length).toBeGreaterThan(from);
+  const start = audioFrames[from].at;
+  const WINDOW_MS = 4000;
+  await page.waitForTimeout(WINDOW_MS + 500);
+  const inWindow = audioFrames.filter(({ at }) => at >= start && at < start + WINDOW_MS);
+  const audioSeconds = inWindow.length / FRAMES_PER_SECOND;
+  const ratio = audioSeconds / (WINDOW_MS / 1000);
+  expect(ratio).toBeGreaterThan(0.75);
+  expect(ratio).toBeLessThan(1.25);
 
   for (const { audio } of audioFrames) {
     expect(audio.mimeType).toBe('audio/pcm;rate=16000');
