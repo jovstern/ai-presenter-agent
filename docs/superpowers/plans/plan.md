@@ -584,8 +584,9 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   harness and `/api/live-token` stubs (4xx → failed, a close → reconnecting). There is no
   test hook in the production bundle.
 - Keyboard walk; axe in light and dark; 360, 768 and 1440 px.
-- Check the bundle against the 165 kB budget. A miss is fixed (for example with Radix
-  per-package imports) or brought to the user.
+- Check the bundle against the 180 kB budget (raised by the user on 2026-11-05, option A of
+  the M6 bundle breakdown in `docs/metrics/m06.md`). Radix Dialog is upgraded together with
+  Toast so the shared primitives are installed once. A miss is brought to the user.
 
 *(medium, 12 min)*
 
@@ -680,6 +681,6 @@ What pushes it to the worst case:
 |---|---|---|---|
 | M4 | ~110 min | ~127 min (1.15×) | Real-browser checks in every task; a larger fix wave (6 Important, 2 Must fix, the LCP miss); two re-review rounds. Remaining milestones re-scaled by 1.15×: M5 ~175, M6 ~150, M7 ~115, M8 ~80 (~8.7 h). |
 | M5 | ~150 min (~175 re-scaled) | ~130 min (0.87×) | T1–T4 ran under estimate; T5's live runs took the planned ~45 min; two fix-wave rounds. A ~3 h usage-limit pause isn't counted. M4+M5 together: 257 vs 260 min, so the remaining estimates stay as written (M6 ~130, M7 ~100, M8 ~70). |
-| M6 | ~130 min | | |
+| M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min | | |
 | M8 | ~70 min | | |

@@ -244,7 +244,7 @@ The kit defaults apply on `/`.
 | TBT | ≤ 150 ms |
 | axe violations | 0 |
 | Console errors in e2e | 0 |
-| `agent-client.js` | ≤ 165 kB gzip (148.6 today). Raised from the kit's 150 by the user at approval (2026-10-28): M7 adds a toast, an orb and web-vitals to an IIFE build that can't code-split |
+| `agent-client.js` | ≤ 180 kB gzip (162.15 after M6). Raised from the kit's 150 to 165 by the user at approval (2026-10-28), then to 180 on 2026-11-05 (option A of the M6 bundle breakdown, `docs/metrics/m06.md`): the Gemini SDK is 74 kB of the bundle, and M7 adds a toast, an orb and web-vitals to an IIFE build that can't code-split |
 | `/api/live-token` p95, warm local, excluding the Gemini mint call | ≤ 50 ms for the gate rejections |
 
 App metrics, from the live e2e, averaged over 5 runs:
