@@ -110,7 +110,9 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
     // A named landmark: the transcript and the alerts sit outside the host
     // page's <main>, and axe's `region` rule wants all content in one.
     <aside className="agent-app" aria-label="AI presenter">
-      <button onClick={action.onClick}>{action.label}</button>
+      <button className="agent-app__primary" onClick={action.onClick}>
+        {action.label}
+      </button>
       {/* Named by its content, not an aria-label: the visible count has to be
           part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
           and the emoji is decoration. The name reads "Knowledge files: 0". */}

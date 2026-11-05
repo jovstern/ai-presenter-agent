@@ -219,18 +219,36 @@ come from `status`.
 
 ## Design tokens ("quiet floating card")
 
+The values live as custom properties on `:host` in `agent-client/src/styles.css` (M7 T1);
+components use the tokens, never raw values.
+
 - **Font:** `system-ui` stack. Scale 12 / 14 / 16 / 20; body 14 inside the widget is
-  acceptable because it is a compact overlay, while transcript text is 16.
+  acceptable because it is a compact overlay, while transcript text is 16. Weights 400 / 500 /
+  600; line height 1.5 for text, 1.2 for the dialog title.
 - **Colour:** neutral greys plus one accent, indigo `#4f46e5` (dark theme `#818cf8`).
-  - danger `#b3261e`, never the only signal;
-  - surface `#fff` / `#18181b`;
-  - text `#18181b` / `#f4f4f5`;
-  - AA verified.
-- **Shape:** radius 12 for the card and 8 for controls; one shadow token; 1 px borders.
+  - danger `#b3261e` / `#f87171`, never the only signal (the light red is 2.7:1 on the dark
+    surface, so dark gets its own);
+  - surface `#fff` / `#18181b`, raised (hover) `#f4f4f5` / `#27272a`;
+  - text `#18181b` / `#f4f4f5`, muted text `#52525b` / `#a1a1aa`;
+  - borders: a decorative hairline `#e4e4e7` / `#3f3f46`, control boundaries `#71717a` /
+    `#a1a1aa` (≥ 3:1);
+  - text on the accent `#fff` / `#18181b`; accent hover `#4338ca` / `#a5b4fc`;
+  - the focus ring is the accent, 2 px with a 2 px offset;
+  - AA verified (M7 T1): text 17.7 / 16.1, muted 7.7 / 6.9, danger 6.5 / 6.4, the primary
+    button's label 6.3 / 5.9, the focus ring and control borders 6.3 / 6.9 and 4.8 / 6.9 (light
+    / dark, on the surface); axe's colour-contrast passes in both schemes (`e2e/a11y.spec.js`).
+- **Shape:** radius 12 for the card and 8 for controls; one shadow token (deeper in dark); 1 px
+  borders. Controls are at least 44 × 44 px.
 - **Spacing:** 4 / 8 / 12 / 16 / 24.
-- **Motion:** 150–200 ms ease-out for state changes. The orb rings freeze to a static level
-  under `prefers-reduced-motion`.
-- **Layering:** the host gets `position:fixed; z-index:2147483000; display:block` (L3, L4).
+- **Motion:** 150–200 ms ease-out for state changes. Under `prefers-reduced-motion` the
+  duration tokens are 0 and no transition or animation runs; the orb rings freeze to a static
+  level.
+- **Layout:** a 16 px gutter; the card is 320 px wide, and at 400 px and below it spans the
+  viewport between the gutters; the dialog is at most 360 px.
+- **Layering:** the host gets `position:fixed; z-index:2147483000; display:block` (L3, L4),
+  through `:host` in `styles.css`, not an inline style: the width changes at a breakpoint,
+  which only a media query can say, and the only page whose styles could outrank `:host` is the
+  sandbox page itself (the target app is in an iframe).
 
 ## Budgets
 

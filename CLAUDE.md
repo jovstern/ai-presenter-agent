@@ -39,6 +39,11 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
     successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
     with the designed card in M7 (issue #11).
+  - `styles.css` — the card's and the dialog's one stylesheet: the spec's design tokens as
+    custom properties on `:host` (redefined under `prefers-color-scheme: dark`, durations zeroed
+    under `prefers-reduced-motion: reduce`), and the host's own `position: fixed`, `z-index` and
+    `display: block`. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
+    as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`.
   - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by

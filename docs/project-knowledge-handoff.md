@@ -174,8 +174,8 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
   returns in M7 (#11).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 622.5 kB,
-  149.7 kB gzip, served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 676.4 kB,
+  163.1 kB gzip after M7 T1 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -386,7 +386,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. The current bundle is 149.5 kB gzip (§3.2).
+  demonstrably can't cover the case. The current bundle is 163.1 kB gzip (§3.2).
 - **Radix UI as the default for new interactive UI elements** (2026-09-15) — today that is
   `Dialog` for the knowledge modal. The first build's Radix `Toast` and hand-rolled
   `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their successors return in M7 (#11).
@@ -444,7 +444,7 @@ Decisions actually made (the open questions from the plan, resolved):
   retrieve top-k per turn) is a legitimate future step and a materially bigger project than this.
 - **The gotcha that cost the most time to get right: Radix's `Dialog.Portal` defaults to
   rendering into `document.body`**, which would silently escape this widget's shadow root — the
-  dialog would render, but unstyled (none of the injected `<style>` in the shadow root would
+  dialog would render, but unstyled (none of the shadow root's `<style>`, `styles.css`, would
   reach it) and outside the isolation the shadow root exists to provide. Fix: `main.jsx` creates a
   second plain `<div>` inside the shadow root purely as a portal target, passes it down through
   `AgentApp` as `portalContainer`, and `KnowledgeModal` passes it to `Dialog.Portal container={...}`.

@@ -36,27 +36,43 @@ function cardButton(page, /** @type {string | RegExp} */ name) {
   return page.locator(HOST).getByRole('button', { name, exact: true });
 }
 
-test('the sandbox page with the card idle', async ({ page }) => {
-  await page.goto('/');
-  await expect(cardButton(page, 'Connect')).toBeVisible();
+// Both themes (styles.css redefines its colour tokens under
+// prefers-color-scheme: dark), so axe's colour-contrast rule checks each one.
+for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
+  test.describe(`${colorScheme} scheme`, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.emulateMedia({ colorScheme });
+    });
 
-  const { violations, checkedInShadowRoot, checked } = await analyze(page);
-  expect(violations).toEqual([]);
-  expect(checkedInShadowRoot('button')).toBe(true);
-  // The target app inside the iframe was analysed too (a frame target is a
-  // list of plain selectors, the iframe first).
-  expect(checked.some((target) => target[0] === '#target-app-frame')).toBe(true);
-});
+    test('the sandbox page with the card idle', async ({ page }) => {
+      await page.goto('/');
+      await expect(cardButton(page, 'Connect')).toBeVisible();
+      // The theme really switched (--color-surface), so axe saw this scheme's colours.
+      await expect(page.locator(HOST).locator('.agent-app')).toHaveCSS(
+        'background-color',
+        colorScheme === 'dark' ? 'rgb(24, 24, 27)' : 'rgb(255, 255, 255)',
+      );
 
-test('the sandbox page with the knowledge dialog open', async ({ page }) => {
-  await page.goto('/');
-  await cardButton(page, 'Knowledge files: 0').click();
-  await expect(page.locator(HOST).getByRole('dialog', { name: 'Knowledge' })).toBeVisible();
+      const { violations, checkedInShadowRoot, checked } = await analyze(page);
+      expect(violations).toEqual([]);
+      // axe names the card's primary button by its class.
+      expect(checkedInShadowRoot('.agent-app__primary')).toBe(true);
+      // The target app inside the iframe was analysed too (a frame target is a
+      // list of plain selectors, the iframe first).
+      expect(checked.some((target) => target[0] === '#target-app-frame')).toBe(true);
+    });
 
-  const { violations, checkedInShadowRoot } = await analyze(page);
-  expect(violations).toEqual([]);
-  expect(checkedInShadowRoot('textarea')).toBe(true);
-});
+    test('the sandbox page with the knowledge dialog open', async ({ page }) => {
+      await page.goto('/');
+      await cardButton(page, 'Knowledge files: 0').click();
+      await expect(page.locator(HOST).getByRole('dialog', { name: 'Knowledge' })).toBeVisible();
+
+      const { violations, checkedInShadowRoot } = await analyze(page);
+      expect(violations).toEqual([]);
+      expect(checkedInShadowRoot('textarea')).toBe(true);
+    });
+  });
+}
 
 // Connected through the fake-Live harness (loop.spec.js) with a transcript
 // line on screen: the transcript is what axe's `region` rule flagged before

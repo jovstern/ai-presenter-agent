@@ -1,0 +1,374 @@
+/*
+ * The agent card's one stylesheet ("quiet floating card", spec Design tokens).
+ * main.jsx imports it with Vite's `?inline` and puts it in the shadow root as a
+ * single <style>, so the IIFE build stays one file (docs/code-review-notes.md L7)
+ * and the CSP's `style-src 'unsafe-inline'` covers it (server/app.js).
+ *
+ * Tokens live on :host and are redefined for the dark theme; components use
+ * tokens only, never raw values. Every text/background pair is WCAG AA in both
+ * themes (contrast ratios beside each colour, against the surface).
+ */
+
+/*
+ * The host element is positioned here, not with an inline style: the card's
+ * width changes at the 400 px breakpoint, which only a media query can say,
+ * and keeping it beside the tokens leaves one place to read the layout. The
+ * only stylesheet that could override a :host rule is the embedding page's own
+ * (the target app is in an iframe, another document), and that page is ours.
+ *
+ * `all: initial` keeps the host page's inherited styles out; the declarations
+ * after it win over it. `display: block` makes the host a real box rather than
+ * relying on the card's own positioning (L4), and `position`/`z-index` sit on
+ * the host, the element that takes part in the page's stacking (L3). The
+ * z-index is just under the 32-bit maximum, so the card stays above a page's
+ * own overlays while leaving browser-extension UI room above it.
+ */
+:host {
+  all: initial;
+  display: block;
+  position: fixed;
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 2147483000;
+  width: var(--card-width);
+  color-scheme: light dark;
+
+  /* Type: system-ui; scale 12 / 14 / 16 / 20. */
+  --font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --leading-body: 1.5;
+  --leading-tight: 1.2;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Spacing: 4 / 8 / 12 / 16 / 24. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* Layout. The breakpoint (400px) is repeated in the media query below:
+     custom properties can't be used in a media condition. */
+  --gutter: var(--space-4);
+  --card-width: 320px;
+  --dialog-width: 360px;
+  --control-height: 44px;
+  --transcript-max-height: 200px;
+
+  /* Shape. */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --border-width: 1px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Motion: state changes only. */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Colour, light theme (contrast on --color-surface). */
+  --color-surface: #ffffff;
+  --color-surface-raised: #f4f4f5; /* hover fill; text on it 16.1:1 */
+  --color-text: #18181b; /* 17.7:1 */
+  --color-text-muted: #52525b; /* 7.7:1 */
+  --color-border: #e4e4e7; /* hairline around the card, decorative */
+  --color-border-strong: #71717a; /* control boundaries, 4.8:1 (non-text ≥ 3:1) */
+  --color-accent: #4f46e5; /* 6.3:1, also the focus ring */
+  --color-accent-hover: #4338ca;
+  --color-on-accent: #ffffff; /* on accent 6.3:1, on hover 7.9:1 */
+  --color-danger: #b3261e; /* 6.5:1 */
+  --color-focus: var(--color-accent);
+  --color-overlay: rgb(24 24 27 / 0.5);
+  --shadow-card: 0 1px 2px rgb(24 24 27 / 0.06), 0 8px 24px rgb(24 24 27 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    /* Colour, dark theme (contrast on --color-surface). */
+    --color-surface: #18181b;
+    --color-surface-raised: #27272a; /* text on it 13.6:1, muted 5.8:1 */
+    --color-text: #f4f4f5; /* 16.1:1 */
+    --color-text-muted: #a1a1aa; /* 6.9:1 */
+    --color-border: #3f3f46;
+    --color-border-strong: #a1a1aa; /* 6.9:1 */
+    --color-accent: #818cf8; /* 5.9:1 */
+    --color-accent-hover: #a5b4fc;
+    --color-on-accent: #18181b; /* on accent 5.9:1, on hover 8.9:1 */
+    /* The light theme's #b3261e is 2.7:1 here, so dark gets its own red. */
+    --color-danger: #f87171; /* 6.4:1 */
+    --color-overlay: rgb(0 0 0 / 0.6);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Phones: the card spans the width, a gutter each side (spec Screens). */
+@media (max-width: 400px) {
+  :host {
+    left: var(--gutter);
+    width: auto;
+  }
+}
+
+/* No motion at all under reduced motion: the durations collapse to zero, and
+   anything not written with the tokens is stopped too. */
+@media (prefers-reduced-motion: reduce) {
+  :host {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- Base ---------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0 var(--space-4);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+button:hover {
+  background: var(--color-surface-raised);
+}
+
+button:active {
+  border-color: var(--color-text);
+}
+
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Read by screen readers, not shown (the knowledge button's name). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- The card ------------------------------------------------------------ */
+
+.agent-app {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+/* The one primary action takes the row; the knowledge button sits beside it. */
+.agent-app__primary {
+  flex: 1;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.agent-app__primary:hover {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+.agent-app__knowledge-btn {
+  padding: 0 var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* No knowledge yet: a dashed outline hints there is something to add, without
+   using a status colour for it. */
+.agent-app__knowledge-btn--empty {
+  border-style: dashed;
+}
+
+/* Everything after the button row takes a full line of its own. */
+.agent-app__status,
+.agent-app__error,
+.agent-app__mic-error,
+.agent-app__transcript {
+  flex-basis: 100%;
+}
+
+.agent-app__status {
+  color: var(--color-text-muted);
+}
+
+.agent-app__error,
+.agent-app__mic-error {
+  color: var(--color-danger);
+}
+
+.agent-app__transcript {
+  max-height: var(--transcript-max-height);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: var(--text-md);
+}
+
+.agent-app__line + .agent-app__line {
+  margin-top: var(--space-1);
+}
+
+.agent-app__line--agent {
+  color: var(--color-text);
+}
+
+/* User turns are distinct by colour and style both, not colour alone. */
+.agent-app__line--user {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---- The knowledge dialog ------------------------------------------------ */
+
+.knowledge-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+}
+
+.knowledge-modal__content {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: min(var(--dialog-width), calc(100vw - 2 * var(--gutter)));
+  max-height: 80vh;
+  padding: var(--space-5);
+  overflow-y: auto;
+  transform: translate(-50%, -50%);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.knowledge-modal__content h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+.knowledge-modal__content p {
+  margin: 0;
+  color: var(--color-text-muted);
+  text-wrap: pretty;
+}
+
+.knowledge-modal__dropzone {
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border: var(--border-width) dashed var(--color-border-strong);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  text-align: center;
+  cursor: pointer;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.knowledge-modal__dropzone--active {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.knowledge-modal__error {
+  margin-bottom: var(--space-2);
+  color: var(--color-danger);
+}
+
+.knowledge-modal__files {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.knowledge-modal__files li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.knowledge-modal__rules-label {
+  display: block;
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.knowledge-modal__rules {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin-top: var(--space-1);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-weight: var(--weight-regular);
+  resize: vertical;
+}
+
+.knowledge-modal__close {
+  margin-top: var(--space-4);
+}
