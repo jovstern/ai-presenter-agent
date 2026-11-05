@@ -207,6 +207,58 @@ button:active {
   line-height: var(--leading-body);
 }
 
+/*
+ * The volume orb (VolumeOrb.jsx): a core dot, a filled halo that follows the
+ * agent's voice (--level) and an outline ring that follows the mic
+ * (--mic-level), the user's colour as in the transcript. VolumeOrb writes the
+ * two variables on every animation frame while the session is open; only
+ * transform and opacity change, so a frame repaints no layout. At rest (idle,
+ * connecting, failed) the core is grey and the rings are hidden. Open under
+ * reduced motion, no loop runs and the variables are unset: the fallbacks
+ * below draw the halo at a static level.
+ */
+.volume-orb {
+  --orb-core: var(--color-border-strong);
+  position: relative;
+  flex: none;
+  width: var(--control-height);
+  height: var(--control-height);
+  /* The core: a 40%-radius dot (about 18 px), drawn without another layer. */
+  background: radial-gradient(circle closest-side, var(--orb-core) 40%, transparent 42%);
+}
+
+.volume-orb::before,
+.volume-orb::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.volume-orb::before {
+  inset: 0;
+  background: var(--color-accent);
+}
+
+.volume-orb::after {
+  inset: var(--space-1);
+  border: var(--focus-ring-width) solid var(--color-text-muted);
+}
+
+.volume-orb[data-active='true'] {
+  --orb-core: var(--color-accent);
+}
+
+.volume-orb[data-active='true']::before {
+  opacity: calc(0.12 + var(--level, 0.4) * 0.3);
+  transform: scale(calc(0.55 + var(--level, 0.4) * 0.45));
+}
+
+.volume-orb[data-active='true']::after {
+  opacity: var(--mic-level, 0);
+  transform: scale(calc(0.6 + var(--mic-level, 0) * 0.4));
+}
+
 /* The one primary action takes the row; the knowledge button sits beside it. */
 .agent-app__primary {
   flex: 1;

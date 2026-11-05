@@ -1,4 +1,4 @@
-import { encodeInputFrame, OUTPUT_SAMPLE_RATE } from './pcm.js';
+import { encodeInputFrame, levelOf, OUTPUT_SAMPLE_RATE } from './pcm.js';
 
 // The name public/capture-worklet.js registers its processor under.
 const CAPTURE_PROCESSOR = 'capture-processor';
@@ -28,6 +28,14 @@ export function voiceSupportError() {
 // that resamples to 16 kHz Int16 off the main thread and posts 80 ms frames,
 // each base64-encoded here for the session. Replaces the deprecated
 // ScriptProcessorNode (docs/project-knowledge-handoff.md §4).
+//
+// getLevel() is the mic's loudness for the volume orb, pulled once per
+// animation frame (VolumeOrb.jsx), never pushed into React. It is the level
+// of the last frame the worklet posted, measured here on the Int16 samples
+// that are already on the main thread to be encoded: 1280 multiply-adds 12.5
+// times a second, with no second node on the mic and no extra message from
+// the worklet. An AnalyserNode would track faster than the 80 ms frames, but
+// the orb smooths its fall over several frames anyway.
 /**
  * @param {{
  *   workletUrl: string,
@@ -37,7 +45,7 @@ export function voiceSupportError() {
  *   `workletUrl` is where capture-worklet.js is served (main.jsx resolves it
  *   next to the bundle); `onFrame` gets 16 kHz PCM; `onError` gets why the mic
  *   couldn't start.
- * @returns {{ ready: Promise<void>, stop: () => void }}
+ * @returns {{ ready: Promise<void>, stop: () => void, getLevel: () => number }}
  */
 export function startCapture({ workletUrl, onFrame, onError }) {
   /** @type {AudioContext | undefined} */
@@ -49,6 +57,7 @@ export function startCapture({ workletUrl, onFrame, onError }) {
   /** @type {AudioWorkletNode | undefined} */
   let worklet;
   let stopped = false;
+  let level = 0;
 
   const ready = (async () => {
     try {
@@ -83,7 +92,10 @@ export function startCapture({ workletUrl, onFrame, onError }) {
         channelCountMode: 'explicit',
       });
       worklet.port.onmessage = (/** @type {MessageEvent<ArrayBuffer>} */ event) => {
-        if (!stopped) onFrame(encodeInputFrame(new Int16Array(event.data)));
+        if (stopped) return;
+        const frame = new Int16Array(event.data);
+        level = levelOf(frame, 0x8000);
+        onFrame(encodeInputFrame(frame));
       };
       source.connect(worklet);
     } catch (err) {
@@ -121,19 +133,38 @@ export function startCapture({ workletUrl, onFrame, onError }) {
   // its pending await returns.
   function stop() {
     stopped = true;
+    level = 0;
     release();
   }
 
-  return { ready, stop };
+  return { ready, stop, getLevel: () => level };
 }
 
 // Playback. Schedules decoded PCM chunks back-to-back on one AudioContext
 // timeline, and keeps a handle to every scheduled source so a barge-in
 // (serverContent.interrupted) can actually stop in-flight audio instead of
 // letting it play out to the end of the buffered queue.
-/** @returns {{ enqueue: (float32: Float32Array<ArrayBuffer>) => void, interrupt: () => void, close: () => void }} */
+//
+// Every chunk plays through one AnalyserNode on its way to the speakers, and
+// getLevel() reads the samples sounding right now from it: the volume orb's
+// output level, pulled once per animation frame (VolumeOrb.jsx). The window
+// is 512 samples (21 ms at 24 kHz), read into one reused buffer: no
+// allocation per frame.
+/**
+ * @returns {{
+ *   enqueue: (float32: Float32Array<ArrayBuffer>) => void,
+ *   interrupt: () => void,
+ *   close: () => void,
+ *   getLevel: () => number,
+ * }}
+ */
 export function createPlayer() {
   const audioContext = new AudioContext({ sampleRate: OUTPUT_SAMPLE_RATE });
+  const analyser = audioContext.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.connect(audioContext.destination);
+  const samples = new Float32Array(analyser.fftSize);
+  let closed = false;
   let nextStartTime = 0;
   /** @type {AudioBufferSourceNode[]} */
   let scheduledSources = [];
@@ -144,7 +175,7 @@ export function createPlayer() {
     buffer.copyToChannel(float32, 0);
     const src = audioContext.createBufferSource();
     src.buffer = buffer;
-    src.connect(audioContext.destination);
+    src.connect(analyser);
 
     const startAt = Math.max(nextStartTime, audioContext.currentTime);
     src.start(startAt);
@@ -169,9 +200,18 @@ export function createPlayer() {
   }
 
   function close() {
+    closed = true;
     interrupt();
     audioContext.close();
   }
 
-  return { enqueue, interrupt, close };
+  // 0 once closed: the orb may read one more frame after a hang-up, and a
+  // closed context's analyser has nothing to say.
+  function getLevel() {
+    if (closed) return 0;
+    analyser.getFloatTimeDomainData(samples);
+    return levelOf(samples);
+  }
+
+  return { enqueue, interrupt, close, getLevel };
 }

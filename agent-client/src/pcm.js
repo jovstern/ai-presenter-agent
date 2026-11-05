@@ -74,4 +74,25 @@ export function decodeOutputChunk(base64) {
   return int16ToFloat32(bytesToInt16(base64ToBytes(base64)));
 }
 
+// The volume orb's loudness (VolumeOrb.jsx): RMS in dBFS mapped onto 0..1
+// over a 60 dB range. Linear RMS would leave normal speech (about -20 dBFS,
+// RMS 0.1) barely moving the rings; on this scale it sits at two thirds, and
+// room noise below -60 dB reads as still.
+const LEVEL_FLOOR_DB = -60;
+
+/**
+ * @param {ArrayLike<number>} samples
+ * @param {number} [fullScale] The magnitude of a full-scale sample: 1 for Float32, 0x8000 for Int16.
+ * @returns {number} 0 (silence) to 1 (full scale).
+ */
+export function levelOf(samples, fullScale = 1) {
+  if (samples.length === 0) return 0;
+  let sum = 0;
+  for (let i = 0; i < samples.length; i++) sum += samples[i] * samples[i];
+  const rms = Math.sqrt(sum / samples.length) / fullScale;
+  if (rms === 0) return 0;
+  const db = 20 * Math.log10(rms);
+  return Math.min(1, Math.max(0, 1 - db / LEVEL_FLOOR_DB));
+}
+
 export { INPUT_SAMPLE_RATE, OUTPUT_SAMPLE_RATE };

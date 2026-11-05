@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bytesToInt16, decodeOutputChunk, encodeInputFrame } from '../pcm.js';
+import { bytesToInt16, decodeOutputChunk, encodeInputFrame, levelOf } from '../pcm.js';
 
 /** Little-endian bytes of the given Int16 samples. */
 function le16(...samples) {
@@ -79,5 +79,29 @@ describe('pcm', () => {
 
     expect(decoded).toBeInstanceOf(Float32Array);
     expect(Array.from(decoded)).toEqual([1, -1, 0, 0x4000 / 0x7fff].map(Math.fround));
+  });
+});
+
+// The orb's loudness: RMS in dBFS, -60 dB (and below) → 0, 0 dB → 1, so
+// speech at a normal level (about -20 dBFS) sits two thirds of the way up.
+describe('levelOf', () => {
+  it('is 0 for silence and for no samples', () => {
+    expect(levelOf(new Float32Array(128))).toBe(0);
+    expect(levelOf(new Float32Array(0))).toBe(0);
+  });
+
+  it('is 1 at full scale, and never above', () => {
+    expect(levelOf(Float32Array.from({ length: 64 }, (_, i) => (i % 2 ? 1 : -1)))).toBe(1);
+    expect(levelOf(new Float32Array([2, -2]))).toBe(1);
+  });
+
+  it('maps -20 dBFS to two thirds and -60 dBFS or quieter to 0', () => {
+    expect(levelOf(new Float32Array([0.1, -0.1]))).toBeCloseTo(2 / 3, 5);
+    expect(levelOf(new Float32Array([0.001, -0.001]))).toBeCloseTo(0, 5);
+    expect(levelOf(new Float32Array([0.0001, -0.0001]))).toBe(0);
+  });
+
+  it('reads Int16 samples against their own full scale', () => {
+    expect(levelOf(new Int16Array([3277, -3277]), 0x8000)).toBeCloseTo(2 / 3, 2);
   });
 });

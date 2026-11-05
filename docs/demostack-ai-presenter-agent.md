@@ -43,13 +43,13 @@ rather than retrofit — this list is the actual build checklist for this repo:
 | 5 | Repetition loops (agent repeats a sentence/action) | Loop guard: cap consecutive identical actions/utterances, force escalation past the cap |
 | 6 | Dropped WebSocket/Live session was silent to the user (volume graph + mic just vanish) | Explicit reconnecting / failed states, with a manual retry affordance on final failure |
 | 7 | DOM grounding shape was informal / undocumented | Formal reduced snapshot: interactive/labeled nodes only, diffed against the last snapshot, size-capped |
-| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value. **Status:** lost in the from-scratch rebuild (no volume meter today); restored in M7 (#11) as the volume orb |
-| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates. **Status:** lost in the from-scratch rebuild; `renderIsolation.test.jsx` is restored in M7 (#11) |
+| 8 | Avatar subtree re-rendered on every audio tick (isolate + memoize was the v1 fix) | Go further: volume held in a ref, bars updated imperatively via rAF — zero React re-renders for that value. **Status:** done (M7 T2) as the volume orb: `VolumeOrb.jsx` pulls the player's and the mic's levels (`getLevel()`, `audioIO.js`) once per animation frame and writes them to CSS variables on its own node |
+| 9 | No regression test proving the render isolation actually holds | Render-count test: assert sibling components' render counts stay flat under a burst of simulated volume updates. **Status:** done (M7 T2): `renderIsolation.test.jsx` drives 50 fake frames under `React.Profiler` — no commit in the card or the orb, `--level` changed 50 times, and a transcript line does re-render the card |
 | 10 | Template edits' effect on already-created demo-agents was never verified | Out of scope for this build (no template/demo-agent model here) — documented for the full-product build later |
 
-> **Note (M4 T5):** goals #8 and #9 were built in the first v2 implementation and lost when it was
-> deleted and rebuilt from scratch. The current card has no volume meter and no render-count test;
-> both come back with the designed widget in M7 (issue #11).
+> **Note (M4 T5, M7 T2):** goals #8 and #9 were built in the first v2 implementation and lost when
+> it was deleted and rebuilt from scratch. Both came back with the designed widget in M7 T2
+> (issue #11): the volume orb and `renderIsolation.test.jsx`.
 
 ## 3. Functional requirements (this build)
 
@@ -209,15 +209,18 @@ events go directly from the browser to Gemini Live.
   `docs/code-review-notes.md` M6).
 - Reconnect: real backoff (immediate, 1s, 3s, 7s, 15s, 30s — 6 attempts) around `ai.live.connect`;
   on final failure, shows a visible failed state with a manual retry button (v2 goal #6).
-- Volume meter: volume value lives in a ref, bars update imperatively via `requestAnimationFrame`
-  — no React state, no re-renders for that value at all (v2 goal #8, the "go further" option from
-  the deep-dive doc). Not in the current build: lost in the rebuild, restored in M7 (#11).
+- Volume orb (`VolumeOrb.jsx`): the output and mic levels are pulled once per
+  `requestAnimationFrame` into the loop's own variables and written as `--level` and
+  `--mic-level` on the orb's node, which `styles.css` turns into ring scale and opacity — no
+  React state, no re-renders for that value at all (v2 goal #8, the "go further" option from
+  the deep-dive doc). The loop runs only while the session is open; under
+  `prefers-reduced-motion` it doesn't run and the rings hold a static level.
 
 ### 5.6 Testing
 
 - Render-count test on the sibling components (avatar image, transcript log) asserting their
-  render counts stay flat under a burst of simulated volume updates (v2 goal #9). Lost in the
-  rebuild; restored in M7 (#11).
+  render counts stay flat under a burst of simulated volume updates (v2 goal #9). Done in M7 T2:
+  `agent-client/src/__tests__/renderIsolation.test.jsx`.
 - A test for the bridge's origin/source/allowlist validation — the exact gap v1 shipped with.
   Done in M5 (#13): `e2e/bridge.spec.js` runs `sandbox/bridge.js` in Chromium on a fixture page
   and performs the real handshake and port transfer; a second `ds-bridge-connect`, forged

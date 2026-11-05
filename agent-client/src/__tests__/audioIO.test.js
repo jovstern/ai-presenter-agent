@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startCapture, voiceSupportError } from '../audioIO.js';
+import { createPlayer, startCapture, voiceSupportError } from '../audioIO.js';
 
 // audioIO.js against stubbed Web Audio and getUserMedia: the secure-context
 // check, and that capture releases everything it acquired (B2: no mic left
@@ -29,6 +29,8 @@ beforeEach(() => {
     tracks: [],
     contexts: [],
     nodes: [],
+    analysers: [],
+    sources: [],
     events: [],
     addModule: vi.fn(async () => {
       made.events.push('addModule');
@@ -45,10 +47,34 @@ beforeEach(() => {
       this.resume = made.resume;
       this.audioWorklet = { addModule: made.addModule };
       this.source = { connect: vi.fn(), disconnect: vi.fn() };
+      this.destination = { name: 'destination' };
+      this.currentTime = 0;
+      this.sampleRate = 24000;
       made.contexts.push(this);
     }
     createMediaStreamSource() {
       return this.source;
+    }
+    // The player's analyser: getFloatTimeDomainData copies `samples`, the
+    // window a test sets as "what is playing now".
+    createAnalyser() {
+      const analyser = {
+        fftSize: 2048,
+        samples: new Float32Array(0),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        getFloatTimeDomainData: vi.fn((out) => out.set(analyser.samples.subarray(0, out.length))),
+      };
+      made.analysers.push(analyser);
+      return analyser;
+    }
+    createBuffer(channels, length, rate) {
+      return { duration: length / rate, copyToChannel: vi.fn() };
+    }
+    createBufferSource() {
+      const source = { connect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null };
+      made.sources.push(source);
+      return source;
     }
   }
   class FakeAudioWorkletNode {
@@ -218,5 +244,72 @@ describe('startCapture', () => {
 
     expect(onError).toHaveBeenCalledWith(blocked);
     expect(made.contexts).toHaveLength(0);
+  });
+});
+
+// The orb's mic ring: the level of the last frame the worklet posted, read on
+// demand (no event per frame into React).
+describe('startCapture getLevel', () => {
+  it("is 0 before the first frame, then the last frame's level, then 0 after stop()", async () => {
+    const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
+    expect(capture.getLevel()).toBe(0);
+    await capture.ready;
+    expect(capture.getLevel()).toBe(0);
+
+    // About -20 dBFS: two thirds of the way up (pcm.js levelOf).
+    made.nodes[0].port.onmessage({ data: new Int16Array([3277, -3277, 3277, -3277]).buffer });
+    expect(capture.getLevel()).toBeCloseTo(2 / 3, 2);
+    made.nodes[0].port.onmessage({ data: new Int16Array(4).buffer });
+    expect(capture.getLevel()).toBe(0);
+    made.nodes[0].port.onmessage({ data: new Int16Array([3277, -3277]).buffer });
+
+    capture.stop();
+    expect(capture.getLevel()).toBe(0);
+  });
+});
+
+// The orb's output rings: an AnalyserNode between the scheduled chunks and
+// the speakers, read on demand.
+describe('createPlayer', () => {
+  it('plays every chunk through one analyser on its way to the speakers', () => {
+    const player = createPlayer();
+    player.enqueue(new Float32Array(240));
+    player.enqueue(new Float32Array(240));
+
+    const [context] = made.contexts;
+    const [analyser] = made.analysers;
+    expect(made.analysers).toHaveLength(1);
+    expect(analyser.connect).toHaveBeenCalledWith(context.destination);
+    expect(made.sources).toHaveLength(2);
+    for (const source of made.sources) {
+      expect(source.connect).toHaveBeenCalledWith(analyser);
+      expect(source.connect).not.toHaveBeenCalledWith(context.destination);
+    }
+  });
+
+  it('getLevel() is the level of what is playing now, 0 in silence', () => {
+    const player = createPlayer();
+    const [analyser] = made.analysers;
+    expect(player.getLevel()).toBe(0);
+
+    analyser.samples = Float32Array.from({ length: analyser.fftSize }, (_, i) =>
+      i % 2 ? 0.1 : -0.1,
+    );
+    expect(player.getLevel()).toBeCloseTo(2 / 3, 5);
+    // The same buffer every read: no allocation per animation frame.
+    const [[first]] = analyser.getFloatTimeDomainData.mock.calls;
+    expect(analyser.getFloatTimeDomainData.mock.calls.every(([out]) => out === first)).toBe(true);
+  });
+
+  it('getLevel() is 0 after close(), without reading the closed context', () => {
+    const player = createPlayer();
+    const [analyser] = made.analysers;
+    analyser.samples = new Float32Array(analyser.fftSize).fill(0.5);
+    player.close();
+
+    analyser.getFloatTimeDomainData.mockClear();
+    expect(player.getLevel()).toBe(0);
+    expect(analyser.getFloatTimeDomainData).not.toHaveBeenCalled();
+    expect(made.contexts[0].close).toHaveBeenCalledTimes(1);
   });
 });

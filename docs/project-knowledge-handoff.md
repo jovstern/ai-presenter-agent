@@ -142,7 +142,7 @@ docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/
 target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
                  routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
-agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
+agent-client/    React 19 app (React Compiler configured, not running: code-review-notes M10), one script in a shadow root
 server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)
 ```
 
@@ -158,8 +158,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
-- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
-  on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
+- `AgentApp.jsx` — the minimal card (the volume orb, one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
+  on `failed`, transcript, `📄` knowledge button); `VolumeOrb.jsx` — the orb's rAF loop (§4);
+  `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`.
 
@@ -173,9 +174,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returns in M7 (#11).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 676.4 kB,
-  163.1 kB gzip after M7 T1 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 14 files,
+  277 tests after M7 T2).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 678.7 kB,
+  163.8 kB gzip after M7 T2 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -360,7 +362,16 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Volume meter bypasses React state entirely** (ref + `requestAnimationFrame`) — the "go
   further" version of the original's isolate-and-memoize fix, backed by a test proving the
   isolation actually holds. Built in the first v2 implementation, lost in the from-scratch
-  rebuild; the volume orb and `renderIsolation.test.jsx` return in M7 (#11).
+  rebuild, back in M7 T2 as the volume orb. **Levels are pulled, not pushed:** the player and
+  the capture each expose `getLevel()` (0..1, `audioIO.js`), and `VolumeOrb.jsx` calls both once
+  per animation frame and writes `--level` / `--mic-level` on its own node; `styles.css` turns
+  them into ring scale and opacity. No event per audio frame reaches React, so there is no
+  state to throttle. The output level comes from an `AnalyserNode` between the scheduled chunks
+  and the speakers; the mic level is computed on the Int16 frame the worklet already posts
+  (cheaper than a second node on the mic, and the orb's fall-off hides the 80 ms steps). The loop
+  runs only while the session is open, never under `prefers-reduced-motion` (followed live with
+  `matchMedia`), and reads its sources through `useEffectEvent`, so a card render never restarts
+  it. `renderIsolation.test.jsx` proves it: 50 frames, no commit, `--level` changed 50 times.
 - **`AudioWorklet` over `ScriptProcessorNode` — reversed in M6 T3** (2026-11-02). The first
   build chose `ScriptProcessorNode` for simplicity: deprecated but functional, one file, no
   module to serve. Reversed because the deprecated node runs its callback on the main thread
@@ -386,7 +397,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. The current bundle is 163.1 kB gzip (§3.2).
+  demonstrably can't cover the case. The current bundle is 163.8 kB gzip (§3.2). **Found in M7
+  T2: the compiler isn't running** — `@vitejs/plugin-react` 6 ignores the `babel` option
+  `vite.config.js` passes it in; see `code-review-notes.md` M10 for the fix options, which wait
+  for the user.
 - **Radix UI as the default for new interactive UI elements** (2026-09-15) — today that is
   `Dialog` for the knowledge modal. The first build's Radix `Toast` and hand-rolled
   `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their successors return in M7 (#11).

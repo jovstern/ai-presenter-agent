@@ -31,6 +31,7 @@ vi.mock('../audioIO.js', () => ({
     const capture = {
       ready: Promise.resolve(),
       stop: vi.fn(() => fakes.events.push(`capture#${n}.stop`)),
+      getLevel: () => 0,
     };
     fakes.captures.push(capture);
     return capture;
@@ -41,6 +42,7 @@ vi.mock('../audioIO.js', () => ({
       enqueue: vi.fn(),
       interrupt: vi.fn(),
       close: vi.fn(() => fakes.events.push(`player#${n}.close`)),
+      getLevel: () => 0,
     };
     fakes.players.push(player);
     return player;

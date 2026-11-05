@@ -1,14 +1,15 @@
 import { useState, useSyncExternalStore } from 'react';
 import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
+import { VolumeOrb } from './VolumeOrb.jsx';
 import * as knowledgeStore from './knowledgeStore.js';
 
 /** @import { BridgeChannel } from './bridgeChannel.js' */
 /** @import { StatusDetails } from './liveSession.js' */
 /** @import { AgentStatus, LiveAgent } from './useLiveAgent.js' */
 
-// Minimal status wording from the spec's Screens table; the designed card
-// (orb, Talk/End, toast) is M7.
+// Minimal status wording from the spec's Screens table; the rest of the
+// designed card (Talk/End, toast) is M7 T4.
 /**
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
@@ -97,7 +98,7 @@ function micErrorText(error) {
  */
 export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const agent = useLiveAgent(bridge, nonce, workletUrl);
-  const { status, details, transcript, micError, connectCount } = agent;
+  const { status, details, transcript, micError, connectCount, outputLevel, micLevel } = agent;
   const action = primaryAction(status, details, agent);
 
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
@@ -110,6 +111,9 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
     // A named landmark: the transcript and the alerts sit outside the host
     // page's <main>, and axe's `region` rule wants all content in one.
     <aside className="agent-app" aria-label="AI presenter">
+      {/* Animates outside React: its frames render nothing, and a card render
+          (a transcript line) doesn't restart its loop (VolumeOrb.jsx). */}
+      <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />
       <button className="agent-app__primary" onClick={action.onClick}>
         {action.label}
       </button>

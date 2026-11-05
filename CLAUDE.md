@@ -15,7 +15,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
 - `agent-client/` (npm) — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`)
   wired into `vite.config.js`'s `@vitejs/plugin-react` babel config — don't add manual
   `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't cover the
-  case. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
+  case. **It isn't running today:** plugin-react 6 ignores the `babel` option, so neither the
+  build nor vitest applies it (`docs/code-review-notes.md` M10; the fix changes the build config,
+  so it waits for the user). Write code that would compile cleanly anyway. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
   (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
   script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
   `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck + test + build).
@@ -24,21 +26,28 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
     playback, barge-in) into React state; owns teardown on unmount. Connect first checks for a
     secure context and AudioWorklet (`voiceSupportError()`), and opens no session without them.
+    Exposes `outputLevel()` / `micLevel()`, pull-only getters over the current player and capture.
   - `audioIO.js` — capture: the mic into `public/capture-worklet.js` (an AudioWorklet, loaded
     with `addModule` from `/agent-client/capture-worklet.js`, a URL `main.jsx` resolves next to
     its own script tag), which low-passes and resamples to 16 kHz Int16 off the main thread and
     posts 80 ms frames (1280 samples, buffer transferred); playback with barge-in. Vite copies
     `public/` into `dist/`; the worklet is plain JS, linted with AudioWorklet globals only and
-    typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`).
+    typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`). Both the
+    capture and the player have `getLevel()` (0..1, `pcm.js` `levelOf`): the mic's last frame,
+    and an `AnalyserNode` between the playback and the speakers.
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
   - `AgentApp.jsx` — a minimal card (an `<aside aria-label="AI presenter">` landmark): one
     never-disabled Connect/Cancel/Disconnect/Retry/Try again/Reload page button, a status line
     ("Can't connect" on a fatal failure), an alert on `failed` (keyed by the connect attempt, so
-    a repeat is announced), the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
-    `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
-    successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
-    with the designed card in M7 (issue #11).
+    a repeat is announced), the transcript, the `📄` knowledge button and the volume orb. The
+    old `TranscriptLog` and `Toast.jsx` didn't survive the rebuild; their successors (coalesced
+    transcript, Radix toast) return with the designed card in M7 (issue #11, T3 and T4).
+  - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
+    `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
+    node — no React state, so a frame renders nothing (spec goals #8 and #9). No loop under
+    `prefers-reduced-motion` (followed live via `matchMedia`); the sources are read through
+    `useEffectEvent`, so a card render never restarts the loop.
   - `styles.css` — the card's and the dialog's one stylesheet: the spec's design tokens as
     custom properties on `:host` (redefined under `prefers-color-scheme: dark`, durations zeroed
     under `prefers-reduced-motion: reduce`), and the host's own `position: fixed`, `z-index` and
@@ -174,12 +183,16 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 12 vitest files (259 tests): `actionTools`,
-  `audioIO` (the secure-context check; capture releases everything once), `bridge` (runs
+- Tests: `agent-client/src/__tests__/` has 14 vitest files (277 tests): `actionTools`,
+  `audioIO` (the secure-context check; capture releases everything once; both `getLevel()`s
+  against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
-  `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing Library). `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
+  `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  animation frames: no commit, `--level` moved 50 times), `useLiveAgent.test.jsx` (Testing
+  Library) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
+  under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),

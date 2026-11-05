@@ -3,11 +3,12 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance (M7 T1): B1–B4, H1–H5, M1–M9, L1, L3, L4, L6, L7 and L9–L12
-> are done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8
-> and L10 in M6 T4; M9 in M6 T5; M6 and M9 refined in the M6 fix wave; L3, L4 and L7 in M7 T1).
-> **Three items are still open:** L2, L5 and L8, unticked and marked "Deferred → M7 (issue #11,
-> Tn)": each is a card item the designed card replaces. The M4 and M5 re-review items accepted for M6 are fixed in M6
+> code instead. Status at a glance (M7 T2): B1–B4, H1–H5, M1–M9, L1, L3, L4, L6–L12 are done
+> (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and L10
+> in M6 T4; M9 in M6 T5; M6 and M9 refined in the M6 fix wave; L3, L4 and L7 in M7 T1; L8 in M7
+> T2). **Three items are still open:** L2 and L5, card items marked "Deferred → M7 (issue #11,
+> Tn)" (L2's orb half is done in M7 T2, its transcript half is T3), and M10, found in M7 T2:
+> the React Compiler isn't running (fixing it changes the build config, the user's call). The M4 and M5 re-review items accepted for M6 are fixed in M6
 > T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
@@ -680,6 +681,29 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 > (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
 > while no session was up, or one sent into the session after its newest handle.
 
+### [ ] M10 — The React Compiler isn't running
+
+Found in M7 T2. `vite.config.js` passes the compiler as `react({ babel: { plugins:
+['babel-plugin-react-compiler'] } })`, but `@vitejs/plugin-react` 6 (in use since before M5)
+has no `babel` option and ignores it: the build and vitest compile JSX with oxc only, and
+`dist/agent-client.js` has no `react/compiler-runtime` cache. So nothing is memoized, while
+CLAUDE.md, the lint rule banning `useMemo`/`useCallback`/`memo` and the handoff's decisions log
+all assume it is. Correctness is unaffected (the compiler only memoizes); every card render
+re-renders the whole card. Two fixes, both a build-config change plus a dependency, so they
+wait for the user: plugin-react 6's own `reactCompilerPreset` through `@rolldown/plugin-babel`
+(+ `@babel/core`, the same Babel compiler as before), or its experimental native
+`compiler: true` (`oxc-transform-react`). Once it runs, `renderIsolation.test.jsx` can also
+assert the orb is skipped on a transcript line.
+
+Also found: the compiler (run by hand on the source) skipped `useLiveAgent.js` entirely
+because `connect()` called `disconnect()` before its declaration ("[PruneHoistedContexts]
+Rewrite hoisted function references", a Todo bailout). M7 T2 moved `disconnect()` above
+`connect()`; all five components and hooks now compile without a diagnostic.
+
+The volume orb doesn't depend on either: it reads its level sources through `useEffectEvent`,
+so a card render that hands it new getter functions never restarts its animation loop
+(`renderIsolation.test.jsx`).
+
 ---
 
 ## Low / polish
@@ -700,6 +724,11 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   *Deferred → M7 (issue #11, T2, T3): `VolumeMeter` didn't survive the rebuild; its
   successor, the volume orb (rAF, a `prefers-reduced-motion` branch), and the `aria-live`
   transcript are the designed card's work, not hardening → M7 (issue #11, T2 and T3).*
+  *Orb half fixed in M7 T2: `agent-client/src/VolumeOrb.jsx` draws real levels (the player's
+  `AnalyserNode` and the mic's last frame, `audioIO.js` `getLevel()`), no randomness; under
+  `prefers-reduced-motion` it runs no animation loop at all (followed live through
+  `matchMedia`) and `styles.css` holds the rings at a static level. It stays `aria-hidden`: the
+  card's `role="status"` line says "Live". The `aria-live` transcript is T3, which ticks this.*
 - [x] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
@@ -748,11 +777,14 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   `vite/client`, no config change) and puts it in the shadow root as one `<style>`. The bundle
   stays one IIFE file (163.1 kB gzip), and the CSP needs no change: `style-src 'unsafe-inline'`
   already covers a runtime `<style>` (0 violations across `npm run e2e`).*
-- [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
+- [x] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
   *Deferred → M7 (issue #11, T2): `VolumeMeter` and its refs didn't survive the rebuild; the
   orb that replaces it holds its node in a ref and is checked by a Profiler render-count test → M7 (issue #11, T2).*
+  *Fixed in M7 T2: `VolumeOrb.jsx` is one element in one `useRef`; its two rings are CSS
+  pseudo-elements driven by `--level` and `--mic-level`, so there is no per-bar ref to keep in
+  step with a count. `renderIsolation.test.jsx` checks that 50 frames commit nothing.*
 - [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.

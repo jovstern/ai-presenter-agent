@@ -21,6 +21,8 @@ import { decodeOutputChunk } from './pcm.js';
  * @property {() => Promise<void>} connect Starts mic, playback and the session.
  * @property {() => void} disconnect
  * @property {() => Promise<void>} retry The same as connect.
+ * @property {() => number} outputLevel The agent's voice right now, 0..1; 0 with no player.
+ * @property {() => number} micLevel The mic's last frame, 0..1; 0 with no capture.
  */
 
 // Glue: wires liveSession + audioIO into React state. `bridge` is the page-
@@ -88,6 +90,13 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     return sessionRef.current;
   }
 
+  // Declared before connect(), which calls it: the React Compiler skips a
+  // hook that uses a function before its declaration (docs/code-review-notes.md M10).
+  function disconnect() {
+    sessionRef.current?.disconnect();
+    stopAudio();
+  }
+
   // Idempotent: whatever pipeline a previous connect() left is stopped before
   // a new one starts, so a double press or a Retry never stacks a second mic.
   async function connect() {
@@ -116,9 +125,18 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     await session.connect();
   }
 
-  function disconnect() {
-    sessionRef.current?.disconnect();
-    stopAudio();
+  // Pull, not push: VolumeOrb reads these once per animation frame and
+  // writes a CSS variable, so the levels never enter React state and a frame
+  // renders nothing (spec goals #8 and #9, handoff §4). They read the refs at
+  // call time, so they keep working across the player and capture that every
+  // connect() replaces. Their identity doesn't matter: the orb reads them
+  // through useEffectEvent.
+  function outputLevel() {
+    return playerRef.current?.getLevel() ?? 0;
+  }
+
+  function micLevel() {
+    return captureRef.current?.getLevel() ?? 0;
   }
 
   // Syncs with external resources (socket, mic, AudioContexts): release them
@@ -143,5 +161,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     connect,
     disconnect,
     retry: connect,
+    outputLevel,
+    micLevel,
   };
 }

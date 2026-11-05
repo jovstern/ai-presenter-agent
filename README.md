@@ -79,7 +79,7 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 12 files, 259 tests
+npm test        # vitest: 14 files, 277 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -207,8 +207,8 @@ workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no 
 
 - A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the
   underlying store is tested, the UI isn't yet (M7, issue #11).
-- The designed widget — volume orb, coalesced transcript, connection toast, render-isolation
-  test — is M7 (issue #11); today's card is deliberately minimal.
+- The rest of the designed widget — coalesced transcript, connection toast — is M7 (issue #11);
+  the volume orb and its render-isolation test landed in M7 T2.
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.
 - Anything from the agent-creation side of the real product (see the docs' scope note).
