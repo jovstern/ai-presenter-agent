@@ -38,6 +38,19 @@ describe('knowledgeStore', () => {
     expect(knowledgeStore.listFiles()).toHaveLength(0);
   });
 
+  it('adds files on an insecure page, where crypto.randomUUID does not exist (L6)', async () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
+    try {
+      const first = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+      const second = await knowledgeStore.addFile(makeFile('b.txt', 'B'));
+      expect(first.ok && second.ok).toBe(true);
+      expect(first.file.id).toMatch(/^[0-9a-f]{32}$/);
+      expect(second.file.id).not.toBe(first.file.id);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('reports total bytes across stored files', async () => {
     await knowledgeStore.addFile(makeFile('a.txt', 'AAAA'));
     await knowledgeStore.addFile(makeFile('b.txt', 'BB'));

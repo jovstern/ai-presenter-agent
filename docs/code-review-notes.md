@@ -3,8 +3,12 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance: B1–B4, H1–H5, M2–M4, L9, L11 and L12 are done (H1 with the
-> M5 T3 CSP); the rest are open.
+> code instead. Status at a glance (M6 fix wave): B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12 are
+> done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and
+> L10 in M6 T4; M9 in M6 T5; M6 and M9 refined in the fix wave). **Six items are still open:**
+> L2, L3, L4, L5, L7 and L8, unticked and marked "Deferred → M7 (issue #11, Tn)": each is a card
+> item the designed card replaces. The M4 and M5 re-review items accepted for M6 are fixed in M6
+> T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -119,6 +123,26 @@ fragments into one bubble rather than pushing a new entry per fragment.
 > which lost the conversation. `liveSession.js` now keeps the handle for that close reason
 > (`SESSION_STILL_ATTACHED`), and the backoff's next attempt, 1 s later, resumes. Tested in
 > `liveSession.test.js`. The live numbers are in `docs/metrics/README.md`.
+>
+> **M6 T6 (the M4 re-review and the M6 T3 deferral).** Four reconnect gaps, closed in
+> `liveSession.js` and tested in `liveSession.test.js` with fake timers:
+> - *Setup timeout.* `live.connect` resolves only on `setupComplete`, so a socket that opened and
+>   then heard nothing sat at `connecting` forever. After `SETUP_TIMEOUT_MS` (10 s) the attempt
+>   fails as a retryable failure on its own generation; the abandoned socket is closed if it
+>   ever lands, and its callbacks are ignored.
+> - *The resume handle survives the network.* It used to be dropped by any resumed attempt that
+>   died before the server answered. Now only a server close (any code but 1006 — no close
+>   frame — and the come-back-later 1001/1012–1014, `TRANSIENT_CLOSE_CODES`) drops it; a socket
+>   error, a 1006, `live.connect` rejecting or the setup timeout keep it.
+> - *The backoff reset waits for a stable session.* It used to reset on the first server
+>   message, so setupComplete-then-close retried at 0 ms each cycle (bounded only by the token
+>   rate limit). It now resets after `STABLE_SESSION_MS` (5 s) open, or on the first real content
+>   (`serverContent` or a `toolCall`). `open` is still reported on the first message.
+> - *Two kinds of fatal failure.* `StatusDetails.fatal` is `'token'` (a 4xx: the page's nonce is
+>   rejected; the card offers Reload page) or `'config'` (`not_configured`: no key, or Google
+>   rejects it; a reload can't help, so the card offers Try again, which asks the server again
+>   and connects once the owner has fixed the key). Card: `useLiveAgent.test.jsx` (focus stays
+>   on the button, no Reload page); browser: `e2e/loop.spec.js`, both paths from the keyboard.
 
 `scheduleReconnect` → `connect()` (`useLiveAgent.js:227-277`) calls `startMicCapture` again on
 every attempt. Each call:
@@ -239,6 +263,10 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 > (`script-src 'self'`); style injection can restyle the page but not run code. Revisit if the
 > styles move to a constructable stylesheet and Radix stops injecting. Tests:
 > `server/__tests__/app.test.js`.
+>
+> **M6 T6 (the M5 re-review).** `server/app.js`'s `errorPage()` (the 404 and page-load 429
+> pages) escapes all three arguments with `escapeHtml()`, so a later caller passing a path or
+> a message can't inject markup; today's callers pass constants. Tested in `app.test.js`.
 
 `server/index.js:35` returns an ephemeral Gemini token to any GET — no origin/referer check, no
 rate limit, no per-page nonce. In the real product the iframe holds a crawled clone of a
@@ -288,10 +316,11 @@ Suggested, in rough order of value:
 > `open` → `reconnecting` → `open` → … → `failed`; `reconnecting` (not `failed`) while a retry is
 > pending; the loop guard's 4th-call block; a manual connect after `failed` resetting the
 > attempts; open-then-close cycles climbing the backoff (the attempt count resets on the first
-> server message, not `onopen`); a 4xx token response failing at once with a reload reason while
+> server message, not `onopen` — since M6 T6 only after 5 s open or the first content, see B2); a 4xx token response failing at once with a reload reason while
 > 5xx and network errors retry; and `dispose()` unsubscribing without closing the bridge channel.
 > The M4 fix wave added: `open` reported on the first server message; a `retryable: false` 500
-> (missing key) failing at once, with `fatal` set for every non-retryable failure; a late
+> (missing key) failing at once, with `fatal` set for every non-retryable failure (since M6 T6
+> its kind, `'config'` or `'token'`, see B2); a late
 > `onclose` after a manual disconnect staying `closed`; every (re)connect requesting a snapshot
 > and sending the next one as a keyframe; buffered connect-time audio flushed and capped at 20; the
 > loop guard reset on a manual connect; a rejected resumption handle dropped; and a throwing
@@ -390,6 +419,12 @@ if (message.toolCall) {
 >   attribute.
 >
 > Tested in `liveSession.test.js`, `bridge.test.js` and `e2e/loop.spec.js`.
+>
+> **M6 T6 (the M5 re-review).** `sandbox/bridge.js`'s `labelFor()` follows the accessible-name
+> order: `aria-labelledby`'s text first, then `aria-label`, the `<label>`, the text, a
+> button-like input's value, the placeholder and the title; and every source, the placeholder,
+> title and `aria-label` included, is cut to 60 characters (`MAX_NAME_LENGTH`). Tested in
+> `bridge.test.js`.
 
 Two issues in one area:
 
@@ -427,7 +462,18 @@ return { selector, tag: el.tagName.toLowerCase(), label: labelFor(el),
 
 ## Medium
 
-### [ ] M1 — `KNOWN_ROUTES` is hand-duplicated across the security boundary
+### [x] M1 — `KNOWN_ROUTES` is hand-duplicated across the security boundary
+
+> Fixed in M6 T1: `target-app/routes.json` (route name → page path) is the only route list.
+> `server/app.js` validates it with Zod at startup and templates it into the sandbox page as a
+> `<script type="application/json" id="ds-routes">` data block (`<` escaped, by
+> `jsonForScriptBlock`; a data block never runs, so `script-src 'self'` holds);
+> `sandbox/bridge.js`'s `readRoutes()` reads and validates that block and throws at load if it is
+> missing or malformed; `agent-client/src/actionTools.js` imports the file (a JSON import), so
+> `navigate`'s enum is its keys. Tests: `bridge.test.js` (each route, unknown routes, a bad
+> block), `actionTools.test.js` (enum = file keys), `server/__tests__/app.test.js` (the block on
+> every sandbox URL, the escaping), and `e2e/bridge.spec.js` (the bridge accepts exactly the
+> enum's routes and rejects another).
 
 `actionTools.js:9` (the enum that *is* the guardrail for v1 bug #4) and `bridge.js:17` each define
 the list, with a code comment that says "Keep this list in sync." If they drift, the model gets an
@@ -489,7 +535,18 @@ and never stores it — so removing `<ds-agent-avatar>` from the DOM leaves the 
 mic live. Store the root, unmount it in `disconnectedCallback`, and have `teardown()` (B2) do the
 rest.
 
-### [ ] M5 — `fill` only works for `<input>`
+### [x] M5 — `fill` only works for `<input>`
+
+> Fixed in M6 T1: `sandbox/bridge.js` `fill` calls the native `value` setter of the element's own
+> prototype (`HTMLInputElement` / `HTMLTextAreaElement` / `HTMLSelectElement`, taken from the
+> iframe's realm, `nativeValueSetter()`), so a framework's controlled input sees the change, then
+> fires bubbling `input` and `change`. A select is matched by its options' visible text (trimmed,
+> case-insensitive), then by value (`matchOption()`); no match replies
+> `{success:false, error:'… has no option "X"; options: A, B, C'}` and leaves the selection as it
+> was. Its snapshot node carries `options` (≤ 20 texts, each ≤ 60 characters) and its `value` is
+> the selected option's text. The target app's Settings page has a Notes textarea and a Plan
+> select to prove it (`bridge.test.js`, `e2e/bridge.spec.js`). `contenteditable` stays out of
+> scope: the target app has none.
 
 > Partly addressed. The rebuilt `sandbox/bridge.js` `fill` sets `el.value` directly, which covers
 > `<input>`, `<textarea>` and `<select>`. Since M5 T2 (checkJs) it replies `{success:false}` for an
@@ -503,7 +560,28 @@ one-line note in the bridge that this is input-only for now. If generalised: pic
 `el.tagName`, or use `el.value = v` for non-React targets and keep the descriptor trick only where
 a framework's controlled input needs it.
 
-### [ ] M6 — The loop guard misses the common failure shape
+### [x] M6 — The loop guard misses the common failure shape
+
+> Fixed in M6 T2: `agent-client/src/loopGuard.js` keeps the last 6 action signatures (tool name
+> + args with keys sorted and strings trimmed, `actionSignature()`) and trips on the call that
+> makes the 4th identical one in a row, or completes an A-B-A-B or A-B-C-A-B-C cycle
+> (`CYCLE_RULES`, a cycle needs two different calls). `liveSession.js` treats every trip as it
+> did a repeat: the call isn't dispatched and is answered `{success:false, error:'…repeated too
+> many times…'}`. Utterances: `liveSession` joins an agent turn's `outputTranscription`
+> fragments until `turnComplete` (an interrupted turn is dropped) and `checkUtterance()` trips
+> when the normalised sentence (lowercase, punctuation and whitespace collapsed, ≥ 4 words, so
+> "Done." doesn't count) fills 3 of the last 5 turns. A trip sends one corrective turn ("You
+> are repeating yourself…", `turnComplete: true`), held until a running tool batch ends and
+> dropped with the session on a reconnect; it fires once per episode, which ends on a turn that
+> isn't a repeat or on the user's own transcription. The thresholds are named constants that
+> M6 T5 may tune. Tested in `loopGuard.test.js` and `liveSession.test.js`.
+>
+> Refined in the M6 fix wave: the action window spans one request — the user's own
+> transcription clears it (`userSpoke()`), since a loop is the model acting with no new input,
+> so four separately spoken "click increment" requests, or A, *user*, B, A, *user*, B, all run.
+> A tool call ends an utterance episode (`agentActed()`): narration before each step of one
+> request ("Clicking the increment button now." ×3) is no talk loop, and an action that really
+> repeats is the action rules' to catch. Only turns with no tool call between them count.
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says
@@ -527,7 +605,17 @@ check(sig) {
 Feed transcript text (normalised) through the same guard, or add a separate cap on spoken turns
 per model turn.
 
-### [ ] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
+### [x] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
+
+> Fixed in M6 T4 ([ADR 0004](./adr/0004-live-token-constraints.md)): model only. `server/geminiMint.js`
+> mints with `liveConnectConstraints: { model }` and `lockAdditionalFields: []`, the model read from
+> `agent-client/src/liveModel.json`, which `liveSession.js` connects with too. The
+> `lockAdditionalFields: []` is load-bearing: left out, Gemini locks every config field to the
+> token's and ignores the client's tools, system instruction and resumption handle (seen in a
+> real run: the agent said it couldn't click). Verified with real mints: three `npm run e2e:live`
+> runs on 2026-11-02 (greeting 3/3, five-step task 2/3 — the miss is the known stall after
+> `navigate` that M6 T5 tunes — reconnect 3/3), tools called every run and every reconnect
+> resumed (`resumed: true`, 1.1–1.2 s, one attempt).
 
 `server/index.js:46-53` locks the token to `{ responseModalities, sessionResumption }`, but the
 client also sends `tools` and `thinkingConfig` (`useLiveAgent.js:248-257`). The in-code comment
@@ -536,7 +624,25 @@ fields are a mismatch and the connect is rejected. Decide: constrain **model onl
 the token being single-use + short-TTL already bounds abuse), or make the constraint an exact
 mirror of what the client sends (and then generate both from one object).
 
-### [ ] M8 — Preview-SDK surface pinned loosely and partly guessed
+### [x] M8 — Preview-SDK surface pinned loosely and partly guessed
+
+> Fixed in M6 T4: `@google/genai` is pinned to exactly `2.32.0` in both packages (from `^2.22.0`;
+> no breaking changes in the 2.23–2.32 release notes), and every other dependency in the three
+> `package.json`s is pinned to the version its lockfile resolved. The Live fields
+> `liveSession.js` reads were checked against 2.32.0's `dist/web/web.d.ts` and runtime, and all
+> held: `message.data`, `serverContent.{interrupted, turnComplete, inputTranscription.text,
+> outputTranscription.text}`, `sessionResumptionUpdate.{resumable, newHandle}`,
+> `toolCall.functionCalls`, `setupComplete` (the first message: `live.connect` resolves only after
+> it), and the `sendRealtimeInput({audio})` / `sendClientContent({turns, turnComplete})` /
+> `sendToolResponse({functionResponses})` signatures. The client sends no `thinkingConfig`, so the
+> `thinkingLevel` question is moot. `goAway` isn't read: the close that follows it takes the
+> normal resume path.
+>
+> Fix wave: `live.connect` delivers `setupComplete`, and anything the server queued behind it,
+> through `onmessage` *before* it resolves, while `liveSession.js` holds no session yet. A tool
+> call in that queue now waits for the session and is answered (it was dropped), and the greeting
+> is decided by whether the attempt resumed, not by whether a handle has arrived by then.
+> `liveSession.test.js` drives both orders.
 
 `@google/genai: ^1.0.0` (also `hono: ^4.6.0`, `react: ^18.3.0`) is a very wide range for a
 preview-API integration whose message shapes the handoff doc already admits are inferred
@@ -546,48 +652,104 @@ checked against the installed version — the SDK has shipped `thinkingBudget` /
 shapes, and `thinkingLevel` may not be the field. Pin exact versions in all three
 `package.json`s and commit to the lockfiles (they exist — good).
 
-### [ ] M9 — A resumed reconnect re-sends context it already has
+### [x] M9 — A resumed reconnect re-sends context it already has
 
 `connect()` always calls `sendKnowledgeContext` (`useLiveAgent.js:270`), and the `ds-ready` path
 re-greets (B3), even when `resumeHandleRef.current` is set and the session already carries all of
 it. Handoff §3.3 flags the knowledge waste; combined with B3, a successful resume gets a greeting
 dropped into the middle of the conversation. Guard both on `!resumeHandleRef.current`.
 
+> Fixed in M6 T5: the greeting was already guarded (`openSession` greets only a fresh session).
+> `agent-client/src/liveSession.js` now sends the knowledge context only to a fresh session, or
+> to a resumed one when the store changed while no session was up (then `knowledgeChangedOffline`;
+> since the fix wave, revisions, below).
+> Measured in the live e2e (`docs/metrics/m06.md`): the reconnect scenario seeds a 386 B knowledge
+> file and asks for its code name after the drop. With the resend, 5 of 5 resumed sessions named
+> it, and without it 10 of 10, so the resend only stacked a copy of the knowledge (up to 4 MB)
+> into the context per drop. The handoff's "deliberate" stance (§3.3) is reversed. The keyframe
+> is still forced on every reconnect, because the page can change during a drop. Tests:
+> `liveSession.test.js` "knowledge on a reconnect (M9)".
+>
+> **Assumption (M6 fix wave):** skipping the resend relies on a resume either really restoring
+> the session the handle names, or Gemini closing the attempt (which drops the handle, so the
+> next attempt is fresh and gets the knowledge). A resume that "succeeds" into an empty context
+> would lose the knowledge silently; nothing seen in the live e2e does that. A handle restores
+> the session as it was when the handle was issued, so knowledge sent after it isn't in the
+> resumed session: `liveSession.js` counts store changes (`knowledgeRevision`), remembers which
+> one the live session holds (`sentRevision`) and which one the newest handle captured
+> (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
+> while no session was up, or one sent into the session after its newest handle.
+
 ---
 
 ## Low / polish
 
-- [ ] **L1** — `pcm.js` base64 helpers build strings char-by-char ~20×/s (`int16ToBase64:23-25`,
+- [x] **L1** — `pcm.js` base64 helpers build strings char-by-char ~20×/s (`int16ToBase64:23-25`,
   `base64ToInt16:30-32`). `new Int16Array(bytes.buffer)` throws on an odd byte length or a
   non-zero-offset view. Convert in chunks (`String.fromCharCode.apply(null, subarray)`), and copy
   into a fresh aligned buffer before the `Int16Array` view.
+  *Fixed in M6 T3: `agent-client/src/pcm.js` encodes base64 by spreading 32 Ki-byte
+  `subarray`s into `String.fromCharCode` (a 1 MB frame encodes; `pcm.test.js`), and encodes only
+  the view's own bytes (`byteOffset`/`byteLength`, not the whole `buffer`). `bytesToInt16`
+  copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
+  sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
+  thread into `public/capture-worklet.js`.*
 - [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
+  *Deferred → M7 (issue #11, T2, T3): `VolumeMeter` didn't survive the rebuild; its
+  successor, the volume orb (rAF, a `prefers-reduced-motion` branch), and the `aria-live`
+  transcript are the designed card's work, not hardening → M7 (issue #11, T2 and T3).*
 - [ ] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
+  *Deferred → M7 (issue #11, T1): today's card has no z-index at all; host positioning and
+  `z-index` on the host element come with the card's styles, so they are set once, on the
+  final layout → M7 (issue #11, T1).*
 - [ ] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
   widget only survives because `.ds-card` is `position:fixed`. Add an explicit
   `:host { display: block; }` (or `contents`) so it doesn't depend on that coincidence.
+  *Deferred → M7 (issue #11, T1): still true of `main.jsx`'s `:host { all: initial; }`; the
+  card's styles move to `styles.css` with tokens on `:host`, where the explicit `display`
+  belongs → M7 (issue #11, T1).*
 - [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
-- [ ] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
+  *Deferred → M7 (issue #11, T3): today's card keeps and renders every line (no bound at all,
+  the M1 rebuild dropped both); the coalesced transcript bounds the list to 20 and renders the
+  last 3 → M7 (issue #11, T3).*
+- [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.
+  *Fixed in M6 T3: `agent-client/src/audioIO.js` `voiceSupportError()` checks
+  `window.isSecureContext`, then `AudioWorkletNode` and `getUserMedia`, and `useLiveAgent.js`
+  runs it before Connect does anything: on plain http the card says "Voice needs a secure
+  connection (https)…" and no session opens or token is minted (`useLiveAgent.test.jsx`, and
+  checked in Chromium over a LAN-IP http URL). The UUID half: `knowledgeStore.js`'s file ids
+  now come from `crypto.getRandomValues` (available everywhere), so adding a file on plain http
+  no longer throws (`knowledgeStore.test.js`); `bridgeChannel.js`'s action ids keep
+  `crypto.randomUUID()`, since actions only run in a session, which now can't start outside a
+  secure context. Handoff §3.3 notes both halves.*
 - [ ] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
   linting. `import styles from './styles.css?inline'` keeps the single-file IIFE build and
   restores tooling / syntax highlighting.
+  *Deferred → M7 (issue #11, T1): the CSS is still a template literal in `main.jsx`; it moves
+  to `src/styles.css?inline` with the card's tokens → M7 (issue #11, T1).*
 - [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
+  *Deferred → M7 (issue #11, T2): `VolumeMeter` and its refs didn't survive the rebuild; the
+  orb that replaces it holds its node in a ref and is checked by a Profiler render-count test → M7 (issue #11, T2).*
 - [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.
   *Fixed (M4): `sandbox/bridge.js`'s `buildSnapshotNodes` names the field `tag`.*
-- [ ] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
+- [x] **L10** — `handleServerMessage` assumes `message.serverContent.modelTurn.parts` and
   `part.inlineData.data` for audio (`useLiveAgent.js:167-169`). Some `@google/genai` Live versions
   surface audio as `message.data`. Verify against the pinned version (ties to M8).
+  *Verified in M6 T4: `liveSession.js` reads `message.data`, which in `@google/genai` 2.32.0 is a
+  getter on the `LiveServerMessage` class the SDK builds for every message: it joins the
+  `inlineData` of `serverContent.modelTurn.parts` and returns base64 (undefined when there is
+  none). The real-key live e2e hears the greeting through it.*
 - [x] **L11** — No root `package.json`, no single command to install/run the three parts, no
   `.nvmrc` / `engines`, no root `npm test`. A `dev` script (concurrently: agent-client watch +
   server) would cut the README's three-terminal dance.

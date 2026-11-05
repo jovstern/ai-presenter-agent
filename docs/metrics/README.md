@@ -54,8 +54,11 @@ the fake-capture file is a browser launch flag.
 | Scenario | Prompt (`make-prompts.sh`) | Passes when |
 |---|---|---|
 | `greeting` | "Hi!" at 4 s | Live within 15 s, then the first agent audio (`ds:first-audio`) and an agent transcript line |
-| `task` | at 6 s: "Increment the counter twice, then go to Settings, turn on notifications and save." | within 150 s: the save confirmation is visible, the Settings heading is shown, the toggle is checked, and the counter went exactly `1`, `2` |
-| `reconnect` | at 12 s: "Which page are we on right now?" | after the first audio, the test closes the page side of the real Gemini socket (a `routeWebSocket` pass-through); the card shows `Reconnecting…`, then Live, `ds:reconnected` is marked, and the agent answers the follow-up |
+| `task` | at 6 s: "Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save." | within 150 s: the save confirmation is visible, the Settings heading is shown, the toggle is checked, the Plan select is `pro` (a `fill`), and the counter went exactly `1`, `2` |
+| `reconnect` | at 12 s: "Which page are we on right now, and what is the code name of this demo?" | a knowledge file naming the code name (Pelican) is seeded in `localStorage` first. After the first audio, the test closes the page side of the real Gemini socket (a `routeWebSocket` pass-through); the card shows `Reconnecting…`, then Live, `ds:reconnected` is marked, and the agent answers the follow-up. Whether the answer names Pelican is recorded (`recalledKnowledge`), not asserted |
+
+Until M6 T5 the task had five steps (no Plan) and the follow-up asked only for the page, with
+no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts.
 
 ### Timing marks
 
@@ -71,6 +74,9 @@ them before disconnecting. Unit-tested in `liveSession.test.js` ("timing marks")
 | `ds:first-audio` | the first audio chunk after a connect (once per connect) |
 | `ds:tool-start:<id>` / `ds:tool-end:<id>` | around one tool call's bridge dispatch; `detail` holds `name` (and `success` on the end) |
 | `ds:reconnected` | the first `open` after a drop that the session recovered from |
+| `ds:keyframe` | a full page snapshot sent to the model (on its own or inside a tool response); `detail` holds `bytes` (UTF-8, the whole message) and `nodes` |
+| `ds:knowledge` | the knowledge context sent to the model; `detail.bytes` (UTF-8) |
+| `ds:loop-trip` | the loop guard tripped; `detail.kind` is `action` (a call refused) or `utterance` (a corrective turn sent) |
 
 ### `.metrics/live.json`
 
@@ -95,8 +101,13 @@ each test's `live-metrics` attachment):
             "openToFirstAudioMs": 506,         // ds:open → ds:first-audio (the greeting budget)
             "tools": [{ "name": "click", "roundTripMs": 2, "success": true }],
             "reconnectMs": 1065,               // socket closed by the test → ds:reconnected
+            "keyframeBytes": [777, 855],       // each ds:keyframe's size
+            "knowledgeBytes": [386],           // each ds:knowledge's size
+            "knowledgeResentBytes": 0,         // reconnect only: knowledge sent after the drop
+            "loopTrips": [],                   // each ds:loop-trip's kind
             "reconnectAttempts": 1,            // reconnect scenario only: sockets after the drop
             "resumed": true,                   // reconnect scenario only: the last one resumed
+            "recalledKnowledge": true,         // reconnect scenario only: the answer named Pelican
             "transcript": ["agent: …", "user: …"] // failed tests only, one line per turn
           }
         }
@@ -109,6 +120,9 @@ each test's `live-metrics` attachment):
 A tool's round trip is the bridge only: the dispatch through the private channel into the
 iframe and back, not the model's thinking time. The observer summarises the file (median and
 worst per metric, pass rate per scenario) in the milestone report.
+
+The latest numbers are in `m06.md` (M6 T5: six-step task 8 of 10, reconnect worst 2.89 s,
+keyframe ≤ 855 B, fill ≤ 3 ms). The M5 baseline below is kept for history.
 
 ## M5 T5 baseline (2026-10-29, 11 runs)
 

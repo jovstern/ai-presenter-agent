@@ -1,35 +1,14 @@
+// The Live API's audio formats and their base64 wire encoding. Input
+// (16 kHz Int16 mono) is produced by public/capture-worklet.js, which also
+// does the resampling and Float32 → Int16 conversion; this file only encodes
+// those frames and decodes the 24 kHz output chunks.
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
 
-/**
- * @param {Float32Array} float32
- * @param {number} fromRate
- * @param {number} toRate
- */
-function resampleTo(float32, fromRate, toRate) {
-  if (fromRate === toRate) return float32;
-  const ratio = fromRate / toRate;
-  const outLength = Math.round(float32.length / ratio);
-  const out = new Float32Array(outLength);
-  for (let i = 0; i < outLength; i++) {
-    const srcIndex = i * ratio;
-    const lo = Math.floor(srcIndex);
-    const hi = Math.min(lo + 1, float32.length - 1);
-    const frac = srcIndex - lo;
-    out[i] = float32[lo] + (float32[hi] - float32[lo]) * frac;
-  }
-  return out;
-}
-
-/** @param {Float32Array} float32 */
-function float32ToInt16(float32) {
-  const int16 = new Int16Array(float32.length);
-  for (let i = 0; i < float32.length; i++) {
-    const s = Math.max(-1, Math.min(1, float32[i]));
-    int16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-  return int16;
-}
+// String.fromCharCode(...bytes) passes every byte as an argument and overflows
+// the stack on a large frame; one call per char is slow at ~12 frames a second
+// (docs/code-review-notes.md L1). Spreading 32 Ki bytes at a time avoids both.
+const BASE64_CHUNK = 0x8000;
 
 /**
  * @param {Int16Array} int16
@@ -45,9 +24,12 @@ function int16ToFloat32(int16) {
 
 /** @param {Uint8Array} bytes */
 function bytesToBase64(bytes) {
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
+  /** @type {string[]} */
+  const parts = [];
+  for (let i = 0; i < bytes.length; i += BASE64_CHUNK) {
+    parts.push(String.fromCharCode(...bytes.subarray(i, i + BASE64_CHUNK)));
+  }
+  return btoa(parts.join(''));
 }
 
 /** @param {string} base64 */
@@ -58,17 +40,28 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
-// Encodes a Float32 audio frame (captured at `sourceSampleRate`) down to the
-// 16kHz 16-bit PCM mono the Live API expects for realtime audio input.
+// An Int16Array view needs an even byte offset and whole samples: a view at an
+// odd offset throws a RangeError, so it is copied into a fresh (aligned)
+// buffer first, and a trailing odd byte, half a sample, is dropped
+// (docs/code-review-notes.md L1).
 /**
- * @param {Float32Array} float32
- * @param {number} sourceSampleRate
+ * @param {Uint8Array} bytes Little-endian 16-bit PCM.
+ * @returns {Int16Array}
+ */
+export function bytesToInt16(bytes) {
+  const length = Math.floor(bytes.byteLength / 2);
+  if (bytes.byteOffset % 2 === 0) return new Int16Array(bytes.buffer, bytes.byteOffset, length);
+  return new Int16Array(bytes.slice(0, length * 2).buffer);
+}
+
+// Encodes one captured 16 kHz Int16 frame for realtimeInput. Only the view's
+// own bytes: a subarray's buffer holds more than the frame.
+/**
+ * @param {Int16Array} int16
  * @returns {string} base64
  */
-export function encodeInputFrame(float32, sourceSampleRate) {
-  const resampled = resampleTo(float32, sourceSampleRate, INPUT_SAMPLE_RATE);
-  const int16 = float32ToInt16(resampled);
-  return bytesToBase64(new Uint8Array(int16.buffer));
+export function encodeInputFrame(int16) {
+  return bytesToBase64(new Uint8Array(int16.buffer, int16.byteOffset, int16.byteLength));
 }
 
 // Decodes a base64 chunk of 24kHz 16-bit PCM mono (the Live API's output
@@ -78,9 +71,7 @@ export function encodeInputFrame(float32, sourceSampleRate) {
  * @returns {Float32Array<ArrayBuffer>}
  */
 export function decodeOutputChunk(base64) {
-  const bytes = base64ToBytes(base64);
-  const int16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.byteLength / 2);
-  return int16ToFloat32(int16);
+  return int16ToFloat32(bytesToInt16(base64ToBytes(base64)));
 }
 
 export { INPUT_SAMPLE_RATE, OUTPUT_SAMPLE_RATE };

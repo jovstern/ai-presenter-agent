@@ -23,7 +23,8 @@ performance — see the docs for why.
 
 ```
 docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/)
-target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements)
+target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
+                 routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
@@ -58,8 +59,9 @@ corner and allow microphone access: the agent greets you once the session is ope
 speak on page load). Try asking it to increment the counter, search for something, or go to
 Settings, turn on notifications and save. The card's one button follows the connection: Connect,
 Cancel while connecting, Disconnect while live or reconnecting, and Retry if the connection is
-lost for good, or Reload page when retrying can't help (the reason shows under the status
-line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
+lost for good. When retrying can't help, it says what can: Reload page when the page's token
+is rejected, or Try again (asks the server once more) when the server isn't configured, which a
+reload can't fix (the reason shows under the status line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
@@ -72,44 +74,72 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 3 specs, 13 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 4 specs, 21 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 10 files, 118 tests
+npm test        # vitest: 12 files, 259 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
-npm run typecheck  # tsc -p jsconfig.json: checkJs + strict, sandbox/bridge.js included
-npm run build   # single-file IIFE bundle in agent-client/dist/
+npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
+                   # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
+npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 2 files, 46 tests
+npm test        # vitest + supertest: 3 files, 54 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
 
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
-  per drop, superseded connects, in-order tool batches, resumption without re-greeting, the
-  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard,
+  per drop, superseded connects, in-order tool batches, the token and model it connects with,
+  resumption without re-greeting, the
+  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
+  per repeated-sentence episode, never sent to a replacement session; the user speaking clears
+  the action window, and narration between tool calls is no loop), the SDK's real order
+  (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
+  the greeting by whether the attempt resumed),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
-  during a tool batch goes out inside the next tool response (`page`); the `ds:*` timing marks.
+  during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
+  retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
+  timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
+  on a server close; the backoff reset only after 5 s open or the first content; the two fatal
+  kinds (`config`, `token`).
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
-  Connect, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
-  Reload page on a fatal failure) with focus kept on it, the status line and alerts.
+  Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
+  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
-  own page and reports a page that never loads as a failure; `fill` refuses an element that
-  isn't a text input; replies survive a later patch of `MessagePort.prototype.postMessage`; a
-  checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot.
+  own page and reports a page that never loads as a failure; the routes come from the page's
+  `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
+  isn't a text input, a disabled or read-only field, a disabled option and a value over the
+  field's `maxlength`, sets the value through the native setter and fires `input` + `change`, and
+  picks a select's option by visible text, then value, selecting that option itself (no match
+  fails and names the options); a test id with a quote in it is found (`CSS.escape`);
+  a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
+  checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
+  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters.
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
-  inherited names (`toString`) get none.
+  inherited names (`toString`) get none; `navigate`'s enum is `target-app/routes.json`'s keys.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
-- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, the
-  context blob it builds.
-- `loopGuard.test.js`, `pcm.test.js` — the repeat cap and the audio encode/decode helpers.
+- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, file
+  ids without `crypto.randomUUID` (plain http), the context blob it builds.
+- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
+  sentences, realistic sequences that must pass, the window cleared by the user speaking and the
+  utterance episode by a tool call.
+- `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack
+  overflow), a subarray encodes only its own samples, Int16 from an odd byte offset or with a
+  trailing half sample.
+- `captureWorklet.test.js` — `public/capture-worklet.js` under a stubbed AudioWorklet scope:
+  80 ms Int16 frames of 1280 at 16 kHz, posted with the buffer transferred; from 48 and 44.1 kHz,
+  16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing).
+- `audioIO.test.js` — the secure-context / AudioWorklet check, the context resumed after the
+  worklet loads (Safari), and that capture releases the port, nodes, mic track and context once,
+  including on a stop mid-setup, a worklet that fails to load (reported as a `WorkletLoadError`)
+  or a context that won't resume.
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
@@ -121,8 +151,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 - `bridge.spec.js` — `sandbox/bridge.js` in a real browser on a fixture page (the bridge and the
   iframe, no agent-client, served with the real CSP). The test does the real handshake and port
   transfer itself, then checks that click / fill / scroll / navigate change the iframe (the fill's
-  value showing in the next snapshot), that an unknown action, an unknown route and `fill` on a
-  non-input are rejected, that a second
+  value showing in the next snapshot), that the bridge accepts exactly `navigate`'s enum, that
+  `fill` works on the Settings textarea and select (by text and by value, firing `input` and
+  `change`; no matching option leaves the selection alone), that an unknown action, an unknown
+  route and `fill` on a non-input are rejected, that a second
   `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
   snapshot with `hidden` right for `save-confirmation`.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
@@ -130,14 +162,22 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
-  connected". And a `not_configured` 500 goes straight to "Reload page" with no retries.
-- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle and
-  with the knowledge dialog open, and on both target-app pages: zero violations. axe walks the
+  connected". A `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no automatic
+  retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload page", both
+  driven from the keyboard with focus kept on the button.
+- `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
+  capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
+  Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
+  none after Disconnect.
+- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle,
+  with the knowledge dialog open, and connected (the fake-Live harness, `e2e/fakeLive.js`, shared
+  with `loop.spec.js`) with a transcript line on screen, and on both target-app pages: zero
+  violations. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the
 real Gemini Live API, with spoken prompts (`e2e/make-prompts.sh`, macOS `say`) played by
-Chromium's fake mic. Three scenarios: the greeting, the scripted five-step task checked in the
+Chromium's fake mic. Three scenarios: the greeting, the scripted six-step task checked in the
 iframe, and a forced socket close that must recover. It records the app metrics (connect time,
 first audio, tool round trips, reconnect time, pass rate) in `.metrics/live.json`. Never in CI.
 How to run it, what each number means and the current baseline: `docs/metrics/README.md`.
@@ -151,10 +191,12 @@ The suite in `server/__tests__/`:
   error, 200), the error handler (a plain error is a 500 without internals; only an `expose`d
   client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
   with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
-  otherwise), no inline script on any page, the CSP and other headers
+  otherwise), no inline script on any page, `errorPage` escaping its arguments, the CSP and other headers
   (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
   nonce cap, and no nonce or token in the logs.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
+- `geminiMint.test.js` — the token config sent to `authTokens.create`: single use, the 60 s
+  session window, locked to `liveModel.json`'s model only (`lockAdditionalFields: []`, ADR 0004).
 
 CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and every push to
 `master`: `npm ci` in the root, `agent-client/` and `server/`, then `npm run check` and

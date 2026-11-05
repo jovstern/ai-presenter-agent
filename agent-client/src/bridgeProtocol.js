@@ -18,8 +18,10 @@
  * `checked` is set for checkboxes and radio buttons only. `value` is set
  * for text inputs, textareas and selects (never a hidden input, a password
  * or a card-number / one-time-code field), cut to 60 characters plus an
- * ellipsis.
- * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
+ * ellipsis; a select's is its selected option's visible text. `options` is
+ * set for selects only: the first 20 options' visible text, each cut the
+ * same way. `fill` picks a select's option by that text.
+ * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string, options?: string[] }} SnapshotNode
  */
 /**
  * The full node list plus its diff against the bridge's previous snapshot.

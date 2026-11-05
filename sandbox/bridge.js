@@ -21,8 +21,10 @@
    * `checked` is set for checkboxes and radio buttons only. `value` is set
    * for text inputs, textareas and selects (never a hidden input, a password
    * or a card-number / one-time-code field), cut to 60 characters plus an
-   * ellipsis.
-   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string }} SnapshotNode
+   * ellipsis; a select's is its selected option's visible text. `options` is
+   * set for selects only: the first 20 options' visible text, each cut the
+   * same way. `fill` picks a select's option by that text.
+   * @typedef {{ selector: string, tag: string, label: string, disabled: boolean, hidden: boolean, checked?: boolean, value?: string, options?: string[] }} SnapshotNode
    */
   /**
    * The full node list plus its diff against the bridge's previous snapshot.
@@ -72,15 +74,17 @@
   // see the residual risks below and docs/adr/0001-private-bridge-channel.md).
   const send = MessagePort.prototype.postMessage;
 
-  /** @type {string[]} */
-  const KNOWN_ROUTES = ['home', 'settings'];
-  // Absolute, not relative to target-app/ — iframe.src resolves against the
-  // parent (sandbox) page's URL, not the iframe's current document.
-  /** @type {Record<string, string>} */
-  const ROUTE_PATHS = { home: '/target-app/index.html', settings: '/target-app/settings.html' };
+  // Route name -> page path, from target-app/routes.json: the one route list
+  // (docs/code-review-notes.md M1), which the server templates into this
+  // page's #ds-routes data block and actionTools.js turns into `navigate`'s
+  // enum. Absolute paths, not relative to target-app/: iframe.src resolves
+  // against the parent (sandbox) page's URL, not the iframe's document.
+  const ROUTE_PATHS = readRoutes();
 
-  // Size cap so a larger page can't blow the model's context — a guess, not
-  // tuned against a real page yet (docs/project-knowledge-handoff.md §3.3).
+  // Size cap so a larger page can't blow the model's context. Kept at 30 in
+  // M6 T5: keyframes measured ~100 B a node (777–855 B for the target app's 8),
+  // so 30 nodes is ~3–3.5 kB, inside the 4 kB budget (docs/metrics/m06.md).
+  // Not yet measured on a page big enough to reach it.
   const MAX_SNAPSHOT_NODES = 30;
   const SNAPSHOT_DEBOUNCE_MS = 250;
   // Kept under agent-client's ACTION_TIMEOUT_MS (4000, bridgeChannel.js) so a
@@ -96,6 +100,36 @@
     throw new Error('bridge.js: no <iframe id="target-app-frame"> on the page');
   }
   const iframe = frameElement; // narrowed once, for the hoisted functions below
+
+  // Without its routes the bridge can't navigate, and a silent empty list
+  // would turn every navigate into "Unknown route": fail loudly at load.
+  /** @returns {Map<string, string>} */
+  function readRoutes() {
+    const fail = (/** @type {string} */ why) => {
+      throw new Error(`bridge.js: the #ds-routes block ${why}`);
+    };
+    const block = document.getElementById('ds-routes');
+    if (!block) return fail('is missing');
+    /** @type {unknown} */
+    let routes;
+    try {
+      routes = JSON.parse(block.textContent ?? '');
+    } catch {
+      return fail('is not JSON');
+    }
+    if (typeof routes !== 'object' || routes === null || Array.isArray(routes)) {
+      return fail('is not an object');
+    }
+    const entries = Object.entries(routes);
+    if (entries.length === 0) return fail('lists no routes');
+    for (const [name, routePath] of entries) {
+      if (typeof routePath !== 'string' || !routePath.startsWith('/target-app/')) {
+        return fail(`maps "${name}" to something other than a /target-app/ path`);
+      }
+    }
+    // A Map, so a model-supplied "toString" or "__proto__" is no route.
+    return new Map(entries);
+  }
 
   // The action library lives in this closure, never on `window` — a page
   // script reaching `window.dsActions.click(...)` directly would bypass the
@@ -118,7 +152,9 @@
    * @returns {HTMLElement | null}
    */
   function findByTestId(testId) {
-    const el = iframe.contentDocument?.querySelector(`[data-testid="${testId}"]`) ?? null;
+    // Escaped, so a quote or backslash in the id can't break the selector.
+    const selector = `[data-testid="${CSS.escape(testId)}"]`;
+    const el = iframe.contentDocument?.querySelector(selector) ?? null;
     return /** @type {HTMLElement | null} */ (el);
   }
 
@@ -167,11 +203,12 @@
       return { success: true };
     },
     async navigate(route) {
-      if (!KNOWN_ROUTES.includes(route)) {
+      const routePath = ROUTE_PATHS.get(route);
+      if (routePath === undefined) {
         return { success: false, error: `Unknown route "${route}"` };
       }
-      const loaded = waitForLoadOf(ROUTE_PATHS[route]);
-      iframe.src = ROUTE_PATHS[route];
+      const loaded = waitForLoadOf(routePath);
+      iframe.src = routePath;
       // Don't report success until the new document is actually in place, and
       // don't claim it was when it never arrived.
       if (!(await loaded)) return { success: false, error: 'The page did not finish loading.' };
@@ -187,8 +224,54 @@
       if (!isTextControl(el) || !('value' in el)) {
         return { success: false, error: `data-testid="${selector}" is not a text input` };
       }
-      el.value = value;
+      // What a user couldn't do, the agent doesn't either: a disabled field
+      // (itself, or in a disabled fieldset) or a read-only one is refused.
+      if (el.matches(':disabled')) {
+        return { success: false, error: `data-testid="${selector}" is disabled` };
+      }
+      if ('readOnly' in el && el.readOnly === true) {
+        return { success: false, error: `data-testid="${selector}" is read-only` };
+      }
+      const newValue = String(value);
+      if (isSelect(el)) {
+        // Matched by what the viewer (and the snapshot) sees, then by value.
+        // No match must not set `value`: that clears the selection.
+        const option = matchOption(el, newValue);
+        if (!option) {
+          const options = optionTexts(el).join(', ');
+          return {
+            success: false,
+            error: `data-testid="${selector}" has no option "${newValue}"; options: ${options}`,
+          };
+        }
+        // A disabled option (or one in a disabled optgroup) can't be picked.
+        if (option.matches(':disabled')) {
+          return {
+            success: false,
+            error: `data-testid="${selector}" has option "${option.text.trim()}", but it is disabled`,
+          };
+        }
+        // The option itself, not `value`: with two options sharing a value,
+        // `value` would pick the first, not the one matched by its text.
+        // React tracks no select value of its own, so the change event below
+        // is all a controlled select needs.
+        option.selected = true;
+      } else {
+        // Refused rather than cut short, so the model never believes it typed
+        // text the field dropped. `maxLength` is -1 when there's no limit.
+        const limit = 'maxLength' in el && typeof el.maxLength === 'number' ? el.maxLength : -1;
+        if (limit >= 0 && newValue.length > limit) {
+          return {
+            success: false,
+            error: `data-testid="${selector}" takes at most ${limit} characters; the value has ${newValue.length}`,
+          };
+        }
+        nativeValueSetter(el).call(el, newValue);
+      }
+      // Both, bubbling, as a user's edit fires them: a framework listens for
+      // `input`, a plain page (or a select's handler) often for `change`.
       el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
       return { success: true };
     },
   };
@@ -312,6 +395,10 @@
   // An input whose value is its caption, so it names the button.
   const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset']);
   const MAX_VALUE_LENGTH = 60;
+  // A snapshot node's name, whatever its source.
+  const MAX_NAME_LENGTH = 60;
+  // A select's options listed in a snapshot (and in a failed fill's error).
+  const MAX_OPTIONS = 20;
 
   // What `fill` may type into, and what a snapshot reports a value for.
   /** @param {Element} el */
@@ -328,23 +415,81 @@
     return inputType(el) === 'password' || tokens.some((token) => SECRET_AUTOCOMPLETE.test(token));
   }
 
+  /** @param {string} text */
+  function cut(text) {
+    return text.length > MAX_VALUE_LENGTH ? `${text.slice(0, MAX_VALUE_LENGTH)}…` : text;
+  }
+
+  // The cast, as in findByTestId: the frame's realm makes `instanceof
+  // HTMLSelectElement` false, so the tag decides.
   /**
+   * @param {Element} el
+   * @returns {el is HTMLSelectElement}
+   */
+  function isSelect(el) {
+    return el.tagName === 'SELECT';
+  }
+
+  /** @param {HTMLSelectElement} select */
+  function optionTexts(select) {
+    return [...select.options].slice(0, MAX_OPTIONS).map((option) => cut(option.text.trim()));
+  }
+
+  /**
+   * The option whose visible text is `wanted` (ignoring case and surrounding
+   * space), else the one whose value is.
+   * @param {HTMLSelectElement} select
+   * @param {string} wanted
+   */
+  function matchOption(select, wanted) {
+    const key = wanted.trim().toLowerCase();
+    const options = [...select.options];
+    return (
+      options.find((option) => option.text.trim().toLowerCase() === key) ??
+      options.find((option) => option.value.trim().toLowerCase() === key)
+    );
+  }
+
+  // The prototype's own `value` setter, from the frame's realm: a framework's
+  // controlled input (React) overrides `value` on the instance to track it,
+  // and only the native setter gets past that so its listener sees the
+  // change (docs/code-review-notes.md M5). Per element type, since each has
+  // its own setter.
+  /**
+   * @param {HTMLElement} el An input or textarea (a select is set through its option).
+   * @returns {(this: HTMLElement, value: string) => void}
+   */
+  function nativeValueSetter(el) {
+    const realm = /** @type {Window & typeof globalThis} */ (iframe.contentWindow);
+    const type = el.tagName === 'TEXTAREA' ? realm.HTMLTextAreaElement : realm.HTMLInputElement;
+    const setter = Object.getOwnPropertyDescriptor(type.prototype, 'value')?.set;
+    // runAction turns the throw into a failure reply.
+    if (!setter) throw new Error(`No native value setter for <${el.tagName.toLowerCase()}>`);
+    return setter;
+  }
+
+  /**
+   * A select's value is its selected option's visible text, the text `fill`
+   * matches; '' when nothing is selected.
    * @param {Element} el
    * @returns {string | undefined}
    */
   function valueOf(el) {
     if (!isTextControl(el) || isSecret(el)) return undefined;
-    const value = 'value' in el && typeof el.value === 'string' ? el.value : '';
-    return value.length > MAX_VALUE_LENGTH ? `${value.slice(0, MAX_VALUE_LENGTH)}…` : value;
+    if (isSelect(el)) return cut(el.selectedOptions[0]?.text.trim() ?? '');
+    return cut('value' in el && typeof el.value === 'string' ? el.value : '');
   }
 
   // A form control is named by its <label>. A checkbox's `value` is no name
   // (it is "on" by default), and naming the notifications toggle "on" let the
   // model report it as already on without clicking it (the live e2e, M5 T5).
   // A text field's value is its content, reported as `value`, not its name;
-  // only a button-like input is named by its value (its caption). Past those,
-  // aria-labelledby's text, then the placeholder, then the title, so a field
-  // with only a placeholder isn't named ''.
+  // only a button-like input is named by its value (its caption). The order
+  // is the accessible-name spec's: aria-labelledby's text first, then
+  // aria-label, the <label>, the content or a button's caption, and last the
+  // placeholder, then the title, so a field with only a placeholder isn't
+  // named ''. Every source is cut to MAX_NAME_LENGTH (docs/code-review-notes.md,
+  // M5 re-review).
   /** @param {Element} el */
   function labelledByText(el) {
     const ids = (el.getAttribute('aria-labelledby') ?? '').split(/\s+/).filter(Boolean);
@@ -364,16 +509,16 @@
       BUTTON_INPUT_TYPES.has(inputType(el)) && 'value' in el && typeof el.value === 'string'
         ? el.value
         : '';
-    return (
+    const name =
+      labelledByText(el) ||
       el.getAttribute('aria-label') ||
-      labelText.slice(0, 60) ||
-      el.textContent?.trim().slice(0, 60) ||
+      labelText ||
+      el.textContent?.trim() ||
       value ||
-      labelledByText(el).slice(0, 60) ||
       el.getAttribute('placeholder') ||
       el.getAttribute('title') ||
-      ''
-    );
+      '';
+    return name.slice(0, MAX_NAME_LENGTH);
   }
 
   /**
@@ -407,6 +552,7 @@
       if (isCheckable(el)) node.checked = 'checked' in el && el.checked === true;
       const value = valueOf(el);
       if (value !== undefined) node.value = value;
+      if (isSelect(el)) node.options = optionTexts(el);
       return node;
     });
   }

@@ -11,6 +11,9 @@ export default defineConfig([
   { ignores: ['agent-client/dist/'] },
   {
     files: ['agent-client/**/*.{js,jsx}', 'sandbox/**/*.js', 'target-app/**/*.js'],
+    // Not a window script: its own block below (globals merge across blocks, so
+    // excluding it here is the only way to keep browser globals off it).
+    ignores: ['agent-client/public/capture-worklet.js'],
     extends: [js.configs.recommended],
     languageOptions: {
       ecmaVersion: 'latest',
@@ -42,6 +45,13 @@ export default defineConfig([
     // Classic scripts loaded with <script defer>, not modules.
     files: ['sandbox/**/*.js', 'target-app/**/*.js'],
     languageOptions: { sourceType: 'script' },
+  },
+  {
+    // Runs in the AudioWorkletGlobalScope (audioWorklet.addModule), not a
+    // window: its globals only, so a stray `window` or `document` fails lint.
+    files: ['agent-client/public/capture-worklet.js'],
+    extends: [js.configs.recommended],
+    languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: globals.audioWorklet },
   },
   {
     files: ['agent-client/vite.config.js', 'agent-client/eslint.config.js'],

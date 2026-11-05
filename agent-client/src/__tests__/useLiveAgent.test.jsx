@@ -24,6 +24,7 @@ vi.mock('../liveSession.js', () => ({
 }));
 
 vi.mock('../audioIO.js', () => ({
+  voiceSupportError: vi.fn(() => null),
   startCapture: vi.fn(() => {
     const n = fakes.captures.length;
     fakes.events.push(`startCapture#${n}`);
@@ -59,7 +60,7 @@ function fakeBridge() {
 function renderApp(bridge = fakeBridge()) {
   const utils = render(
     <StrictMode>
-      <AgentApp bridge={bridge} nonce="page-nonce" />
+      <AgentApp bridge={bridge} nonce="page-nonce" workletUrl="/agent-client/capture-worklet.js" />
     </StrictMode>,
   );
   return { bridge, ...utils };
@@ -98,6 +99,46 @@ describe('AgentApp + useLiveAgent', () => {
     renderApp();
     await click('Connect');
     expect(fakes.sessions[0].options.nonce).toBe('page-nonce');
+  });
+
+  it('hands the worklet URL from main.jsx to the mic capture', async () => {
+    const { startCapture } = await import('../audioIO.js');
+    renderApp();
+    await click('Connect');
+    expect(startCapture).toHaveBeenLastCalledWith(
+      expect.objectContaining({ workletUrl: '/agent-client/capture-worklet.js' }),
+    );
+  });
+
+  it('over plain http, says voice needs https and opens no session', async () => {
+    const { voiceSupportError } = await import('../audioIO.js');
+    voiceSupportError.mockReturnValueOnce(
+      Object.assign(new Error('insecure'), { name: 'InsecureContextError' }),
+    );
+    renderApp();
+    await click('Connect');
+
+    expect(fakes.sessions).toHaveLength(0);
+    expect(fakes.captures).toHaveLength(0);
+    expect(screen.getByRole('alert').textContent).toBe(
+      'Voice needs a secure connection (https). Open this page over https, or on localhost.',
+    );
+    // Still Connect and enabled: the same button, so focus stays on it.
+    expect(screen.getByRole('button', { name: 'Connect' }).disabled).toBe(false);
+  });
+
+  it('without AudioWorklet, names a browser that can capture voice', async () => {
+    const { voiceSupportError } = await import('../audioIO.js');
+    voiceSupportError.mockReturnValueOnce(
+      Object.assign(new Error('no worklet'), { name: 'AudioUnsupportedError' }),
+    );
+    renderApp();
+    await click('Connect');
+
+    expect(fakes.sessions).toHaveLength(0);
+    expect(screen.getByRole('alert').textContent).toBe(
+      "This browser can't capture voice. Use a current Chrome, Edge, Firefox or Safari.",
+    );
   });
 
   it('pressing Connect twice stops the first capture and closes the first player before the second capture starts', async () => {
@@ -202,7 +243,7 @@ describe('AgentApp + useLiveAgent', () => {
     expect(fakes.captures[0].stop).toHaveBeenCalled();
   });
 
-  it('on a fatal failure, offers Reload page instead of Retry', async () => {
+  it('on a fatal token failure, offers Reload page instead of Retry', async () => {
     const reload = vi.fn();
     vi.stubGlobal('location', { ...window.location, reload });
     renderApp();
@@ -210,16 +251,47 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('failed', {
       attempt: 0,
       maxAttempts: 6,
-      reason:
-        "The server isn't configured to connect. Contact the site owner, then reload this page.",
-      fatal: true,
+      reason: 'This page can no longer get a connection token. Reload the page to reconnect.',
+      fatal: 'token',
     });
 
-    expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    expect(screen.getByRole('alert').textContent).toMatch(/Reload the page/);
+    expect(screen.getByRole('status').textContent).toBe("Can't connect");
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await click('Reload page');
     expect(reload).toHaveBeenCalledTimes(1);
     expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(1);
+  });
+
+  // M6 T6 (M4 re-review): a reload can't fix a server with no key, so the card
+  // offers no Reload page; Try again asks the server again (it works once the
+  // owner has fixed the key, without losing the page).
+  it('on a fatal config failure, offers Try again (no Reload page), keeping focus on the button', async () => {
+    const reload = vi.fn();
+    vi.stubGlobal('location', { ...window.location, reload });
+    renderApp();
+    const button = screen.getByRole('button', { name: 'Connect' });
+    button.focus();
+    await click('Connect');
+    emitStatus('failed', {
+      attempt: 0,
+      maxAttempts: 6,
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+      fatal: 'config',
+    });
+
+    expect(screen.getByRole('alert').textContent).toMatch(/Contact the site owner/);
+    // Fatal: nothing was lost, the session never connected.
+    expect(screen.getByRole('status').textContent).toBe("Can't connect");
+    expect(screen.queryByRole('button', { name: 'Reload page' })).toBeNull();
+    expect(document.activeElement).toBe(button);
+    expect(button.textContent).toBe('Try again');
+    expect(button.disabled).toBe(false);
+
+    await click('Try again');
+    expect(reload).not.toHaveBeenCalled();
+    expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(2);
   });
 
   it('keeps focus on the primary button through connecting → reconnecting → failed', async () => {
@@ -262,6 +334,100 @@ describe('AgentApp + useLiveAgent', () => {
     expect(screen.getByRole('alert').textContent).toBe(
       'Microphone blocked — allow it in the address bar, then press Connect.',
     );
+  });
+
+  // I7: whatever stops the mic from starting, the agent can't hear the user,
+  // so the card never shows Live while deaf: the session ends, and the alert
+  // says why in the error's own words.
+  it.each([
+    [
+      'the worklet failing to load',
+      Object.assign(new Error("Unable to load a worklet's module."), { name: 'WorkletLoadError' }),
+      "Voice couldn't start. Reload the page, then press Connect.",
+    ],
+    [
+      'no microphone',
+      Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
+      'No microphone found. Connect one, then press Connect.',
+    ],
+    [
+      'the microphone busy',
+      Object.assign(new Error('Could not start audio source'), { name: 'NotReadableError' }),
+      'Microphone unavailable: Could not start audio source',
+    ],
+  ])('ends the session when capture fails with %s', async (_name, error, text) => {
+    const { startCapture } = await import('../audioIO.js');
+    const stop = vi.fn();
+    startCapture.mockImplementationOnce(({ onError }) => {
+      const ready = Promise.resolve().then(() => onError(error));
+      return { ready, stop };
+    });
+    renderApp();
+    await click('Connect');
+    const session = fakes.sessions.at(-1);
+    await act(async () => {});
+
+    expect(session.disconnect).toHaveBeenCalled();
+    expect(stop).toHaveBeenCalled();
+    emitStatus('closed');
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toBe(text);
+  });
+
+  // A screen reader announces a role="alert" when it is inserted: the same
+  // alert after Try again must be a new node, or the second failure is silent.
+  it('re-announces an identical failure after Try again: the alert is a new node', async () => {
+    renderApp();
+    await click('Connect');
+    const failed = {
+      attempt: 0,
+      maxAttempts: 6,
+      reason:
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+      fatal: 'config',
+    };
+    emitStatus('failed', failed);
+    const first = screen.getByRole('alert');
+
+    await click('Try again');
+    emitStatus('failed', failed);
+
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+    expect(first.isConnected).toBe(false);
+  });
+
+  it('re-announces an identical microphone error after Connect: the alert is a new node', async () => {
+    const { startCapture } = await import('../audioIO.js');
+    const blocked = () =>
+      startCapture.mockImplementationOnce(({ onError }) => ({
+        ready: Promise.resolve().then(() =>
+          onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
+        ),
+        stop: vi.fn(),
+      }));
+    blocked();
+    renderApp();
+    await click('Connect');
+    await act(async () => {});
+    const first = screen.getByRole('alert');
+
+    blocked();
+    await click('Connect');
+    await act(async () => {});
+
+    const second = screen.getByRole('alert');
+    expect(second.textContent).toBe(first.textContent);
+    expect(second).not.toBe(first);
+  });
+
+  it('is a landmark named "AI presenter", so its transcript is inside a region', async () => {
+    renderApp();
+    await click('Connect');
+    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    const card = screen.getByRole('complementary', { name: 'AI presenter' });
+    expect(card.querySelector('ul').textContent).toBe('Hello!');
   });
 
   it('renders the transcript list only once it has entries', async () => {

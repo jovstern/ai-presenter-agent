@@ -160,13 +160,18 @@ needed; this is intentionally the simplest piece.
 ### 5.3 DOM grounding snapshot
 
 - Flattened list of interactive/meaningful nodes only: tag, name, the `data-testid`-based
-  selector, visibility/enabled flags. A form control is named by its `aria-label` or `<label>`
-  (never by a checkbox's `value`, which is "on"), falling back to its text, a button-like
-  input's value, `aria-labelledby`'s text, its placeholder and its title; a checkbox or radio
+  selector, visibility/enabled flags. A node is named in the accessible-name order:
+  `aria-labelledby`'s text, its `aria-label`, its `<label>` (never a checkbox's `value`, which is
+  "on"), its text, a button-like input's value, its placeholder and its title, every source cut
+  to 60 characters; a checkbox or radio
   carries `checked`; a text input, textarea or select carries its `value` (never a hidden
   input's, a password's or a card-number / one-time-code field's; cut to 60 characters), so a
-  `fill` shows up in the next snapshot. `fill` itself accepts only those text controls and
-  refuses a button, checkbox, hidden or other non-text input.
+  `fill` shows up in the next snapshot. A select's `value` is its selected option's visible
+  text, and it lists `options` (the first 20 options' visible text, each cut to 60 characters).
+  `fill` itself accepts only those text controls and refuses a button, checkbox, hidden or other
+  non-text input; it uses the element type's native value setter and fires `input` + `change`,
+  and on a select it matches an option's visible text (trimmed, case-insensitive), then its
+  value — no match fails, naming the options, and changes nothing.
 - Size-capped (top N elements) so a larger page can't blow the model's context.
 - The bridge (`sandbox/bridge.js`) always computes and reports the full node set *and* a diff
   (changed/removed) against its last snapshot — cheap, same-process port message regardless of page
@@ -187,7 +192,8 @@ events go directly from the browser to Gemini Live.
 ### 5.5 Agent-client
 
 - Connects to Gemini Live with `tools` = function declarations for `click`, `navigate` (enum of
-  known routes — closes v2 goal #4 directly), `scroll`, `fill`.
+  known routes, the keys of `target-app/routes.json` — closes v2 goal #4 directly), `scroll`,
+  `fill`.
 - On a `toolCall` message: dispatch to the bridge over the private channel, await the result
   correlated by id (4 s timeout → failure),
   call `session.sendToolResponse()` with it. This action-result loop is the primary grounding
@@ -196,8 +202,11 @@ events go directly from the browser to Gemini Live.
   field (a keyframe when several were held), instead of going out as a separate turn: a
   navigate's keyframe sent on its own landed between the call and its response, and the model
   ended its turn without the new page's selectors (M5 T5).
-- Loop guard: caps consecutive identical action/utterance signatures; past the cap, injects a
-  corrective context turn instead of dispatching again (v2 goal #5).
+- Loop guard (`loopGuard.js`): an action that is the 4th identical call in a row, or completes
+  an A-B-A-B or A-B-C-A-B-C cycle, is not dispatched and is answered with a failure telling the
+  model to try something else; an agent sentence said in 3 of the last 5 turns gets one
+  corrective context turn per episode ("You are repeating yourself…") (v2 goal #5,
+  `docs/code-review-notes.md` M6).
 - Reconnect: real backoff (immediate, 1s, 3s, 7s, 15s, 30s — 6 attempts) around `ai.live.connect`;
   on final failure, shows a visible failed state with a manual retry button (v2 goal #6).
 - Volume meter: volume value lives in a ref, bars update imperatively via `requestAnimationFrame`

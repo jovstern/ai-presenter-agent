@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import pino from 'pino';
 import request from 'supertest';
-import { createApp } from '../app.js';
+import ROUTES from '../../target-app/routes.json' with { type: 'json' };
+import { createApp, errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
 
 const HOST = 'agent.test';
 const ORIGIN = `http://${HOST}`;
@@ -309,14 +310,32 @@ describe('the sandbox page', () => {
     expect(await pageNonce(app)).not.toBe(await pageNonce(app));
   });
 
-  it('ships no inline script', async () => {
+  // The one data block, #ds-routes, is JSON: the browser never runs it, so
+  // script-src 'self' still holds. Every other script is a file.
+  it('ships no inline script but the #ds-routes JSON data block', async () => {
     const { app } = setup();
     const res = await request(app).get('/').set('Host', HOST);
     const scripts = res.text.match(/<script\b[^>]*>/g) ?? [];
 
     expect(scripts.length).toBeGreaterThan(0);
-    for (const tag of scripts) expect(tag).toMatch(/\bsrc="/);
+    const inline = scripts.filter((tag) => !/\bsrc="/.test(tag));
+    expect(inline).toEqual(['<script type="application/json" id="ds-routes">']);
   });
+
+  it.each(['/', '/sandbox/', '/sandbox/index.html'])(
+    '%s carries target-app/routes.json in its #ds-routes block (code-review-notes M1)',
+    async (path) => {
+      const { app } = setup();
+      const res = await request(app).get(path).set('Host', HOST);
+      const block = /<script type="application\/json" id="ds-routes">([\s\S]*?)<\/script>/.exec(
+        res.text,
+      );
+
+      expect(block).not.toBeNull();
+      expect(JSON.parse(block[1])).toEqual(ROUTES);
+      expect(res.text).not.toContain('%%DS_ROUTES%%');
+    },
+  );
 
   it.each(['/target-app/index.html', '/target-app/settings.html'])(
     '%s ships no inline script',
@@ -329,6 +348,33 @@ describe('the sandbox page', () => {
       for (const tag of scripts) expect(tag).toMatch(/\bsrc="/);
     },
   );
+});
+
+describe('jsonForScriptBlock', () => {
+  it('escapes every < so a value cannot close the script tag or open a comment', () => {
+    const value = { evil: '</script><script>alert(1)</script><!--' };
+    const text = jsonForScriptBlock(value);
+
+    expect(text).not.toContain('<');
+    expect(JSON.parse(text)).toEqual(value);
+  });
+});
+
+describe('errorPage', () => {
+  it('escapes every argument, so a dynamic caller cannot inject markup', () => {
+    const html = errorPage('<script>a</script>', 'Tom & "Jerry" <b>', "<img src=x onerror='x'>");
+
+    expect(html).not.toMatch(/<script>|<b>|<img/);
+    expect(html).toContain('<title>&lt;script&gt;a&lt;/script&gt;</title>');
+    expect(html).toContain('<p>Tom &amp; &quot;Jerry&quot; &lt;b&gt;</p>');
+    expect(html).toContain('&lt;img src=x onerror=&#39;x&#39;&gt;</a>');
+  });
+
+  it('leaves plain text as it is', () => {
+    expect(escapeHtml('Wait a minute, then reload this page.')).toBe(
+      'Wait a minute, then reload this page.',
+    );
+  });
 });
 
 describe('headers', () => {
@@ -347,6 +393,7 @@ describe('headers', () => {
     const csp = cspOf(res);
 
     expect(csp['default-src']).toBe("'self'");
+    // Covers the capture worklet too (a same-origin file): no blob:, no inline.
     expect(csp['script-src']).toBe("'self'");
     expect(csp['style-src']).toBe("'self' 'unsafe-inline'");
     expect(csp['connect-src']).toBe(

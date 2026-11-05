@@ -27,5 +27,8 @@ prompt() {
 }
 
 prompt greeting '[[slnc 4000]] Hi! [[slnc 60000]]'
-prompt task '[[slnc 6000]] Increment the counter twice, then go to Settings, turn on notifications and save. [[slnc 60000]]'
-prompt followup '[[slnc 12000]] Which page are we on right now? [[slnc 60000]]'
+# Six steps since M6 T5: a fill (the Plan select) so its round trip is measured.
+prompt task '[[slnc 6000]] Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save. [[slnc 60000]]'
+# The code name is in the knowledge file live.spec.js seeds: answering it after
+# the forced drop shows whether the resumed session still has its knowledge.
+prompt followup '[[slnc 12000]] Which page are we on right now, and what is the code name of this demo? [[slnc 60000]]'

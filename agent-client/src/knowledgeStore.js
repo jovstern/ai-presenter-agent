@@ -46,6 +46,15 @@ function writeFiles(files) {
   window.dispatchEvent(new Event(CHANGE_EVENT));
 }
 
+// A file's id only has to be unique in this list. Not crypto.randomUUID(),
+// which exists only in a secure context, so on plain http adding a file threw
+// (docs/code-review-notes.md L6); getRandomValues works everywhere.
+function newId() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
+
 /** @param {string} name */
 function hasAcceptedExtension(name) {
   const lower = name.toLowerCase();
@@ -101,7 +110,7 @@ export async function addFile(file) {
 
   const text = await file.text();
   const entry = {
-    id: crypto.randomUUID(),
+    id: newId(),
     name: file.name,
     size: file.size,
     addedAt: Date.now(),

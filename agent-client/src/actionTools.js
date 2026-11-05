@@ -1,13 +1,10 @@
 /** @import { FunctionDeclaration } from '@google/genai/web' */
 /** @import { ActionName } from './bridgeProtocol.js' */
 
-// Mirrors sandbox/bridge.js's KNOWN_ROUTES. The two can't literally share an
-// import (bridge.js is a plain unbundled script, this is bundled separately)
-// — kept as a hand-duplicated pair rather than a shared module, matching the
-// tradeoff already flagged as open in docs/code-review-notes.md M1. If they
-// ever drift, `navigate` calls for the missing route fail closed (bridge.js
-// rejects unknown routes), not open.
-export const KNOWN_ROUTES = ['home', 'settings'];
+// The one route list (docs/code-review-notes.md M1): route name -> page path.
+// The server templates the same file into the sandbox page for bridge.js, so
+// the enum the model sees and the routes the bridge accepts can't drift.
+import ROUTES from '../../target-app/routes.json' with { type: 'json' };
 
 /** @typedef {{ name: ActionName } & FunctionDeclaration} ActionDeclaration */
 
@@ -40,12 +37,18 @@ export const TOOL_DECLARATIONS = [
   },
   {
     name: 'fill',
-    description: 'Type a value into a text input, identified by its data-testid selector.',
+    description:
+      'Fill a form field, identified by its data-testid selector: type text into a text input ' +
+      'or textarea, or choose an option of a select by its visible text (as listed in the ' +
+      "snapshot's `options`). Fails, naming the options, when a select has no such option.",
     parametersJsonSchema: {
       type: 'object',
       properties: {
-        selector: { type: 'string', description: 'The data-testid of the input to fill.' },
-        value: { type: 'string', description: 'The text to type into the input.' },
+        selector: { type: 'string', description: 'The data-testid of the field to fill.' },
+        value: {
+          type: 'string',
+          description: "The text to type, or the visible text of the select's option to choose.",
+        },
       },
       required: ['selector', 'value'],
     },
@@ -56,7 +59,11 @@ export const TOOL_DECLARATIONS = [
     parametersJsonSchema: {
       type: 'object',
       properties: {
-        route: { type: 'string', enum: KNOWN_ROUTES, description: 'The route to navigate to.' },
+        route: {
+          type: 'string',
+          enum: Object.keys(ROUTES),
+          description: 'The route to navigate to.',
+        },
       },
       required: ['route'],
     },

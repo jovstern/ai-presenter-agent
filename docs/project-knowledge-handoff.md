@@ -139,7 +139,8 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 
 ```
 docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/
-target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids
+target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
+                 routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
 agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
 server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)
@@ -155,8 +156,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `liveSession.js` — the Live socket: token fetch, connect, one-retry-per-drop backoff,
   resumption, serialized tool dispatch, knowledge and snapshot injection. The riskiest file.
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
-  playback, barge-in); owns teardown.
-- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Reload page button, status line, alert
+  playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
+  `agent-client/public/capture-worklet.js` (§4).
+- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
   on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`.
@@ -204,6 +206,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   `session.sendRealtimeInput`, `session.sendToolResponse`, the `toolCall.functionCalls` shape) was
   checked against Google's current docs (`ai.google.dev/gemini-api/docs/live-api/*`) via live web
   search/fetch during this build, not recalled from training data alone.
+  M6 T4 re-checked it against the pinned `@google/genai` 2.32.0 (exact in both packages): the
+  `.d.ts` types, the runtime, and Google's ephemeral-token docs. The token is locked to the
+  model only (`liveConnectConstraints: { model }` plus `lockAdditionalFields: []`, ADR 0004);
+  without the empty `lockAdditionalFields`, a real run showed Gemini dropping the client's tools
+  and system instruction.
 - **The live loop was run by hand in a real browser with a real key (PR #9, M4).** A multi-step
   task across a navigation (increment the counter → go to Settings → toggle notifications → save)
   completed, with the agent reporting DOM state it could only have learned from a live snapshot.
@@ -231,17 +238,27 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   are used, or at once on a 4xx token response (other than 429), which means the page's nonce is
   no longer accepted: the reason tells the user to reload. Every server error has one shape,
   `{ error: { code, message } }`, and a 500 with the code `not_configured` also fails at once,
-  with a "contact the site owner, then reload" reason: the server sends it when it has no
+  with a "contact the site owner, then try again (you may need to reload the page)" reason —
+  fixing the key often restarts the server, which wipes its in-memory nonces, and then Try again
+  comes back a rejected token and turns into Reload page. The server sends it when it has no
   `GEMINI_API_KEY` and when Google rejects the key it has (an upstream 400/401/403 from the
-  mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. Both
-  fatal cases carry `fatal: true`, and the card offers "Reload page" instead of Retry.
-  The status turns `open` and the attempt count resets on the first server message of a session
-  (normally `setupComplete`), not when the socket opens, so a socket that opens and closes
-  without the server answering never shows "Live" and keeps climbing the backoff instead of
-  retrying at 0 ms. A resumed attempt that closes before the server answers drops its handle, so
-  the next attempt starts a fresh session instead of retrying a rejected handle, except when the
-  close is code 1008 with "already connected": Gemini still holds the dropped client, the handle
-  is fine, and the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
+  mint). Any other mint failure is a 502 `upstream_error`, which is retried like any 5xx. The
+  fatal cases carry their kind (M6 T6): `fatal: 'token'` (a rejected nonce) makes the card offer
+  "Reload page", which brings a fresh nonce; `fatal: 'config'` makes it offer "Try again", which
+  asks the server again, since a reload can't fix a missing key.
+  The status turns `open` on the first server message of a session (normally `setupComplete`),
+  not when the socket opens, so a socket that opens and closes without the server answering
+  never shows "Live". The attempt count resets later still (M6 T6): once the session has stayed
+  open 5 s (`STABLE_SESSION_MS`) or the server has sent real content (`serverContent` or a
+  `toolCall`), so a server that completes setup and then closes every session keeps climbing the
+  backoff instead of retrying at 0 ms. `live.connect` resolves only on `setupComplete`, so an
+  attempt the server never answers fails after 10 s (`SETUP_TIMEOUT_MS`) and is retried; the
+  abandoned socket is closed if it ever lands. A resumed attempt that the server closes before
+  setup completes drops its handle, so the next attempt starts a fresh session instead of
+  retrying a rejected handle; a network failure (a socket error, a 1006 close with no close frame,
+  1001/1012–1014, `live.connect` rejecting, the setup timeout) keeps it. So does a close of code
+  1008 with "already connected": Gemini still holds the dropped client, the handle is fine, and
+  the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
   Connect/Retry starts a fresh budget and resets the loop guard. Unit-tested; not yet exercised
   against a real network drop in this form.
 - **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since
@@ -256,30 +273,64 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (`liveSession.js` stores it in `resumeHandle`), and every reconnect passes that stored handle
   back if one exists, so a 15-minute cutoff is handled by the same reconnect path as a real
   network drop rather than being a separate failure mode. The unit tests check that the handle is
-  passed and that a resumed session isn't greeted again. **Not verified against a live session**:
-  the exact field names (`sessionResumptionUpdate`,
-  `.resumable`, `.newHandle`) are inferred from the SDK's consistent camelCase convention
-  elsewhere (`serverContent`, `toolCall.functionCalls`), not confirmed from an actual received
-  message. If resumption silently doesn't kick in, check these names first.
-- **`sendKnowledgeContext` and the DOM-snapshot keyframe are both resent on every `connect()`,
-  including a resumed reconnect — deliberately, not an oversight.** A (re)connect can't fully
-  trust that a resumed session's turn history is intact, so both resend fresh grounding rather
-  than assuming the model still remembers. The one acknowledged cost: on a *successfully* resumed
-  session (where the model's context genuinely did survive), this adds a small amount of
-  redundant context. Worth revisiting only if that turns out to matter in practice.
-- **Mic capture uses `ScriptProcessorNode`**, which is a deprecated Web Audio API. Chosen
-  deliberately for simplicity (an `AudioWorklet` is the modern, non-deprecated replacement but is
-  meaningfully more code — a separate worklet module, message-passing to the main thread). Fine
-  for a local demo; worth swapping before anything resembling production use.
+  passed and that a resumed session isn't greeted again. The field names
+  (`sessionResumptionUpdate`, `.resumable`, `.newHandle`), once inferred, were **verified against
+  `@google/genai` v2.32.0** (M6 T4): its `LiveServerMessage` types and runtime, plus real runs in
+  which the reconnect resumed (`resumed: true` in `.metrics/live.json`) under the model-locked
+  token (ADR 0004). The same check covered every other field `liveSession.js` reads
+  (`message.data`, transcriptions, `interrupted`, `turnComplete`, `toolCall.functionCalls`,
+  `setupComplete`) and the three send signatures (code-review-notes M8, L10).
+- **A resumed reconnect resends the DOM keyframe but not the knowledge context — reversed in
+  M6 T5 (code-review-notes M9).** Until then both were resent on every (re)connect, "deliberately":
+  a reconnect couldn't trust that a resumed session's history was intact. The live e2e now
+  measures it: the reconnect scenario seeds a 386 B knowledge file naming a code name, drops the
+  socket and asks for the code name afterwards. With the resend (5 runs) and without it (10 runs)
+  the resumed session named it every time, so resumption does carry the knowledge, and the resend
+  only stacked another copy of it (up to `MAX_TOTAL_BYTES`, 4 MB) into the context on every drop.
+  A fresh session (no handle, or a handle the server rejected) still gets it, and so does a
+  resumed one when the store changed while no session was up. The keyframe (777–855 B on the
+  target app) is still forced on every reconnect: the page can change during a drop.
+- **Reconnect timing.** A resume refused with 1008 "already connected" is retried after 400 ms ×
+  the attempt (capped by the usual backoff) instead of the generic 1 s, since M6 T5
+  (`STILL_ATTACHED_RETRY_MS`); numbers in `docs/metrics/m06.md`.
+- **Mic capture runs in an AudioWorklet** (M6 T3; it replaced the deprecated
+  `ScriptProcessorNode`, see §4). `agent-client/public/capture-worklet.js` is copied into `dist/`
+  by Vite and loaded with `audioWorklet.addModule('/agent-client/capture-worklet.js')` — the URL
+  is resolved by `main.jsx` against its own script tag — so the CSP's `script-src 'self'` covers
+  it with no `blob:`. The AudioContext runs at the device rate; the worklet low-passes (63-tap
+  Blackman windowed sinc at 7 kHz) and resamples to 16 kHz by linear interpolation, converts
+  to Int16 and posts 80 ms frames (1280 samples) with the buffer transferred. Verified:
+  `captureWorklet.test.js` (frame size, 16000 samples/s from 48 and 44.1 kHz, a 12 kHz tone
+  suppressed below −40 dB), `e2e/audio.spec.js` (Chromium's fake mic at 48 kHz through the real
+  worklet under the real CSP: 2560-byte `audio/pcm;rate=16000` frames at ~12.5/s), and one
+  `npm run e2e:live` run on 2026-11-02 in which all three live scenarios passed, the spoken
+  five-step task included — so Gemini heard the worklet's audio. `startCapture` resumes the
+  context after `addModule` (M6 fix wave): it is created after awaits, outside the click's user
+  activation, and Safari starts such a context suspended. Not verified: Firefox and Safari (the
+  e2e is Chromium only). Manual checks for them, with a real mic:
+  - **Safari / WebKit:** the capture node has **0 outputs** (a sink), and WebKit has been known
+    not to pull a node that isn't connected toward the destination, so `process()` might never
+    run. Check that a user transcript line appears after speaking; if not, give the node one
+    output and connect it through a muted `GainNode` to the destination.
+  - **Firefox:** the AudioContext runs at the device rate on purpose (Firefox refuses to connect
+    a mic to a context at another rate). Check on a 44.1 kHz device (many USB headsets) and a
+    48 kHz one that the agent hears you and the frames are 2560 bytes at ~12.5/s (DevTools →
+    Network → WS).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
-- **DOM snapshot payload size in practice is untested** — the size cap (`MAX_SNAPSHOT_NODES = 30`
-  in `bridge.js`) is a guess, not tuned against a real page or a real model's context behavior.
-  (The keyframe-vs-delta *decision* logic itself, in `domSnapshotContext.js`, is unit-tested — it's
-  specifically the real-world tuning of the cap and the 0.6 full-refresh ratio that's unverified.)
+- **DOM snapshot payload size is measured on the mock target app only** (M6 T5, the `ds:keyframe`
+  mark): 8 nodes per page, keyframes 777–855 B, about 100 B a node, so the 30-node cap
+  (`MAX_SNAPSHOT_NODES` in `bridge.js`) comes to roughly 3–3.5 kB, inside the 4 kB budget. The cap
+  and the 0.6 full-refresh ratio were kept, but these pages never reach the cap or a large delta,
+  so neither is stressed. A real, larger page is the test that's still missing.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
-  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and `crypto.randomUUID`
-  need a secure context — fine on `localhost`, HTTPS anywhere else.
+  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and AudioWorklet need a
+  secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Connect now stops
+  before opening a session and the card says "Voice needs a secure connection (https)…"
+  (`voiceSupportError()` in `audioIO.js`; code-review-notes L6). Of the two `crypto.randomUUID`
+  callers, the knowledge store's file ids no longer use it (they use `getRandomValues`), and the
+  bridge channel's action ids only run inside a session, which can't start without a secure
+  context.
 
 ## 4. Decisions log (fast "why did we do X" reference)
 
@@ -304,13 +355,23 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   model not to do it.
 - **Ephemeral Gemini Live token, minted server-side, single job for the whole server** — mirrors
   the original system's own `token`/`sessionId` pattern almost exactly, just scoped to Gemini Live
-  specifically instead of a bespoke backend.
+  specifically instead of a bespoke backend. Since M6 T4 the token is locked to the model only
+  ([ADR 0004](./adr/0004-live-token-constraints.md)).
 - **Volume meter bypasses React state entirely** (ref + `requestAnimationFrame`) — the "go
   further" version of the original's isolate-and-memoize fix, backed by a test proving the
   isolation actually holds. Built in the first v2 implementation, lost in the from-scratch
   rebuild; the volume orb and `renderIsolation.test.jsx` return in M7 (#11).
-- **`ScriptProcessorNode` over `AudioWorklet`** — simpler, deprecated-but-functional, a known
-  tradeoff (see §3.3), not an oversight.
+- **`AudioWorklet` over `ScriptProcessorNode` — reversed in M6 T3** (2026-11-02). The first
+  build chose `ScriptProcessorNode` for simplicity: deprecated but functional, one file, no
+  module to serve. Reversed because the deprecated node runs its callback on the main thread
+  (capture glitches whenever React or the snapshot work is busy, and its resampling there was
+  linear interpolation with no low-pass, so everything above 8 kHz aliased into the voice band),
+  and because the "more code" cost turned out small once the CSP existed to say where the
+  worklet must come from: a same-origin file under `script-src 'self'`, not a `blob:` URL. The
+  AudioContext deliberately runs at the device rate rather than 16 kHz: Firefox has long
+  refused to connect a mic stream to a context at a different rate ("Connecting AudioNodes from
+  AudioContexts with different sample-rate is currently not supported"; not re-checked against
+  the current release), so the worklet resamples itself, one path for every browser. See §3.3 for what is verified.
 - **Session resumption wired up proactively, before ever hitting the 15-minute session cap in
   practice** — discovered the limit by reading the docs, not by observing a real session die at
   minute 15. Chose to fix it structurally (reuse the existing reconnect path) rather than wait and
@@ -340,6 +401,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Host on Render** (2026-10-28) — a web service from a `render.yaml` blueprint: automatic HTTPS
   (the mic needs a secure context), the key as a dashboard secret, PR previews; free-tier cold
   starts accepted. Deploy is M8. See [ADR 0003](./adr/0003-hosting-on-render.md).
+
+- **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
+  Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the
+  4 kB budget), `FULL_REFRESH_RATIO` 0.6, and the loop-guard thresholds (no trip in 14 runs).
+  Changed: a 1008 "already connected" refusal is retried after 400 ms × the attempt instead of
+  the generic 1 s. The worst recovery went from 3.14 s to 2.89 s, and two attempts now take
+  2.5–2.9 s instead of 2.8–3.4 s. A resumed session no longer gets the knowledge again (M9, §3.3).
+  **Tried and reverted:** a `next` line in a successful navigate's tool result ("the page has
+  loaded … carry on with the next step"), meant for the stall after navigate. The task passed
+  0 of 3 with it, against 6 of 6 for the code just before it. The model still ended its turn
+  after the navigate, so the change was reverted. The task path is now the baseline's, and it
+  passed 8 of 10 after the other changes. Its misses were a stall after `fill` and a prompt that
+  the voice activity detection split in two.
 
 ## 5. Future planning (not yet built — read before starting on these)
 
@@ -387,10 +461,12 @@ Decisions actually made (the open questions from the plan, resolved):
 `@radix-ui/react-dialog` powers the knowledge modal (§5.1); it is the only Radix package in
 `agent-client/package.json`. There is no toast on this branch. Connection status (v1 gap #6) is
 shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
-/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost), one primary button whose
+/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost, or Can't connect for a
+fatal failure), one primary button whose
 job follows the status and is never disabled (Connect; Cancel while connecting; Disconnect while
-live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, or Reload
-page when the failure is fatal), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
+live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, Reload
+page when the page's token is rejected, or Try again when the server isn't configured — a reload
+can't fix that, M6 T6), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
 the page to reconnect" after a rejected token). A blocked microphone is a `role="alert"` too. The Radix toast for the failed state arrives with the designed card in M7
 (#11).
 

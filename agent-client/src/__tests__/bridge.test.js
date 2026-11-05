@@ -10,13 +10,22 @@ const BRIDGE_SOURCE = readFileSync(
   path.resolve(import.meta.dirname, '../../../sandbox/bridge.js'),
   'utf8',
 );
+// The one route list: the server templates this file into the sandbox page's
+// #ds-routes data block, which is what the bridge reads.
+const ROUTES_JSON = readFileSync(
+  path.resolve(import.meta.dirname, '../../../target-app/routes.json'),
+  'utf8',
+);
+const ROUTES = JSON.parse(ROUTES_JSON);
 
 let frame;
 let agentPort;
 let openPorts = [];
 
-function stubFrame() {
-  document.body.innerHTML = '<iframe id="target-app-frame"></iframe>';
+function stubFrame(
+  routesBlock = `<script type="application/json" id="ds-routes">${ROUTES_JSON}</script>`,
+) {
+  document.body.innerHTML = `<iframe id="target-app-frame"></iframe>${routesBlock}`;
   const iframe = document.getElementById('target-app-frame');
   const state = {
     doc: document.implementation.createHTMLDocument(''),
@@ -29,6 +38,10 @@ function stubFrame() {
     get: () => ({
       location: { pathname: state.path },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
+      // The frame's realm: its documents are this jsdom window's.
+      HTMLInputElement: window.HTMLInputElement,
+      HTMLTextAreaElement: window.HTMLTextAreaElement,
+      HTMLSelectElement: window.HTMLSelectElement,
     }),
   });
   Object.defineProperty(iframe, 'src', {
@@ -83,6 +96,47 @@ afterEach(() => {
   vi.restoreAllMocks();
   openPorts.forEach((port) => port.close());
   openPorts = [];
+});
+
+describe('sandbox/bridge.js routes', () => {
+  it.each(Object.entries(ROUTES))(
+    'navigates "%s" to %s, from the #ds-routes block',
+    async (route, routePath) => {
+      const srcSet = frame.nextSrcSet();
+      const result = nextMessage(agentPort, 'action-result');
+      agentPort.postMessage({ type: 'action', id: 'r1', action: 'navigate', args: [route] });
+
+      expect(await srcSet).toBe(routePath);
+      frame.load(routePath);
+      expect(await result).toEqual({ type: 'action-result', id: 'r1', success: true });
+    },
+  );
+
+  it.each(['admin', 'toString', '__proto__'])('rejects the unknown route "%s"', async (route) => {
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id: 'r2', action: 'navigate', args: [route] });
+
+    expect(await result).toEqual({
+      type: 'action-result',
+      id: 'r2',
+      success: false,
+      error: `Unknown route "${route}"`,
+    });
+  });
+
+  it.each([
+    ['missing', ''],
+    ['not JSON', '<script type="application/json" id="ds-routes">{home:</script>'],
+    ['empty', '<script type="application/json" id="ds-routes">{}</script>'],
+    ['an array', '<script type="application/json" id="ds-routes">["home"]</script>'],
+    [
+      'a non-path value',
+      '<script type="application/json" id="ds-routes">{"home":"javascript:alert(1)"}</script>',
+    ],
+  ])('fails loudly at load when the #ds-routes block is %s', (_name, block) => {
+    stubFrame(block);
+    expect(() => new Function(BRIDGE_SOURCE)()).toThrow(/bridge\.js: .*ds-routes/);
+  });
 });
 
 describe('sandbox/bridge.js navigate', () => {
@@ -188,11 +242,6 @@ describe('sandbox/bridge.js fill', () => {
   it.each([
     ['a textarea', '<textarea data-testid="target"></textarea>', 'Ada'],
     ['an email input', '<input data-testid="target" type="email" />', 'ada@example.com'],
-    [
-      'a select',
-      '<select data-testid="target"><option>Bob</option><option>Ada</option></select>',
-      'Ada',
-    ],
   ])('fills %s', async (_name, html, value) => {
     frame.doc.body.innerHTML = html;
     const result = nextMessage(agentPort, 'action-result');
@@ -200,6 +249,231 @@ describe('sandbox/bridge.js fill', () => {
 
     expect(await result).toMatchObject({ id: 'f5', success: true });
     expect(frame.doc.querySelector('[data-testid="target"]').value).toBe(value);
+  });
+
+  const PLAN = `<select data-testid="plan">
+      <option value="free">Free plan</option>
+      <option value="pro">Pro plan</option>
+      <option value="team">Team plan</option>
+    </select>`;
+
+  /** Sends one fill and resolves with its reply. */
+  function fill(id, selector, value) {
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
+    return result;
+  }
+
+  it.each([
+    ['its visible text', 'Pro plan'],
+    ['its text, ignoring case and surrounding space', '  pRO PLAN '],
+    ['its value', 'pro'],
+  ])('selects an option by %s', async (_name, value) => {
+    frame.doc.body.innerHTML = PLAN;
+
+    expect(await fill('f7', 'plan', value)).toEqual({
+      type: 'action-result',
+      id: 'f7',
+      success: true,
+    });
+    expect(frame.doc.querySelector('select').value).toBe('pro');
+  });
+
+  it('prefers an option whose text matches over one whose value does', async () => {
+    frame.doc.body.innerHTML = `<select data-testid="plan">
+      <option value="b">a</option>
+      <option value="a">b</option>
+    </select>`;
+
+    expect(await fill('f8', 'plan', 'a')).toMatchObject({ success: true });
+    expect(frame.doc.querySelector('select').value).toBe('b');
+  });
+
+  it('fails, naming the options, and leaves the selection alone when no option matches', async () => {
+    frame.doc.body.innerHTML = PLAN;
+    const select = frame.doc.querySelector('select');
+    select.value = 'team';
+    const events = vi.fn();
+    select.addEventListener('input', events);
+    select.addEventListener('change', events);
+
+    expect(await fill('f9', 'plan', 'Enterprise')).toEqual({
+      type: 'action-result',
+      id: 'f9',
+      success: false,
+      error:
+        'data-testid="plan" has no option "Enterprise"; options: Free plan, Pro plan, Team plan',
+    });
+    expect(select.value).toBe('team');
+    expect(events).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an input', '<input data-testid="target" />', 'Ada'],
+    ['a textarea', '<textarea data-testid="target"></textarea>', 'Ada'],
+    ['a select', PLAN.replace('data-testid="plan"', 'data-testid="target"'), 'Team plan'],
+  ])('fires bubbling input and change events on %s', async (_name, html, value) => {
+    frame.doc.body.innerHTML = html;
+    const seen = [];
+    const record = (event) => seen.push([event.type, event.bubbles, event.target.value]);
+    frame.doc.body.addEventListener('input', record);
+    frame.doc.body.addEventListener('change', record);
+
+    expect(await fill('f10', 'target', value)).toMatchObject({ success: true });
+    const expected = frame.doc.querySelector('[data-testid="target"]').value;
+    expect(seen).toEqual([
+      ['input', true, expected],
+      ['change', true, expected],
+    ]);
+  });
+
+  // A framework's controlled input (React) tracks the value through the
+  // element's own `value` property; only the prototype's native setter gets
+  // past that, so the bridge must not assign through the instance.
+  it.each([
+    ['an input', '<input data-testid="target" />', 'HTMLInputElement', 'Ada', 'Ada'],
+    [
+      'a textarea',
+      '<textarea data-testid="target"></textarea>',
+      'HTMLTextAreaElement',
+      'Ada',
+      'Ada',
+    ],
+  ])(
+    'sets %s through its prototype’s native value setter',
+    async (_name, html, type, value, set) => {
+      frame.doc.body.innerHTML = html;
+      const target = frame.doc.querySelector('[data-testid="target"]');
+      const instanceSetter = vi.fn();
+      Object.defineProperty(target, 'value', {
+        configurable: true,
+        get: () => '',
+        set: instanceSetter,
+      });
+      const { prototype } = window[type];
+      const native = Object.getOwnPropertyDescriptor(prototype, 'value');
+      const nativeSetter = vi.fn(function (v) {
+        native.set.call(this, v);
+      });
+      Object.defineProperty(prototype, 'value', { ...native, set: nativeSetter });
+      try {
+        expect(await fill('f11', 'target', value)).toMatchObject({ success: true });
+        expect(instanceSetter).not.toHaveBeenCalled();
+        expect(nativeSetter).toHaveBeenCalledWith(set);
+      } finally {
+        Object.defineProperty(prototype, 'value', native);
+      }
+    },
+  );
+});
+
+describe('sandbox/bridge.js fill refuses what a user could not do', () => {
+  function fill(id, selector, value) {
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
+    return result;
+  }
+
+  it.each([
+    ['a disabled input', '<input data-testid="target" disabled value="old" />', 'is disabled'],
+    [
+      'an input in a disabled fieldset',
+      '<fieldset disabled><input data-testid="target" value="old" /></fieldset>',
+      'is disabled',
+    ],
+    ['a read-only input', '<input data-testid="target" readonly value="old" />', 'is read-only'],
+    [
+      'a read-only textarea',
+      '<textarea data-testid="target" readonly>old</textarea>',
+      'is read-only',
+    ],
+  ])('refuses %s and leaves it alone', async (_name, html, why) => {
+    frame.doc.body.innerHTML = html;
+    const events = vi.fn();
+    frame.doc.body.addEventListener('input', events);
+
+    expect(await fill('d1', 'target', 'new')).toEqual({
+      type: 'action-result',
+      id: 'd1',
+      success: false,
+      error: `data-testid="target" ${why}`,
+    });
+    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe('old');
+    expect(events).not.toHaveBeenCalled();
+  });
+
+  it('refuses a disabled select', async () => {
+    frame.doc.body.innerHTML = `<select data-testid="plan" disabled>
+      <option value="free">Free plan</option><option value="pro">Pro plan</option></select>`;
+    expect(await fill('d2', 'plan', 'Pro plan')).toMatchObject({
+      success: false,
+      error: 'data-testid="plan" is disabled',
+    });
+    expect(frame.doc.querySelector('select').value).toBe('free');
+  });
+
+  it.each([
+    ['a disabled option', '<option value="team" disabled>Team plan</option>'],
+    [
+      'an option in a disabled optgroup',
+      '<optgroup label="Paid" disabled><option value="team">Team plan</option></optgroup>',
+    ],
+  ])('refuses %s', async (_name, option) => {
+    frame.doc.body.innerHTML = `<select data-testid="plan">
+      <option value="free">Free plan</option>${option}</select>`;
+    expect(await fill('d3', 'plan', 'Team plan')).toMatchObject({
+      success: false,
+      error: 'data-testid="plan" has option "Team plan", but it is disabled',
+    });
+    expect(frame.doc.querySelector('select').value).toBe('free');
+  });
+
+  it('selects the matched option itself when two options share a value', async () => {
+    frame.doc.body.innerHTML = `<select data-testid="size">
+      <option value="m">Medium</option>
+      <option value="m">Medium (fitted)</option>
+    </select>`;
+    expect(await fill('d4', 'size', 'Medium (fitted)')).toMatchObject({ success: true });
+    expect(frame.doc.querySelector('select').selectedIndex).toBe(1);
+  });
+
+  // maxlength: failing, not truncating, so the model never believes it typed
+  // text the field cut short.
+  it('refuses a value longer than the field’s maxlength, naming the limit', async () => {
+    frame.doc.body.innerHTML = '<input data-testid="target" maxlength="5" />';
+    expect(await fill('d5', 'target', 'Ada Lovelace')).toEqual({
+      type: 'action-result',
+      id: 'd5',
+      success: false,
+      error: 'data-testid="target" takes at most 5 characters; the value has 12',
+    });
+    expect(frame.doc.querySelector('input').value).toBe('');
+  });
+
+  it('fills a value that fits the maxlength', async () => {
+    frame.doc.body.innerHTML = '<textarea data-testid="target" maxlength="5"></textarea>';
+    expect(await fill('d6', 'target', 'Ada')).toMatchObject({ success: true });
+    expect(frame.doc.querySelector('textarea').value).toBe('Ada');
+  });
+});
+
+describe('sandbox/bridge.js selectors', () => {
+  // The test id goes into a CSS attribute selector: a quote in it used to
+  // break the selector (a SyntaxError, reported as a failure).
+  it('finds an element whose data-testid has a quote and a backslash in it', async () => {
+    frame.doc.body.innerHTML = '<button data-testid=\'say "hi" \\ bye\'>Hi</button>';
+    const clicked = vi.fn();
+    frame.doc.querySelector('button').addEventListener('click', clicked);
+    const result = nextMessage(agentPort, 'action-result');
+    agentPort.postMessage({
+      type: 'action',
+      id: 's1',
+      action: 'click',
+      args: ['say "hi" \\ bye'],
+    });
+
+    expect(await result).toEqual({ type: 'action-result', id: 's1', success: true });
+    expect(clicked).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -322,6 +596,58 @@ describe('sandbox/bridge.js snapshots', () => {
     expect(full.map((node) => node.value)).toEqual([`${'x'.repeat(60)}…`, 'Pro']);
   });
 
+  it('reports a select by its options’ visible text, not their values', async () => {
+    const { full } = await loadPage(`
+      <label for="plan">Plan</label>
+      <select id="plan" data-testid="plan">
+        <option value="free">Free plan</option>
+        <option value="pro" selected>Pro plan</option>
+      </select>`);
+
+    expect(full).toEqual([
+      {
+        selector: 'plan',
+        tag: 'select',
+        label: 'Plan',
+        disabled: false,
+        hidden: false,
+        value: 'Pro plan',
+        options: ['Free plan', 'Pro plan'],
+      },
+    ]);
+  });
+
+  it('lists at most 20 options, each cut to 60 characters', async () => {
+    const options = Array.from(
+      { length: 25 },
+      (_, i) => `<option value="${i}">${String(i).padStart(2, '0')}${'y'.repeat(80)}</option>`,
+    ).join('');
+    const { full } = await loadPage(`<select data-testid="many">${options}</select>`);
+
+    expect(full[0].options).toHaveLength(20);
+    expect(full[0].options[0]).toBe(`00${'y'.repeat(58)}…`);
+    expect(full[0].value).toBe(full[0].options[0]);
+  });
+
+  it('reports an empty select with no value', async () => {
+    const { full } = await loadPage('<select data-testid="none"></select>');
+
+    expect(full[0]).toMatchObject({ value: '', options: [] });
+  });
+
+  it('sends a snapshot with the newly selected option’s text after a fill', async () => {
+    await loadPage(`<select data-testid="plan">
+      <option value="free">Free plan</option>
+      <option value="pro">Pro plan</option>
+    </select>`);
+    const next = nextMessage(agentPort, 'snapshot');
+
+    agentPort.postMessage({ type: 'action', id: 'f12', action: 'fill', args: ['plan', 'pro'] });
+
+    const { changed } = await next;
+    expect(changed).toEqual([expect.objectContaining({ selector: 'plan', value: 'Pro plan' })]);
+  });
+
   it('names a submit input by its value, which is its caption', async () => {
     const { full } = await loadPage('<input data-testid="send" type="submit" value="Send" />');
 
@@ -363,5 +689,30 @@ describe('sandbox/bridge.js snapshots', () => {
       ['by-placeholder', 'Search'],
       ['by-title', 'Your email'],
     ]);
+  });
+
+  // The accessible-name order (accname 1.2): aria-labelledby wins over
+  // aria-label, a <label> and the content.
+  it('names an element by aria-labelledby before aria-label, its label or its text', async () => {
+    const { full } = await loadPage(`
+      <span id="cap">Promo code</span>
+      <label for="f">Code</label>
+      <input id="f" data-testid="field" aria-labelledby="cap" aria-label="Ignored" />
+      <button data-testid="btn" aria-labelledby="cap">Apply</button>`);
+
+    expect(full.map((node) => [node.selector, node.label])).toEqual([
+      ['field', 'Promo code'],
+      ['btn', 'Promo code'],
+    ]);
+  });
+
+  it('caps every name source at 60 characters, placeholder, title and aria-label included', async () => {
+    const long = 'x'.repeat(100);
+    const { full } = await loadPage(`
+      <input data-testid="by-placeholder" placeholder="${long}" />
+      <input data-testid="by-title" title="${long}" />
+      <button data-testid="by-aria-label" aria-label="${long}">Go</button>`);
+
+    expect(full.map((node) => node.label.length)).toEqual([60, 60, 60]);
   });
 });

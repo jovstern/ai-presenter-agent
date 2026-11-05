@@ -48,10 +48,19 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       included, no force pushes.)*
 
 **M6: hardening and tuning (issue #5)**
-- [ ] R14 Every remaining M and L item is closed or deferred with a reason.
-- [ ] R15 Capture uses an AudioWorklet.
-- [ ] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
-      numbers.
+- [x] R14 Every remaining M and L item is closed or deferred with a reason. *(M6 T6: every M
+      item and L1, L6, L9–L12 are fixed; L2, L3, L4, L5, L7 and L8 are card items, deferred
+      → M7 (its T1–T3 name them). The M4 and M5 re-review items are fixed too:
+      `fatal: 'config' | 'token'`, a 10 s setup timeout, the resume handle kept on a network
+      failure, the backoff reset after 5 s or the first content, `labelFor`'s order and cap,
+      `errorPage` escaping.)*
+- [x] R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
+      same-origin under `script-src 'self'`; 16 kHz Int16 80 ms frames; `e2e/audio.spec.js`.)*
+- [x] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
+      numbers. *(M6 T5, `docs/metrics/m06.md`: the cap, the ratio and the loop thresholds are
+      kept on the numbers; the still-attached retry is 400 ms × the attempt; a resume no
+      longer resends knowledge. Task 8 of 10 meets the 80 % budget only just, and the cap and
+      ratio are measured on the 8-node target app only.)*
 
 **M7: presentable widget (new issue)**
 - [ ] R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.
@@ -92,7 +101,8 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - The live e2e costs Gemini usage and needs the key. It runs only when `GEMINI_LIVE_E2E=1`,
   at the end of a milestone, never in CI.
 - `@google/genai` is pinned to an exact version (2.31.0 or whatever is current when M6 runs),
-  after the Live message shapes have been verified against it.
+  after the Live message shapes have been verified against it. *Done in M6 T4: `2.32.0`, and
+  every other dependency is pinned exactly too (table below).*
 - Tests stay in `src/__tests__/` (the repo's own pattern).
 
 ## Stack
@@ -111,22 +121,30 @@ Language: JS with checkJs (ADR 0002).
 
 | Package | Where | Why |
 |---|---|---|
-| eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals |
-| eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) |
-| prettier | root | format gate (R8): one formatter for every package and the static dirs |
-| typescript (7.x) | both packages | `tsc -p jsconfig.json` checkJs (R9, ADR 0002) |
-| @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies |
-| @types/node, @types/express | server | Node and Express types for checkJs (R9) |
-| @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) |
-| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) — `^7.2.1` |
-| pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `^10.4.0`, `^11.0.0` |
-| helmet | server | security headers and CSP (H1 remainder) — `^8.3.0` |
-| supertest, vitest | server | token-gate tests (R10) — `^7.3.1`, `^5.0.5` |
-| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `^1.64.1`, `^4.14.0` |
+| eslint, @eslint/js, globals | both packages | lint gate (R8): ESLint 10 flat config, recommended rules, browser/node globals — `10.13.0`, `10.0.1`, `17.13.0` |
+| eslint-plugin-react-hooks | agent-client | lint gate (R8): Rules of Hooks plus the React Compiler rules (v7 `configs.flat.recommended`) — `7.1.1` |
+| prettier | root | format gate (R8): one formatter for every package and the static dirs — `3.9.10` |
+| typescript (7.x) | both packages | `tsc -p jsconfig.json` checkJs (R9, ADR 0002) — `7.0.2` |
+| @types/react, @types/react-dom | agent-client | JSX and hook types for checkJs (R9); already in devDependencies — `19.3.0`, `19.3.0` |
+| @types/node, @types/express | server | Node and Express types for checkJs (R9) — `24.19.2`, `5.0.6` |
+| @types/compression | server | `compression` ships no types; without them tsc descends into its untyped JS (R9) — `1.8.1` |
+| @types/supertest | server | types for the token-gate tests; added with supertest in T3 (R10) — `7.2.1` |
+| pino, pino-http | server | structured logs with a request id (metrics skill, node-api.md) — `10.4.0`, `11.0.0` |
+| helmet | server | security headers and CSP (H1 remainder) — `8.3.0` |
+| supertest, vitest | server | token-gate tests (R10) — `7.3.1`, `5.0.5` |
+| @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `1.64.1`, `4.14.0` |
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
-| zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `^4.6.7` |
+| zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |
-| compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile |
+| compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile — `1.8.2` |
+
+Dependencies from before this cycle, pinned exactly in M6 T4 (code-review-notes M8):
+`@google/genai` `2.32.0` (both packages, upgraded from `^2.22.0` after the Live shapes were
+verified against it); agent-client `react` / `react-dom` `19.3.0`, `@radix-ui/react-dialog`
+`1.1.23`, `vite` `8.3.0`, `@vitejs/plugin-react` `6.1.1`, `babel-plugin-react-compiler` `1.0.0`,
+`vitest` `5.0.1`, `@testing-library/react` `16.3.3`, `jsdom` `30.0.1`; server `express` `5.2.1`,
+`dotenv` `17.4.2`. Every `package.json` uses exact versions; add one with
+`npm install --save-exact`.
 
 No `useReducer`, context or state library. `useLiveAgent` keeps `useState` and refs. The
 knowledge store keeps `useSyncExternalStore`. `KnowledgeModal` stops mirroring the store
@@ -145,13 +163,23 @@ mount. The bridge accepts the first one only. After that, everything travels on 
 | bridge → agent | `{type:'snapshot', full, changed, removed}` |
 | bridge → agent | `{type:'navigated'}` (sent before the load snapshot) |
 
-Snapshot node: `{selector, tag, label, disabled, hidden, checked?, value?}`. `label` is a form
+Snapshot node: `{selector, tag, label, disabled, hidden, checked?, value?, options?}`. `label` is a form
 control's `<label>` text; `checked` is set on checkboxes and radios only (M5 T5); `value` is set
 on text inputs, textareas and selects, never on a hidden input, a password or a field whose
 `autocomplete` is `cc-*`, `one-time-code`, `current-password` or `new-password`, cut to 60
-characters plus `…` (M5 fix wave), so the model sees what a `fill` typed. `fill` accepts only
-those text controls. A control with no `<label>` falls back to its text, then (for a button-like
-input) its value, then `aria-labelledby`'s text, its placeholder and its title.
+characters plus `…` (M5 fix wave), so the model sees what a `fill` typed. A select's `value`
+is its selected option's visible text, and its node adds `options`: the first 20 options' visible
+text, each cut the same way (M6 T1). `fill` accepts only those text controls; it sets the value
+through the element type's native setter and fires `input` and `change`. On a select it picks the
+option whose text matches (trimmed, case-insensitive), then the one whose value does; no match
+fails with `… has no option "X"; options: A, B, C` and leaves the selection as it was.
+
+Routes: `target-app/routes.json` (`{name: path}`) is the one list. The server templates it into
+the sandbox page as `<script type="application/json" id="ds-routes">` (`<` escaped), the bridge
+reads that block (and throws at load without it), and `actionTools.js` imports the file as
+`navigate`'s enum (M6 T1, `code-review-notes.md` M1). A node's name follows the accessible-name
+order: `aria-labelledby`'s text, `aria-label`, its `<label>`, its text, (for a button-like
+input) its value, its placeholder, its title — every source cut to 60 characters (M6 T6).
 
 Local storage stays as it is in `knowledgeStore.js`.
 
@@ -172,9 +200,10 @@ come from `status`.
 | connecting | pending button, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
-| failed | "Connection lost" plus a Retry button (or "Reload page" when the failure is fatal), and a Radix toast once |
+| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) and the reason (`role="alert"`, keyed by the connect attempt so the same reason after Try again is announced again) plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
+| insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
 
 - **Transcript:** the last 3 coalesced turns, `aria-live="polite"`, with user turns visually
   distinct.
@@ -226,7 +255,7 @@ App metrics, from the live e2e, averaged over 5 runs:
 | First agent audio after `open` (greeting) | ≤ 2.0 s |
 | Tool round-trip, bridge only: click / fill / scroll | ≤ 300 ms |
 | Tool round-trip, bridge only: navigate | ≤ 1.5 s |
-| Scripted task success (5-step task) | ≥ 4 of 5 runs |
+| Scripted task success (6-step task since M6 T5, with a `fill`) | ≥ 4 of 5 runs |
 | Reconnect recovery (forced close → `open`) | ≤ 3 s |
 | Keyframe payload | ≤ 4 kB of JSON |
 

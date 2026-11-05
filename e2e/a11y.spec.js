@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures.js';
+import { card, fakeGeminiLive, stubToken } from './fakeLive.js';
 
 // axe on every screen this build has (spec Budgets: 0 violations), with all of
 // axe's default rules, best practices included.
@@ -55,6 +56,25 @@ test('the sandbox page with the knowledge dialog open', async ({ page }) => {
   const { violations, checkedInShadowRoot } = await analyze(page);
   expect(violations).toEqual([]);
   expect(checkedInShadowRoot('textarea')).toBe(true);
+});
+
+// Connected through the fake-Live harness (loop.spec.js) with a transcript
+// line on screen: the transcript is what axe's `region` rule flagged before
+// the card became a named landmark (docs/metrics/m06.md, observer miss 1).
+test('the sandbox page with the card connected and a transcript line', async ({ page }) => {
+  await stubToken(page, { status: 200, body: { token: 'e2e-token' } });
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+
+  await page.goto('/');
+  await button('Connect').click();
+  await expect(status).toHaveText('Live');
+  live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello there.' } } });
+  await expect(page.locator(HOST).getByText('Hello there.')).toBeVisible();
+
+  const { violations, checkedInShadowRoot } = await analyze(page);
+  expect(violations).toEqual([]);
+  expect(checkedInShadowRoot('li')).toBe(true);
 });
 
 for (const path of ['/target-app/index.html', '/target-app/settings.html']) {

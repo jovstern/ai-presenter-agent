@@ -2,37 +2,23 @@ import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import pino from 'pino';
 import { createApp } from './app.js';
+import { createGeminiMint } from './geminiMint.js';
 
-/** @import { MintToken } from './app.js' */
-
-// The process half of the server: env, the real Gemini mint, listen and a
-// graceful shutdown. Everything testable lives in app.js.
+// The process half of the server: env, listen and a graceful shutdown.
+// Everything testable lives in app.js and geminiMint.js.
 
 // JSON lines on stdout, which is what Render's log viewer reads.
 const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const PORT = Number(process.env.PORT) || 3000;
 const SHUTDOWN_GRACE_MS = 10_000;
 
-/**
- * @param {string} apiKey
- * @returns {MintToken}
- */
-function createGeminiMint(apiKey) {
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1alpha' } });
-  return async ({ expiresAt }) => {
-    const token = await ai.authTokens.create({
-      config: { uses: 1, newSessionExpireTime: expiresAt.toISOString() },
-    });
-    if (!token.name) throw new Error('Gemini returned an auth token without a name');
-    return token.name;
-  };
-}
-
 const apiKey = process.env.GEMINI_API_KEY;
 if (!apiKey) logger.warn('GEMINI_API_KEY is not set; /api/live-token will answer not_configured');
 
 const app = createApp({
-  mintToken: apiKey ? createGeminiMint(apiKey) : undefined,
+  mintToken: apiKey
+    ? createGeminiMint(new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1alpha' } }))
+    : undefined,
   logger,
   production: process.env.NODE_ENV === 'production',
 });

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLiveSession } from '../liveSession.js';
 import { setRules } from '../knowledgeStore.js';
+import LIVE_MODEL from '../liveModel.json' with { type: 'json' };
 
 // A fake Gemini Live client: every live.connect() is recorded with its
 // callbacks and a fake session, and stays pending until the test resolves or
@@ -80,6 +81,16 @@ async function establish(call) {
   call.params.callbacks.onmessage({ setupComplete: {} });
 }
 
+// The real SDK's order (@google/genai 2.32.0, live.connect): setupComplete
+// and anything queued behind it reach onmessage *before* connect() resolves,
+// while the session object isn't ours yet.
+async function establishInRealOrder(call, queued = []) {
+  call.params.callbacks.onmessage({ setupComplete: {} });
+  queued.forEach((message) => call.params.callbacks.onmessage(message));
+  call.resolve();
+  await flush();
+}
+
 // What Live typically does on a network drop: both callbacks, back to back.
 function drop(call) {
   call.params.callbacks.onerror(new Error('socket dropped'));
@@ -119,7 +130,8 @@ describe('createLiveSession', () => {
     const first = await connectAndEstablish(liveSession);
 
     drop(first);
-    await vi.advanceTimersByTimeAsync(60_000);
+    // Long, but under SETUP_TIMEOUT_MS, which would fail the still-pending retry.
+    await vi.advanceTimersByTimeAsync(9_000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(live.calls).toHaveLength(2);
@@ -143,7 +155,7 @@ describe('createLiveSession', () => {
 
     // Late callbacks from the stale socket don't schedule anything either.
     stale.params.callbacks.onclose({});
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(9_000); // under SETUP_TIMEOUT_MS: `current` is still pending
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     await establish(current);
@@ -337,6 +349,18 @@ describe('createLiveSession', () => {
     });
   });
 
+  it('connects on v1alpha with the fetched token and the model the token is locked to (M7)', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    expect(call.options).toEqual({
+      apiKey: 'ephemeral-token',
+      httpOptions: { apiVersion: 'v1alpha' },
+    });
+    // server/geminiMint.js constrains the token to this same file's model.
+    expect(call.params.model).toBe(LIVE_MODEL.model);
+  });
+
   it('resumes with the stored handle on reconnect and does not greet again', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -361,6 +385,7 @@ describe('createLiveSession', () => {
     drop(first);
     await flush();
     await establish(live.calls[1]);
+    await vi.advanceTimersByTimeAsync(5_000); // stable for STABLE_SESSION_MS: the backoff resets
 
     expect(statusNames()).toEqual(['connecting', 'open', 'reconnecting', 'open']);
     expect(statuses[2]).toMatchObject({ attempt: 1, maxAttempts: MAX_ATTEMPTS });
@@ -474,25 +499,132 @@ describe('createLiveSession', () => {
     expect(statuses.map((s) => s.status)).not.toContain('open'); // the server never answered
   });
 
-  it('resets the backoff once the server has answered, so the next drop retries immediately', async () => {
-    const { liveSession, statuses } = setup();
-    const first = await connectAndEstablish(liveSession);
-    drop(first);
-    await flush();
-    const second = await (async () => {
-      const call = live.calls[1];
-      await establish(call); // setupComplete arrives → healthy again
-      return call;
-    })();
+  // M6 T6 (the M6 T3 deferral): setupComplete alone no longer resets the
+  // backoff. A server that completes setup and then closes every session
+  // used to retry at 0 ms forever (bounded only by the token rate limit).
+  describe('backoff reset (STABLE_SESSION_MS)', () => {
+    const reconnectAttempts = (statuses) =>
+      statuses.filter((s) => s.status === 'reconnecting').map((s) => s.attempt);
 
-    drop(second);
-    await flush();
+    it('keeps climbing when sessions complete setup and then close', async () => {
+      const { liveSession, statuses } = setup();
+      const setupThenClose = async (call) => {
+        await establish(call);
+        call.params.callbacks.onclose({ code: 1011 });
+      };
+      await setupThenClose(await connectAndEstablish(liveSession)); // → retry 1 at 0 ms
+      await flush();
+      await setupThenClose(live.calls[1]); // → retry 2 at 1 s
+      await vi.advanceTimersByTimeAsync(999);
+      expect(live.calls).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await setupThenClose(live.calls[2]); // → retry 3 at 3 s
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(live.calls).toHaveLength(3);
+      await vi.advanceTimersByTimeAsync(1);
 
-    expect(live.calls).toHaveLength(3);
-    const reconnectAttempts = statuses
-      .filter((s) => s.status === 'reconnecting')
-      .map((s) => s.attempt);
-    expect(reconnectAttempts).toEqual([1, 1]);
+      expect(live.calls).toHaveLength(4);
+      expect(reconnectAttempts(statuses)).toEqual([1, 2, 3]);
+    });
+
+    it('resets once a session has stayed open for STABLE_SESSION_MS, so the next drop retries immediately', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      drop(second);
+      await flush();
+
+      expect(live.calls).toHaveLength(3);
+      expect(reconnectAttempts(statuses)).toEqual([1, 1]);
+    });
+
+    it('resets on the first real server content, before STABLE_SESSION_MS', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      second.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: 'Welcome back.' } },
+      });
+
+      drop(second);
+      await flush();
+
+      expect(live.calls).toHaveLength(3);
+      expect(reconnectAttempts(statuses)).toEqual([1, 1]);
+    });
+
+    it('does not reset on a session that drops before STABLE_SESSION_MS with no content', async () => {
+      const { liveSession, statuses } = setup();
+      drop(await connectAndEstablish(liveSession));
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      second.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+
+      await vi.advanceTimersByTimeAsync(4_999);
+      drop(second);
+      await flush();
+
+      expect(reconnectAttempts(statuses)).toEqual([1, 2]);
+    });
+  });
+
+  // M6 T6 (M4 re-review): live.connect resolves only on setupComplete, so a
+  // socket that opens and then hears nothing would sit at `connecting` forever.
+  describe('setup timeout (SETUP_TIMEOUT_MS)', () => {
+    it('retries an attempt whose server never completes setup, and closes it if it answers late', async () => {
+      const { liveSession, statuses, statusNames } = setup();
+      liveSession.connect();
+      await flush();
+      const silent = live.calls[0];
+
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(statusNames()).toEqual(['connecting']);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(statuses.at(-1)).toMatchObject({ status: 'reconnecting', attempt: 1 });
+      expect(statuses.at(-1).reason).toMatch(/did not answer/i);
+      // Retry 1 runs at 0 ms; fake timers run a 0 ms timer set inside another
+      // timer's callback 1 ms later.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(live.calls).toHaveLength(2);
+
+      // The abandoned attempt is a retired generation: closed if it lands late,
+      // and its callbacks are ignored.
+      silent.resolve();
+      await flush();
+      expect(silent.session.close).toHaveBeenCalled();
+      silent.params.callbacks.onclose({ code: 1006 });
+      expect(live.calls).toHaveLength(2);
+      await establish(live.calls[1]);
+      expect(statusNames().at(-1)).toBe('open');
+    });
+
+    it('is cleared once setup completes', async () => {
+      const { liveSession, statusNames } = setup();
+      await connectAndEstablish(liveSession);
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(statusNames()).toEqual(['connecting', 'open']);
+      expect(live.calls).toHaveLength(1);
+    });
+
+    it('is cleared by a disconnect', async () => {
+      const { liveSession, statusNames } = setup();
+      liveSession.connect();
+      await flush();
+      liveSession.disconnect();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(statusNames()).toEqual(['connecting', 'closed']);
+      expect(live.calls).toHaveLength(1);
+    });
   });
 
   it("echoes the page nonce on the token request, and reports the server's error message", async () => {
@@ -519,7 +651,7 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1).reason).toMatch(/reload/i);
-    expect(statuses.at(-1).fatal).toBe(true);
+    expect(statuses.at(-1).fatal).toBe('token'); // a reload gets a fresh nonce
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(120_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -592,7 +724,7 @@ describe('createLiveSession', () => {
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
   });
-  it('treats a not_configured server error as fatal, with a contact-the-owner reason', async () => {
+  it('treats a not_configured server error as a fatal config failure, with a contact-the-owner reason', async () => {
     fetchMock.mockImplementation(async () =>
       tokenResponse(500, apiError('not_configured', "The server isn't configured to connect")),
     );
@@ -603,11 +735,14 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
+      // A server restart (often how the key gets fixed) wipes its nonces, so
+      // Try again may turn into Reload page: the reason says so.
       reason:
-        "The server isn't configured to connect. Contact the site owner, then reload this page.",
-      fatal: true,
+        "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+      fatal: 'config', // a reload can't help; asking the server again can, once it's fixed
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('reports open on the first server message, not when the socket opens', async () => {
@@ -728,6 +863,42 @@ describe('createLiveSession', () => {
     expect(greetings(fresh.session)).toHaveLength(1);
   });
 
+  // M6 T6 (M4 re-review): only the server rejecting the handle clears it. A
+  // resumed attempt that fails on the network says nothing about the handle.
+  describe('a resumed attempt that fails on the network keeps the handle', () => {
+    async function resumedAttempt() {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      await flush();
+      const resumed = live.calls[1];
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      return resumed;
+    }
+
+    it.each([
+      ['a socket error and an abnormal close (1006)', (call) => drop(call)],
+      ['live.connect rejecting', (call) => call.reject(new TypeError('network'))],
+      ['a going-away close (1001)', (call) => call.params.callbacks.onclose({ code: 1001 })],
+      // m4: Gemini's internal error says nothing against the handle either.
+      ['an internal-error close (1011)', (call) => call.params.callbacks.onclose({ code: 1011 })],
+    ])('%s', async (_name, fail) => {
+      const resumed = await resumedAttempt();
+      fail(resumed);
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(live.calls[2].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    });
+
+    it('the setup timeout', async () => {
+      await resumedAttempt();
+      await vi.advanceTimersByTimeAsync(10_000 + 1_000);
+      expect(live.calls[2].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    });
+  });
+
   it('keeps the resumption handle when the server refuses a resume because the old client is still attached', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -753,6 +924,163 @@ describe('createLiveSession', () => {
     expect(greetings(retried.session)).toHaveLength(0);
   });
 
+  // M6 T5: the generic 1 s backoff made a two-attempt recovery 2.8–3.4 s in
+  // the live e2e; a still-attached refusal retries after 400 ms, then 800 ms…
+  it('retries a still-attached refusal after 400 ms, then 800 ms, and any other close on the usual backoff', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+    const refuse = async (call) => {
+      call.resolve();
+      await flush();
+      call.params.callbacks.onclose({
+        code: 1008,
+        reason: 'BidiGenerateContent session is already connected to an existing client',
+      });
+    };
+
+    await refuse(live.calls[1]);
+    await vi.advanceTimersByTimeAsync(399);
+    expect(live.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(3);
+
+    await refuse(live.calls[2]);
+    await vi.advanceTimersByTimeAsync(799);
+    expect(live.calls).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(4);
+    expect(live.calls[3].params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+
+    // A plain failure on the next attempt waits the usual 7 s (attempt 4).
+    live.calls[3].reject(new Error('network'));
+    await vi.advanceTimersByTimeAsync(6_999);
+    expect(live.calls).toHaveLength(4);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(live.calls).toHaveLength(5);
+  });
+
+  // m4: only a resume can be refused for a still-attached client; on a fresh
+  // attempt the text means nothing, and the usual backoff applies.
+  it('treats a still-attached close of a fresh (not resumed) attempt as a plain failure', async () => {
+    fetchMock.mockImplementationOnce(async () =>
+      tokenResponse(503, apiError('internal', 'unavailable')),
+    );
+    const { liveSession } = setup();
+    liveSession.connect();
+    await flush(); // attempt 1 fails at once; its retry is immediate
+    const fresh = live.calls[0];
+    expect(fresh.params.config.sessionResumption).toEqual({});
+    fresh.resolve();
+    await flush();
+    fresh.params.callbacks.onclose({
+      code: 1008,
+      reason: 'BidiGenerateContent session is already connected to an existing client',
+    });
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(live.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(live.calls).toHaveLength(2);
+  });
+
+  describe('knowledge on a reconnect (M9)', () => {
+    const knowledgeSends = (session) =>
+      session.sendClientContent.mock.calls.filter(([arg]) =>
+        String(arg.turns).startsWith('STRICT RULES'),
+      );
+
+    async function dropAndReconnect(first, { handle = true } = {}) {
+      if (handle) {
+        first.params.callbacks.onmessage({
+          sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+        });
+      }
+      drop(first);
+      // The backoff hasn't reset (no STABLE_SESSION_MS, no content), so a
+      // second drop's retry waits 1 s.
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = live.calls.at(-1);
+      await establish(second);
+      return second;
+    }
+
+    it('sends it on a fresh session, and not again on a resumed one', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      expect(knowledgeSends(first.session)).toHaveLength(1);
+
+      const resumed = await dropAndReconnect(first);
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      expect(knowledgeSends(resumed.session)).toHaveLength(0);
+    });
+
+    it('sends it on a reconnect that starts a fresh session (no handle)', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      const fresh = await dropAndReconnect(first, { handle: false });
+      expect(knowledgeSends(fresh.session)).toHaveLength(1);
+    });
+
+    it('sends it on a resumed session when it changed while no session was up', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      setRules('Be very brief.');
+      await flush();
+      const resumed = live.calls.at(-1);
+      await establish(resumed);
+      expect(knowledgeSends(resumed.session).map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+
+      // Sent once: the next resume has nothing new to send.
+      const again = await dropAndReconnect(resumed);
+      expect(knowledgeSends(again.session)).toHaveLength(0);
+    });
+
+    // m3: a handle restores the session as it was when the handle was issued,
+    // so knowledge sent after that isn't in the resumed session.
+    it('resends it on a resume when it changed after the handle in use was issued', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      setRules('Be very brief.'); // sent into the live session, after handle-1
+      expect(knowledgeSends(first.session)).toHaveLength(2);
+
+      const resumed = await dropAndReconnect(first, { handle: false });
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      expect(knowledgeSends(resumed.session).map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+    });
+
+    it('does not resend it when a newer handle was issued after the change', async () => {
+      setRules('Be brief.');
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      setRules('Be very brief.');
+      const resumed = await dropAndReconnect(first); // handle-1 reissued after the change
+      expect(knowledgeSends(resumed.session)).toHaveLength(0);
+    });
+  });
+
   it('drops the resumption handle when a close that is not 1008 carries the still-attached text', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -766,7 +1094,7 @@ describe('createLiveSession', () => {
     early.resolve();
     await flush();
     early.params.callbacks.onclose({
-      code: 1011,
+      code: 1007,
       reason: 'BidiGenerateContent session is already connected to an existing client',
     });
 
@@ -825,7 +1153,10 @@ describe('createLiveSession', () => {
       {
         id: 'nav',
         name: 'navigate',
-        response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\)/) },
+        response: {
+          success: true,
+          page: expect.stringMatching(/^Page snapshot \(full\)/),
+        },
       },
       {
         id: 'tap',
@@ -947,6 +1278,75 @@ describe('timing marks', () => {
     }
   });
 
+  it('marks each keyframe with its UTF-8 size and node count, and no delta', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const node = (selector, label) => ({
+      selector,
+      tag: 'button',
+      label,
+      disabled: false,
+      hidden: false,
+    });
+    const first = [node('a', 'Añadir'), node('b', 'B'), node('c', 'C')];
+    bridge.emitSnapshot({ full: first, changed: first, removed: [] });
+    const changedB = node('b', 'B2');
+    bridge.emitSnapshot({ full: [first[0], changedB, first[2]], changed: [changedB], removed: [] });
+
+    const keyframes = dsMarks().filter((entry) => entry.name === 'ds:keyframe');
+    expect(keyframes).toHaveLength(1);
+    const sent = call.session.sendClientContent.mock.calls
+      .map(([arg]) => arg.turns)
+      .find((turns) => String(turns).startsWith('Page snapshot (full)'));
+    expect(keyframes[0].detail).toEqual({
+      bytes: new TextEncoder().encode(sent).length,
+      nodes: 3,
+    });
+    // 'ñ' is two bytes: the size is bytes on the wire, not characters.
+    expect(keyframes[0].detail.bytes).toBe(sent.length + 1);
+  });
+
+  it('marks every loop-guard trip with its kind, and nothing for calls it lets through', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const sameClick = (id) => ({ id, name: 'click', args: { selector: '#buy' } });
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [sameClick('1'), sameClick('2'), sameClick('3')] },
+    });
+    await flush();
+    expect(markNames()).not.toContain('ds:loop-trip');
+
+    call.params.callbacks.onmessage({ toolCall: { functionCalls: [sameClick('4')] } });
+    await flush();
+    const sentence = 'I will now open the settings page for you.';
+    for (let turn = 0; turn < 3; turn += 1) {
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: sentence } },
+      });
+      call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+    }
+
+    expect(dsMarks().filter((entry) => entry.name === 'ds:loop-trip')).toEqual([
+      { name: 'ds:loop-trip', detail: { kind: 'action' } },
+      { name: 'ds:loop-trip', detail: { kind: 'utterance' } },
+    ]);
+  });
+
+  it('marks the knowledge context it sends with its size, and nothing when there is none', async () => {
+    const { liveSession } = setup();
+    await connectAndEstablish(liveSession);
+    expect(markNames()).not.toContain('ds:knowledge');
+
+    setRules('Be brief.');
+    const knowledge = dsMarks().filter((entry) => entry.name === 'ds:knowledge');
+    expect(knowledge).toEqual([
+      {
+        name: 'ds:knowledge',
+        detail: { bytes: 'STRICT RULES (must always follow):\nBe brief.'.length },
+      },
+    ]);
+  });
+
   it('marks reconnected when a dropped session is open again, not on a first or manual connect', async () => {
     const { liveSession } = setup();
     const first = await connectAndEstablish(liveSession);
@@ -962,5 +1362,317 @@ describe('timing marks', () => {
     markSpy.mockClear();
     await connectAndEstablish(liveSession);
     expect(markNames()).toEqual(['ds:connect-start', 'ds:open']);
+  });
+});
+
+describe('createLiveSession: loop guard', () => {
+  it('blocks the call that completes an A-B-A-B cycle with the loop guard, like a repeat', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const go = (id, route) => ({ id, name: 'navigate', args: { route } });
+
+    call.params.callbacks.onmessage({
+      toolCall: {
+        functionCalls: [go('1', 'home'), go('2', 'settings'), go('3', 'home'), go('4', 'settings')],
+      },
+    });
+    await flush();
+
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    expect(responses).toHaveLength(4);
+    expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
+    expect(responses[3].response.error).toMatch(/repeated/i);
+  });
+
+  describe('the utterance loop guard', () => {
+    const LINE = 'Let me show you the settings page.';
+
+    // One agent turn the way Live delivers it: transcription fragments, then
+    // turnComplete in a message of its own.
+    function say(call, text) {
+      const words = text.split(' ');
+      const half = Math.ceil(words.length / 2);
+      for (const fragment of [words.slice(0, half).join(' '), ' ' + words.slice(half).join(' ')]) {
+        call.params.callbacks.onmessage({
+          serverContent: { outputTranscription: { text: fragment } },
+        });
+      }
+      call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+    }
+
+    const correctives = (call) =>
+      call.session.sendClientContent.mock.calls.filter(
+        ([arg]) => typeof arg.turns === 'string' && /repeating yourself/i.test(arg.turns),
+      );
+
+    it('sends one corrective turn when the agent says the same sentence three turns running', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      say(call, LINE);
+      say(call, LINE);
+      expect(correctives(call)).toHaveLength(0);
+      say(call, LINE);
+
+      expect(correctives(call)).toHaveLength(1);
+      expect(correctives(call)[0][0].turnComplete).toBe(true);
+    });
+
+    it('sends it once per episode, and again only after the user speaks', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      for (let i = 0; i < 5; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(1);
+
+      call.params.callbacks.onmessage({
+        serverContent: { inputTranscription: { text: 'Why do you keep saying that?' } },
+      });
+      for (let i = 0; i < 3; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(2);
+    });
+
+    it('discards an interrupted partial turn instead of counting it', async () => {
+      const { liveSession } = setup();
+      const call = await connectAndEstablish(liveSession);
+
+      say(call, LINE);
+      say(call, LINE);
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: 'Let me show you' } },
+      });
+      call.params.callbacks.onmessage({ serverContent: { interrupted: true } });
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: ' the settings page.' }, turnComplete: true },
+      });
+
+      expect(correctives(call)).toHaveLength(0);
+    });
+
+    it('holds the corrective while a tool batch runs, then sends it after the last response', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'c', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+
+      for (let i = 0; i < 3; i += 1) say(call, LINE);
+      expect(correctives(call)).toHaveLength(0);
+
+      finishClick({ success: true });
+      await flush();
+
+      expect(correctives(call)).toHaveLength(1);
+      const order = call.session.sendToolResponse.mock.invocationCallOrder[0];
+      const correctiveCall = call.session.sendClientContent.mock.calls.findIndex(([arg]) =>
+        /repeating yourself/i.test(String(arg.turns)),
+      );
+      expect(
+        call.session.sendClientContent.mock.invocationCallOrder[correctiveCall],
+      ).toBeGreaterThan(order);
+    });
+
+    it('never sends a held corrective to the replacement session after a drop', async () => {
+      const { liveSession, bridge } = setup();
+      const first = await connectAndEstablish(liveSession);
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+      first.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'c', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      for (let i = 0; i < 3; i += 1) say(first, LINE);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      finishClick({ success: true });
+      await flush();
+      // Nor at the end of the new session's first batch.
+      second.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'd', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+
+      expect(second.session.sendToolResponse).toHaveBeenCalledTimes(1);
+      expect(correctives(first)).toHaveLength(0);
+      expect(correctives(second)).toHaveLength(0);
+    });
+
+    it('ignores turns from a dropped session', async () => {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      say(first, LINE);
+      say(first, LINE);
+
+      drop(first);
+      await flush();
+      const second = live.calls[1];
+      await establish(second);
+      say(first, LINE); // a late message on the dead socket
+
+      expect(correctives(first)).toHaveLength(0);
+      expect(correctives(second)).toHaveLength(0);
+    });
+
+    it('a manual connect() starts the utterance history afresh', async () => {
+      const { liveSession } = setup();
+      const first = await connectAndEstablish(liveSession);
+      say(first, LINE);
+      say(first, LINE);
+
+      liveSession.disconnect();
+      const second = await connectAndEstablish(liveSession);
+      say(second, LINE);
+
+      expect(correctives(second)).toHaveLength(0);
+    });
+  });
+});
+
+// m1: the real SDK delivers setupComplete, and whatever the server queued
+// behind it, through onmessage before live.connect() resolves.
+describe('createLiveSession: the SDK order (messages before connect() resolves)', () => {
+  it('goes open, greets once, and flushes the buffered audio', async () => {
+    const { liveSession, statusNames } = setup();
+    liveSession.connect();
+    await flush();
+    liveSession.sendAudioFrame('frame-0');
+    const call = live.calls[0];
+
+    await establishInRealOrder(call);
+
+    expect(statusNames()).toEqual(['connecting', 'open']);
+    expect(greetings(call.session)).toHaveLength(1);
+    expect(call.session.sendRealtimeInput.mock.calls.map(([arg]) => arg.audio.data)).toEqual([
+      'frame-0',
+    ]);
+  });
+
+  // m2: the greeting follows whether this attempt resumed, not whether a
+  // handle exists by now (one can arrive in the queue of a fresh session).
+  it('greets a fresh session even when a resumption handle arrives before connect() resolves', async () => {
+    const { liveSession } = setup();
+    liveSession.connect();
+    await flush();
+    const call = live.calls[0];
+
+    await establishInRealOrder(call, [
+      { sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' } },
+    ]);
+
+    expect(greetings(call.session)).toHaveLength(1);
+  });
+
+  it('answers a tool call queued before connect() resolves instead of dropping it', async () => {
+    const { liveSession, bridge } = setup();
+    liveSession.connect();
+    await flush();
+    const call = live.calls[0];
+
+    await establishInRealOrder(call, [
+      { toolCall: { functionCalls: [{ id: 'early', name: 'click', args: { selector: 'b' } }] } },
+    ]);
+
+    expect(bridge.dispatchAction).toHaveBeenCalledWith('click', ['b']);
+    expect(call.session.sendToolResponse).toHaveBeenCalledTimes(1);
+    expect(call.session.sendToolResponse.mock.calls[0][0].functionResponses).toMatchObject({
+      id: 'early',
+      response: { success: true },
+    });
+  });
+
+  it('drops a queued tool call whose connect() was superseded', async () => {
+    const { liveSession, bridge } = setup();
+    liveSession.connect();
+    await flush();
+    const stale = live.calls[0];
+    stale.params.callbacks.onmessage({ setupComplete: {} });
+    stale.params.callbacks.onmessage({
+      toolCall: { functionCalls: [{ id: 'early', name: 'click', args: { selector: 'b' } }] },
+    });
+    liveSession.disconnect();
+    stale.resolve();
+    await flush();
+
+    expect(bridge.dispatchAction).not.toHaveBeenCalled();
+    expect(stale.session.sendToolResponse).not.toHaveBeenCalled();
+  });
+});
+
+describe('createLiveSession: the loop guard across requests', () => {
+  const userSays = (call, text) =>
+    call.params.callbacks.onmessage({ serverContent: { inputTranscription: { text } } });
+  const toolCall = (call, id, name, args) =>
+    call.params.callbacks.onmessage({ toolCall: { functionCalls: [{ id, name, args }] } });
+
+  // I1: a loop is the model acting without new input from the user.
+  it('dispatches A, B, A, B when the user asked in between', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    toolCall(call, '1', 'navigate', { route: 'home' });
+    await flush();
+    userSays(call, 'Now settings.');
+    toolCall(call, '2', 'navigate', { route: 'settings' });
+    await flush();
+    toolCall(call, '3', 'navigate', { route: 'home' });
+    await flush();
+    userSays(call, 'And settings again.');
+    toolCall(call, '4', 'navigate', { route: 'settings' });
+    await flush();
+
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(4);
+  });
+
+  it('dispatches four separately spoken "click increment" requests', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+
+    for (const id of ['1', '2', '3', '4']) {
+      userSays(call, 'Click increment.');
+      toolCall(call, id, 'click', { selector: 'counter-increment' });
+      await flush();
+    }
+
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(4);
+    const results = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses.response.success,
+    );
+    expect(results).toEqual([true, true, true, true]);
+  });
+
+  // m11: narration before each step of one multi-step request.
+  it('sends no corrective for the same narration between the tool calls of one request', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const narrate = () => {
+      call.params.callbacks.onmessage({
+        serverContent: { outputTranscription: { text: 'Clicking the increment button now.' } },
+      });
+      call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+    };
+
+    for (const id of ['1', '2', '3']) {
+      narrate();
+      toolCall(call, id, 'click', { selector: 'counter-increment' });
+      await flush();
+    }
+
+    const correctives = call.session.sendClientContent.mock.calls.filter(([arg]) =>
+      /repeating yourself/i.test(String(arg.turns)),
+    );
+    expect(correctives).toHaveLength(0);
   });
 });

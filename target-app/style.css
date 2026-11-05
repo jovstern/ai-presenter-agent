@@ -10,6 +10,69 @@ nav a {
   margin-right: 12px;
 }
 
+/* Controls take the page's font (browsers default them to a smaller system
+   one), so the original controls and the M6 ones (Notes, Plan) match. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+/* One look for every button and the search field: the same edge, radius and
+   padding as the Settings fields below. */
+button,
+input[type='text'] {
+  box-sizing: border-box;
+  padding: 6px 12px;
+  /* 4.5:1 on white: a form control's edge needs 3:1 (WCAG 1.4.11). */
+  border: 1px solid #767676;
+  border-radius: 4px;
+  background: #fff;
+}
+
+input[type='text'] {
+  padding: 6px 8px;
+}
+
+button {
+  background: #f2f2f2;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #e6e6e6;
+}
+
+/* A labelled form field: the label above its control, the control full width. */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field label {
+  font-weight: 600;
+}
+
+.field textarea,
+.field select {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  color: inherit;
+  background: #fff;
+  /* 4.5:1 on white: a form control's edge needs 3:1 (WCAG 1.4.11). */
+  border: 1px solid #767676;
+  border-radius: 4px;
+}
+
+.field textarea {
+  resize: vertical;
+}
+
 .save-confirmation {
   display: none;
   color: #1a7a1a;

@@ -22,13 +22,19 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Bridge protocol** — the message types on the channel, as JSDoc typedefs
   (`agent-client/src/bridgeProtocol.js`, copied verbatim into `bridge.js`).
 - **Action** — one thing the bridge does to the target app: click, fill, scroll, navigate. The
-  bridge's **allowlist** is the authority on which actions and routes exist; the model sees
-  them as tools (`agent-client/src/actionTools.js`).
+  bridge's **allowlist** is the authority on which actions exist; the model sees them as tools
+  (`agent-client/src/actionTools.js`). `fill` types into a text field or picks a select's
+  option by its visible text, and refuses what a user couldn't do: a disabled or read-only
+  field, a disabled option, a value longer than the field's `maxlength`.
+- **Routes** — the pages `navigate` can open, by name: `target-app/routes.json`, the one list.
+  The server templates it into the sandbox page's `#ds-routes` block for the bridge, and
+  `actionTools.js` imports it as `navigate`'s enum.
 
 ## Grounding
 
 - **Snapshot** — the bridge's description of the interactive elements on the current page
-  (each one's name, state, and a text field's `value`): the full node list plus its diff
+  (each one's name, state, a text field's `value`, and a select's `options` by visible text):
+  the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
   after every load, after a debounced DOM mutation, and on request (`sandbox/bridge.js`).
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
@@ -42,28 +48,48 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Live session** — one Gemini Live socket and its state (`agent-client/src/liveSession.js`).
   Its **status** is `connecting`, `open`, `reconnecting`, `failed` or `closed`.
 - **Token** — a short-lived, single-use Gemini Live credential the server mints per connect
-  and per reconnect (`server/index.js`, `/api/live-token` in `server/app.js`). The real API key
+  and per reconnect (`server/geminiMint.js`, locked to the one model in
+  `agent-client/src/liveModel.json`; `/api/live-token` in `server/app.js`). The real API key
   never reaches the browser.
 - **Nonce** — a random id the server writes into the sandbox page at serve time; the agent
   sends it back with every token request (`server/app.js`). Proves the request came from a
   script on this page. Reusable until it expires, not single-use, because every reconnect needs
   a new token.
 - **Attempt** — one try at opening the socket. After a drop the session reconnects with a
-  backoff, up to a fixed number of attempts, then goes `failed` (`liveSession.js`).
+  backoff, up to a fixed number of attempts, then goes `failed` (`liveSession.js`). An attempt
+  the server never answers with `setupComplete` fails after the **setup timeout** (10 s). The
+  attempt count resets only once a session is **stable**: open for 5 s, or the server has sent
+  real content.
 - **Generation** — a counter in `liveSession.js` bumped by every connect, drop and disconnect.
   A callback from an older generation (a late socket event, a tool batch from a dead session)
   sees the mismatch and does nothing.
 - **Resume handle** — the id Gemini sends so a reconnect can resume the same conversation
-  instead of starting over (`liveSession.js`). A resumed session is not greeted again.
-- **Fatal failure** — a `failed` status that Retry can't fix (the token request is rejected,
-  or the server has no key or Google rejects it: `not_configured`), so the card offers Reload page instead, with the reason
-  (`fatal` in `liveSession.js`'s `StatusDetails`).
+  instead of starting over (`liveSession.js`). A resumed session is not greeted again. It is
+  dropped only when the server closes a resumed attempt before setup (a rejection), never on a
+  network failure.
+- **Fatal failure** — a `failed` status the backoff doesn't retry (`fatal` in
+  `liveSession.js`'s `StatusDetails`), of one of two **kinds**: `token` — this page's token
+  request is rejected (an expired nonce), so the card offers Reload page, which brings a fresh
+  nonce; `config` — the server has no key or Google rejects it (`not_configured`), which a
+  reload can't fix, so the card offers Try again, which asks the server again. Either way with
+  the reason.
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`).
-- **Loop guard** — stops the model repeating the same action: past three identical **action
-  signatures** (tool name + arguments) in a row, the call is refused and the model is told to
-  try something else (`agent-client/src/loopGuard.js`).
+- **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
+  **action signature** (tool name + normalised arguments) that is the 4th identical one in a
+  row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
+  try something else. The window covers one request: the user speaking clears it. An **agent
+  turn** (its transcription fragments up to `turnComplete`) whose normalised sentence fills 3
+  of the last 5 turns is an **utterance loop**: `liveSession` sends one **corrective turn** per
+  episode, which ends when the agent says something else, calls a tool (narrating each step of
+  a task is no loop) or the user speaks. Reset on every manual connect.
+
+- **Capture worklet** — the AudioWorklet that turns the mic into what the Live API takes:
+  `agent-client/public/capture-worklet.js`, served as a same-origin file at
+  `/agent-client/capture-worklet.js`. It low-passes, resamples to 16 kHz, converts to Int16 and
+  posts one **frame** (80 ms, 1280 samples) at a time; `audioIO.js` base64-encodes each frame
+  for the session (`pcm.js`).
 
 ## Knowledge
 

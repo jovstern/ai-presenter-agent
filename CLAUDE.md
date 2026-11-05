@@ -22,16 +22,27 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested.
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
-    playback, barge-in) into React state; owns teardown on unmount.
+    playback, barge-in) into React state; owns teardown on unmount. Connect first checks for a
+    secure context and AudioWorklet (`voiceSupportError()`), and opens no session without them.
+  - `audioIO.js` — capture: the mic into `public/capture-worklet.js` (an AudioWorklet, loaded
+    with `addModule` from `/agent-client/capture-worklet.js`, a URL `main.jsx` resolves next to
+    its own script tag), which low-passes and resamples to 16 kHz Int16 off the main thread and
+    posts 80 ms frames (1280 samples, buffer transferred); playback with barge-in. Vite copies
+    `public/` into `dist/`; the worklet is plain JS, linted with AudioWorklet globals only and
+    typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`).
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
-  - `AgentApp.jsx` — a minimal card: one never-disabled Connect/Cancel/Disconnect/Retry/Reload
-    page button, a status line, an alert on `failed`, the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
+  - `AgentApp.jsx` — a minimal card (an `<aside aria-label="AI presenter">` landmark): one
+    never-disabled Connect/Cancel/Disconnect/Retry/Try again/Reload page button, a status line
+    ("Can't connect" on a fatal failure), an alert on `failed` (keyed by the connect attempt, so
+    a repeat is announced), the transcript, and the `📄` knowledge button. The old `VolumeMeter`,
     `TranscriptLog`, `Toast.jsx` and `renderIsolation` test didn't survive the rebuild; their
     successors (volume orb, coalesced transcript, Radix toast, render-isolation test) return
     with the designed card in M7 (issue #11).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`.
+  - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by
+    `server/geminiMint.js` for the token's constraint.
   - `bridgeProtocol.js` — types only: the bridge messages as JSDoc `@typedef`s. `sandbox/bridge.js`
     holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
     they drift, so edit both together.
@@ -50,20 +61,28 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     without internals. An unknown page a browser asks for gets a small HTML 404 with a link
     back; `/api/*` and non-HTML callers get the JSON one.
   - `expiringMap.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
-  - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the real
-    Gemini mint, `listen`, graceful SIGTERM/SIGINT shutdown (once, whichever signal comes
-    first).
+  - `geminiMint.js` — the real Gemini mint: a single-use token, 60 s to start a session,
+    locked to the model in `agent-client/src/liveModel.json` with `lockAdditionalFields: []`
+    ([ADR 0004](docs/adr/0004-live-token-constraints.md)).
+  - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the
+    v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
+    (once, whichever signal comes first).
   `npm start`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run check` (all three).
   Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
   **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any
   page), `style-src 'self' 'unsafe-inline'` (runtime `<style>` from the shadow root and Radix),
   `connect-src` adds the Gemini `wss:`/`https:` origins, `frame-src 'self'`, `img-src 'self'
-  data:`; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
+  data:`; `script-src 'self'` also covers the same-origin capture worklet (no `blob:`); the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
+  never runs; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
   adds a resource type updates the CSP in the same commit.
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
-  DOM snapshots). No build step.
+  DOM snapshots; reads the routes from the page's `#ds-routes` block, which the server
+  templates in). No build step.
 - `target-app/` (static) — 2-page mock app used as the demo target: `index.html` + `home.js`
-  (counter), `settings.html` + `settings.js` (Save confirmation), `style.css`. No build step.
+  (counter), `settings.html` + `settings.js` (Save confirmation; also a Notes textarea and a
+  Plan select for `fill`), `style.css`, and `routes.json` — the one route list (route name →
+  page path): the server templates it into the sandbox page for `bridge.js`, and
+  `actionTools.js` imports it for `navigate`'s enum. No build step.
 
 ## Commands and gates
 
@@ -98,7 +117,9 @@ path).
 
 Typecheck is `checkJs` + `strict` on plain JS with JSDoc types
 ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)): `npm run typecheck` in each package
-runs `tsc -p jsconfig.json` (TypeScript 7; plain `tsc` ignores `jsconfig.json`).
+runs `tsc -p jsconfig.json` (TypeScript 7; plain `tsc` ignores `jsconfig.json`); agent-client's
+also runs `tsc -p jsconfig.worklet.json` for the capture worklet (ES lib plus a small
+AudioWorkletGlobalScope shim, so no DOM names leak into it or its names into `src/`).
 agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`); it excludes
 `src/__tests__/` for now. The page nonce is no longer a window global: `main.jsx` reads it off
 its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
@@ -113,11 +134,12 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
 - `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Done: B1–B4, H1–H5, M2–M4, L9, L11, L12; the rest are open. Its original
+  M1–M9, L1–L12). Done: B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12. Open: L2, L3, L4, L5, L7 and
+  L8, card items deferred to M7 (issue #11), each marked "Deferred → M7". Its original
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
-  checking, 0003 hosting on Render.
+  checking, 0003 hosting on Render, 0004 Live token locked to the model only.
 - `docs/superpowers/` — the `/build` cycle: `specs/assessment.md`, `specs/design.md` (the spec)
   and `plans/plan.md` (milestones M4–M7 and their tasks).
 
@@ -140,29 +162,38 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
 
 ## Workflow notes
 
+- Every dependency in the three `package.json`s is pinned exactly (no `^`/`~`), lockfiles
+  committed; add one with `npm install --save-exact`.
 - Two npm packages, not a workspace — `cd` into `agent-client/` or `server/` before running
   their npm commands (`npm install` included); the root only runs `check`, `format`, `dev`,
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 10 vitest files (118 tests): `actionTools`,
-  `bridge` (runs `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`,
-  `bridgeProtocol` (the typedef copies match), `domSnapshotContext`,
-  `knowledgeStore`, `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing
-  Library). `server/__tests__/` has 2 vitest files (46 tests): `app` (supertest against
+- Tests: `agent-client/src/__tests__/` has 12 vitest files (259 tests): `actionTools`,
+  `audioIO` (the secure-context check; capture releases everything once), `bridge` (runs
+  `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
+  copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
+  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
+  `liveSession`, `loopGuard`, `pcm` and `useLiveAgent.test.jsx` (Testing Library). `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts, the CSP and other headers, `/health`, the HTML and JSON 404s, the nonce cap)
-  and `expiringMap` (expiry, pruning on access, the cap). `e2e/` has 3 Playwright specs (13
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
+  `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (21
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
-  violation in any frame: `bridge.spec.js` (7: `sandbox/bridge.js` on a fixture page, the test
-  doing the real handshake and port transfer — the actions, the allowlist, unknown routes, a
-  second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (2: the real
+  violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
+  doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
+  bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (3: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
-  socket, one token per reconnect, the page nonce; and the fatal `not_configured` path) and
-  `a11y.spec.js` (4: axe with zero violations on `/` idle, with the knowledge dialog open —
-  inside the shadow root — and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
-  Gemini: greeting, the five-step task, a forced close → recovery) runs only under
+  socket, one token per reconnect, the page nonce; and the two fatal paths from the keyboard — `not_configured` offers Try again, no
+  Reload page; a rejected nonce offers Reload page),
+  `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
+  `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after Disconnect) and
+  `a11y.spec.js` (5: axe with zero violations on `/` idle, with the knowledge dialog open —
+  inside the shadow root —, connected with a transcript line (the fake-Live harness in
+  `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
+  Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.

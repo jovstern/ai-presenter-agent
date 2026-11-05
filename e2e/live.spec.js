@@ -13,7 +13,7 @@ import { test, expect } from './fixtures.js';
 const LIVE_SOCKET = /^wss:\/\/generativelanguage\.googleapis\.com\//;
 
 /**
- * @typedef {{ name: string, startTime: number, detail: { name?: string, success?: boolean } | null }} Mark
+ * @typedef {{ name: string, startTime: number, detail: { name?: string, success?: boolean, bytes?: number, kind?: string } | null }} Mark
  */
 
 /** @param {import('@playwright/test').Page} page */
@@ -56,7 +56,7 @@ async function markTime(page, name) {
 /**
  * The durations this run is measured by, in ms (null when the mark never came).
  * @param {Mark[]} marks
- * @param {{ closedAt?: number, resumed?: boolean, reconnectAttempts?: number }} extra
+ * @param {Extra} extra
  */
 function summarize(marks, extra) {
   /** @param {string} name */
@@ -81,19 +81,42 @@ function summarize(marks, extra) {
         success: end?.detail?.success ?? null,
       };
     });
+  /** @param {string} name */
+  const sizes = (name) =>
+    marks.filter((entry) => entry.name === name).map((entry) => entry.detail?.bytes ?? null);
+  const { closedAt } = extra;
   return {
     connectToOpenMs: between(connectStart, open),
     connectToFirstAudioMs: between(connectStart, firstAudio),
     openToFirstAudioMs: between(open, firstAudio),
     tools,
-    reconnectMs: between(extra.closedAt, at('ds:reconnected')),
+    reconnectMs: between(closedAt, at('ds:reconnected')),
+    keyframeBytes: sizes('ds:keyframe'),
+    knowledgeBytes: sizes('ds:knowledge'),
+    loopTrips: marks
+      .filter((entry) => entry.name === 'ds:loop-trip')
+      .map((entry) => entry.detail?.kind ?? null),
+    // Knowledge sent again by a reconnect: what M9's resend costs per drop.
+    knowledgeResentBytes:
+      closedAt === undefined
+        ? null
+        : marks
+            .filter((entry) => entry.name === 'ds:knowledge' && entry.startTime > closedAt)
+            .reduce((sum, entry) => sum + (entry.detail?.bytes ?? 0), 0),
     ...(extra.reconnectAttempts === undefined
       ? {}
-      : { reconnectAttempts: extra.reconnectAttempts, resumed: extra.resumed }),
+      : {
+          reconnectAttempts: extra.reconnectAttempts,
+          resumed: extra.resumed,
+          recalledKnowledge: extra.recalledKnowledge,
+        }),
   };
 }
 
-/** @type {{ closedAt?: number, resumed?: boolean, reconnectAttempts?: number }} */
+/**
+ * @typedef {{ closedAt?: number, resumed?: boolean, reconnectAttempts?: number, recalledKnowledge?: boolean }} Extra
+ */
+/** @type {Extra} */
 let extra = {};
 
 test.beforeEach(() => {
@@ -153,7 +176,7 @@ test('greeting: the agent greets on connect', async ({ page }) => {
   await expect(card(page).agentLines.first()).toBeVisible({ timeout: 20_000 });
 });
 
-test('task: the spoken five-step task drives the target app', async ({ page }) => {
+test('task: the spoken six-step task drives the target app', async ({ page }) => {
   test.setTimeout(180_000);
   // The counter lives on Home only and resets on every load, so its values
   // are recorded as they change rather than read after the agent has left.
@@ -185,11 +208,35 @@ test('task: the spoken five-step task drives the target app', async ({ page }) =
   await expect(frame.getByTestId('save-confirmation')).toBeVisible({ timeout: 150_000 });
   await expect(frame.getByTestId('settings-heading')).toBeVisible();
   await expect(frame.getByTestId('notifications-toggle')).toBeChecked();
+  await expect(frame.getByTestId('plan-select')).toHaveValue('pro');
   expect(counterValues, 'the counter was incremented exactly twice').toEqual(['1', '2']);
 });
 
+// The reconnect scenario's knowledge file (knowledgeStore.js's storage format).
+// The follow-up asks for the code name, so the answer says whether the resumed
+// session still has the knowledge sent before the drop (M9).
+const KNOWLEDGE_FILE = {
+  id: 'e2e-knowledge',
+  name: 'demo-notes.md',
+  size: 0,
+  addedAt: 0,
+  text: [
+    '# Demo notes',
+    'The code name of this demo is Pelican.',
+    'The demo app has two pages: Home, with a counter, and Settings, with notifications,',
+    'notes, a plan (Free, Pro or Team) and a Save button. Saving shows a confirmation.',
+    'The Pro plan adds priority support and unlimited projects; the Team plan adds shared',
+    'workspaces and single sign-on. Notifications are off by default.',
+  ].join('\n'),
+};
+
 test('reconnect: a dropped socket recovers and the conversation carries on', async ({ page }) => {
   test.setTimeout(120_000);
+  await page.addInitScript((file) => {
+    if (window.top === window) {
+      localStorage.setItem('ds-agent-knowledge-files', JSON.stringify([file]));
+    }
+  }, KNOWLEDGE_FILE);
   // A pass-through to the real Gemini socket, so the test can drop it. The
   // page's frames are forwarded by hand only to read whether the reconnect's
   // setup asked to resume.
@@ -244,4 +291,14 @@ test('reconnect: a dropped socket recovers and the conversation carries on', asy
   await expect
     .poll(() => agentLines.count(), { timeout: 45_000 })
     .toBeGreaterThan(agentLinesBefore);
+  // Recorded, not asserted: a metric for M9, and the model's wording varies.
+  // The answer streams in, so it gets a few seconds to name the code name.
+  const answer = async () => (await agentLines.allTextContents()).slice(agentLinesBefore).join('');
+  extra.recalledKnowledge = await expect
+    .poll(answer, { timeout: 10_000 })
+    .toMatch(/pelican/i)
+    .then(
+      () => true,
+      () => false,
+    );
 });

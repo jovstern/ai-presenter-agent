@@ -70,6 +70,22 @@ const GEMINI_ORIGINS = [
 // request, not a wrong nonce.
 const TokenQuery = z.object({ nonce: z.uuid() });
 
+// target-app/routes.json, the one route list (docs/code-review-notes.md M1):
+// route name -> the page's absolute path. bridge.js and actionTools.js both
+// derive from it, so a bad file fails the server's start, not a demo.
+const Routes = z
+  .record(z.string().regex(/^[a-z][a-z0-9-]*$/), z.string().regex(/^\/target-app\/[\w-]+\.html$/))
+  .refine((routes) => Object.keys(routes).length > 0, 'no routes');
+
+/**
+ * JSON for a `<script type="application/json">` data block. Every `<` is
+ * escaped, so no value can close the tag (`</script>`) or open a comment.
+ * @param {unknown} value
+ */
+export function jsonForScriptBlock(value) {
+  return JSON.stringify(value).replaceAll('<', '\\u003c');
+}
+
 /**
  * The one error shape for every JSON error (node-api.md).
  * @param {Response} res
@@ -138,6 +154,8 @@ function contentSecurityPolicy(production) {
       defaultSrc: ["'self'"],
       // No inline script on any served page: the target app's scripts are
       // files, and the page nonce rides on a data- attribute (sandbox/index.html).
+      // Also governs worklets: the mic capture worklet is a same-origin file
+      // (/agent-client/capture-worklet.js), so no blob: is needed (M6 T3).
       scriptSrc: ["'self'"],
       // 'unsafe-inline' on purpose: the agent-client's shadow root gets its
       // stylesheet as a runtime <style> element (main.jsx), and Radix Dialog's
@@ -161,16 +179,29 @@ function contentSecurityPolicy(production) {
   };
 }
 
+/** @type {Record<string, string>} */
+const HTML_ENTITIES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/**
+ * Text made safe for an HTML element or a quoted attribute.
+ * @param {string} text
+ */
+export function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, (char) => HTML_ENTITIES[char] ?? char);
+}
+
 /**
  * The one look for the server's own HTML pages (the 404 and the page-load
  * 429), so they match: a heading, a line of text and a link back to the
- * demo. Static text only (callers pass constants), no script, under the same
- * CSP as everything else.
- * @param {string} title
- * @param {string} text
- * @param {string} linkText
+ * demo. Today's callers pass constants, but every argument is escaped anyway,
+ * so a later caller passing a path or a message can't inject markup. No
+ * script, under the same CSP as everything else.
+ * @param {string} rawTitle
+ * @param {string} rawText
+ * @param {string} rawLinkText
  */
-function errorPage(title, text, linkText) {
+export function errorPage(rawTitle, rawText, rawLinkText) {
+  const [title, text, linkText] = [rawTitle, rawText, rawLinkText].map(escapeHtml);
   return `<!doctype html>
 <html lang="en">
   <head>
@@ -276,9 +307,16 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
 
   // A1 (assessment): every URL that renders the sandbox page must go through
   // the nonce template, or the page ships the literal %%DS_NONCE%% and every
-  // /api/live-token call fails (see H1 above). Read once: the file only
-  // changes on a deploy, which restarts the process anyway.
-  const sandboxHtml = fs.readFileSync(path.join(ROOT, 'sandbox/index.html'), 'utf8');
+  // /api/live-token call fails (see H1 above). Read once: the files only
+  // change on a deploy, which restarts the process anyway. The route list is
+  // templated in here, once; only the nonce differs per load. A replacer
+  // function, not a string, so a `$&` in the JSON is not a replace pattern.
+  const routes = Routes.parse(
+    JSON.parse(fs.readFileSync(path.join(ROOT, 'target-app/routes.json'), 'utf8')),
+  );
+  const sandboxHtml = fs
+    .readFileSync(path.join(ROOT, 'sandbox/index.html'), 'utf8')
+    .replace('%%DS_ROUTES%%', () => jsonForScriptBlock(routes));
 
   const app = express();
   app.disable('x-powered-by');
