@@ -46,7 +46,17 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
     the failure's reason as plain text, a `role="alert"` for mic and voice-support guidance
     (keyed by the connect attempt, so a repeat is announced), the transcript, the `📄`
-    knowledge button and the volume orb.
+    knowledge button (rendered by `KnowledgeModal.jsx`) and the volume orb.
+  - `KnowledgeModal.jsx` — the `📄 <count>` button (the Radix `Dialog.Trigger`, so closing returns
+    focus to it) and the knowledge dialog, portalled into the shadow root: Add files (a real
+    `<button>` that opens the file picker and takes dropped files), the file list with "Remove
+    <file name>" buttons, an empty state, a rules field with a used / limit counter
+    (`aria-describedby`; a polite note near the limit, a `role="alert"` over it, the text kept
+    but not saved) and `role="alert"` add errors. It reads `knowledgeStore.js` through
+    `useSyncExternalStore` (no mirrored state). Its Tab wrap and open focus are its own, read
+    from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
+    its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` / `tabStops`,
+    shared with `FailureToast.jsx`.
   - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason, the card's
     action under the same label, Dismiss. Its viewport sits above the card in the shadow root
     and its announcer in `main.jsx`'s portal container; it is the one live announcement of the
@@ -197,13 +207,15 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 16 vitest files (316 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 17 vitest files (328 tests): `actionTools`,
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
-  `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
+  oversize alert, drop, the rules counter and over-limit alert, the picker from a button, open
+  focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (last 3, live-region attributes, a node per fragment), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, one announcement, the
@@ -213,7 +225,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (25
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (27
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
@@ -224,8 +236,10 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   Reload page, with its toast once per failure and F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
-  `a11y.spec.js` (9: axe with zero violations, in light and dark, on `/` idle, failed with its
-  toast and with the knowledge dialog open — inside the shadow root —; connected with a coalesced transcript line (the fake-Live harness in
+  `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its
+  toast and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
+  keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
+  inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
   `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
   Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.

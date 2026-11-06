@@ -51,6 +51,22 @@ describe('knowledgeStore', () => {
     }
   });
 
+  // useSyncExternalStore re-renders, and warns of an infinite loop, when two
+  // reads with no change in between return different values.
+  it('lists the same array until the files change, then a new one', async () => {
+    const empty = knowledgeStore.listFiles();
+    expect(knowledgeStore.listFiles()).toBe(empty);
+
+    await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+    const one = knowledgeStore.listFiles();
+    expect(one).not.toBe(empty);
+    expect(one.map((f) => f.name)).toEqual(['a.txt']);
+    expect(knowledgeStore.listFiles()).toBe(one);
+    // A rules write leaves the file list as it was.
+    knowledgeStore.setRules('be brief');
+    expect(knowledgeStore.listFiles()).toBe(one);
+  });
+
   it('reports total bytes across stored files', async () => {
     await knowledgeStore.addFile(makeFile('a.txt', 'AAAA'));
     await knowledgeStore.addFile(makeFile('b.txt', 'BB'));

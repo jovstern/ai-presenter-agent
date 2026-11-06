@@ -1,10 +1,9 @@
-import { useRef, useState, useSyncExternalStore } from 'react';
+import { useRef } from 'react';
 import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import { FailureToast } from './FailureToast.jsx';
 import { VolumeOrb } from './VolumeOrb.jsx';
 import { Transcript } from './Transcript.jsx';
-import * as knowledgeStore from './knowledgeStore.js';
 
 /** @import { BridgeChannel } from './bridgeChannel.js' */
 /** @import { StatusDetails } from './liveSession.js' */
@@ -110,12 +109,6 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const action = primaryAction(status, details, agent);
   const primaryRef = useRef(/** @type {HTMLButtonElement | null} */ (null));
 
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  // Read straight from the store rather than mirroring it into local state —
-  // knowledgeStore.subscribe/fileCount/hasContent are the source of truth.
-  const fileCount = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.fileCount);
-  const hasContent = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.hasContent);
-
   const failureReason = status === 'failed' ? details?.reason : undefined;
 
   return (
@@ -139,16 +132,9 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         >
           {action.label}
         </button>
-        {/* Named by its content, not an aria-label: the visible count has to be
-            part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
-            and the emoji is decoration. The name reads "Knowledge files: 0". */}
-        <button
-          className={`agent-app__knowledge-btn${hasContent ? '' : ' agent-app__knowledge-btn--empty'}`}
-          onClick={() => setKnowledgeOpen(true)}
-        >
-          <span aria-hidden="true">📄</span>{' '}
-          <span className="visually-hidden">Knowledge files:</span> {fileCount}
-        </button>
+        {/* The knowledge button, which opens the dialog (portalled into the
+            shadow root) and takes focus back when it closes. */}
+        <KnowledgeModal portalContainer={portalContainer} />
         <span className="agent-app__status" role="status">
           {statusText(status, details)}
         </span>
@@ -166,11 +152,6 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
             {micErrorText(micError)}
           </div>
         )}
-        <KnowledgeModal
-          open={knowledgeOpen}
-          onOpenChange={setKnowledgeOpen}
-          portalContainer={portalContainer}
-        />
       </aside>
       <FailureToast
         failureId={failureCount}

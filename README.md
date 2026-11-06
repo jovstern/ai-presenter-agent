@@ -2,8 +2,8 @@
 
 A rebuild of the runtime half of a Presenter Agent — an AI avatar embedded in a demo that talks
 *and* acts (click/scroll/navigate/fill) on the app behind it, hardened against the gaps found in
-the v1 build. It also has a small RAG-lite knowledge feature: drop `.txt`/`.md` files into a modal
-and the agent gets them as context, stored only in your browser's `localStorage`.
+the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`/`.md` files, and
+standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
 Start with [`docs/project-knowledge-handoff.md`](./docs/project-knowledge-handoff.md) — the full
 origin story, what's actually verified vs. just written, every caveat, and what's planned next.
@@ -76,12 +76,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 4 specs, 23 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 4 specs, 27 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 16 files, 300 tests
+npm test        # vitest: 17 files, 328 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -131,8 +131,14 @@ The suite in `agent-client/src/__tests__/`:
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
-- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, file
-  ids without `crypto.randomUUID` (plain http), the context blob it builds.
+- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list (the
+  same array until the files change, for `useSyncExternalStore`), file ids without
+  `crypto.randomUUID` (plain http), the context blob it builds.
+- `KnowledgeModal.test.jsx` — the knowledge dialog in a real shadow root: a file added, listed
+  and removed (focus moves to the next Remove, or Add files), an oversize file as an alert, a
+  drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
+  and not saved, the file picker from a real button, open focus, Tab wrapping both ways,
+  Escape returning focus to the knowledge button.
 - `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
   sentences, realistic sequences that must pass, the window cleared by the user speaking and the
   utterance episode by a tool call.
@@ -180,7 +186,9 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 - `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule), in light and dark, on `/`
   with the card idle, failed with its toast, and with the knowledge dialog open; connected (the fake-Live harness, `e2e/fakeLive.js`, shared
   with `loop.spec.js`) with a transcript line on screen, and on both target-app pages: zero
-  violations. axe walks the
+  violations. In each theme it also walks the knowledge dialog from the keyboard only: Enter on
+  Add files opens the file picker, Tab and Shift+Tab wrap inside the dialog, Escape returns
+  focus to the knowledge button. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the

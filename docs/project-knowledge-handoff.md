@@ -162,7 +162,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   failure's reason, mic alerts, transcript, `📄` knowledge button); `FailureToast.jsx` — the Radix
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
   `Transcript.jsx` — the last 3 coalesced turns, `aria-live="polite"` (additions only);
-  `KnowledgeModal.jsx` — the Radix dialog.
+  `KnowledgeModal.jsx` — the knowledge button and its Radix dialog (§5.1).
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`, `transcript.js` (fragments → bounded turns).
 
@@ -176,10 +176,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 16 files,
-  300 tests after M7 T3).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 682.3 kB,
-  166.2 kB gzip after M7 T3 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 17 files,
+  328 tests after M7 T5, with `KnowledgeModal.test.jsx`).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 714.5 kB,
+  175.4 kB gzip after M7 T5 (174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -440,8 +440,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 
 ### 5.1 RAG-lite knowledge modal (client-side, no backend) — IMPLEMENTED
 
-Built: a button on the agent card (`📄 <count>`) opens a **Radix `Dialog`** (`KnowledgeModal.jsx`)
-with a drag-and-drop zone plus a click-to-browse fallback. Dropped files are read via
+Built: a button on the agent card (`📄 <count>`, the dialog's `Dialog.Trigger`) opens a **Radix
+`Dialog`** (`KnowledgeModal.jsx`) with an Add files button — a real `<button>`, so the keyboard
+reaches the file picker — that is also the drop target for dragged files (M7 T5; it was a
+mouse-only `<div>` before). Dropped files are read via
 `FileReader` and stored, as `{id, name, size, addedAt, text}`, in `localStorage` under
 `ds-agent-knowledge-files` (`knowledgeStore.js`) — no server-side storage, no backend indexing
 pipeline, unlike the original system's Cusmo-owned RAG pipeline.
@@ -473,11 +475,33 @@ Decisions actually made (the open questions from the plan, resolved):
   `Portal`. Radix Toast's `Viewport` renders in place, but its screen-reader announcer is a
   portal: `FailureToast.jsx` passes the same container as the provider's `announcerContainer`
   (M7 T4). Radix also tracks focus with `document.activeElement`, which inside a shadow root is
-  the host; see §5.2 for what that broke in the toast.
-- Tested: `knowledgeStore.test.js` (10 tests) covers accept/reject-by-extension, the size cap, add/
-  remove/list, the concatenated context blob, byte totals, and that the change event fires exactly
-  once per write. Not tested: the modal component itself (drag/drop interaction, Radix wiring) —
-  reasonable next addition if this UI gets more complex.
+  the host; see §5.2 for what that broke in the toast. In the dialog it broke the focus trap
+  (found by the M4 UI review, fixed in M7 T5): FocusScope's Tab wrap compares
+  `document.activeElement` to the first and last controls, so it never matched and Tab from
+  Close walked out of the dialog (to Radix's focus guards on the page, then the browser), and
+  Shift+Tab from the first control onto the card; its trapping `focusin` listener on `document`
+  sees the host as every event's target, so it never pulled focus back; and its open autofocus
+  never saw focus move and fell back to focusing the dialog itself. `KnowledgeModal`'s Content
+  `onKeyDown` now wraps Tab at the two edges using the shadow root's own `activeElement`
+  (`shadowFocus.js`, shared with the toast), and `onOpenAutoFocus` focuses Add files. Escape
+  left focus nowhere for another reason: the knowledge button wasn't a `Dialog.Trigger`, so
+  Radix's modal close (which focuses the trigger) had none; it is one now.
+- **The dialog's states (M7 T5, R21):** it reads the store through `useSyncExternalStore`
+  (`listFiles()` returns the same array until the files change), with no mirrored state. An
+  empty state says what files are for; each file has a "Remove <file name>" button, and removing
+  one moves focus to the next file's Remove, else the previous, else Add files; an add the store
+  refuses is a `role="alert"` naming the file and the reason. The rules field (GitHub issue #5's
+  "rules polish") has a used / limit counter it is described by, a polite note once within 200
+  characters and again at the limit (not per keystroke), and over the limit keeps the text on
+  screen, unsaved, with `aria-invalid` and a `role="alert"` saying by how much — the store's
+  "no silent truncation" carried into the UI (the old `maxLength` cut a paste silently).
+- Tested: `knowledgeStore.test.js` covers accept/reject-by-extension, the size cap, add/
+  remove/list, the stable list snapshot, the concatenated context blob, byte totals, and that
+  the change event fires exactly once per write. `KnowledgeModal.test.jsx` (M7 T5) renders the
+  dialog in a real shadow root and covers every state above, the picker from a button, a drop,
+  open focus, the Tab wrap both ways and Escape returning focus; `e2e/a11y.spec.js` walks it from
+  the keyboard only in Chromium (Enter → the real file chooser, Tab wraps, Escape), axe 0 in
+  both themes.
 
 ### 5.2 Radix UI for generic components — IMPLEMENTED
 

@@ -405,42 +405,71 @@ button:active {
   text-wrap: pretty;
 }
 
+/* Add files: a real button (keyboard and pointer), and the drop target. */
 .knowledge-modal__dropzone {
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
   margin: var(--space-4) 0;
   padding: var(--space-4);
-  border: var(--border-width) dashed var(--color-border-strong);
-  border-radius: var(--radius-control);
-  color: var(--color-text-muted);
+  border-style: dashed;
   text-align: center;
-  cursor: pointer;
   transition:
-    border-color var(--duration-fast) var(--ease-out),
-    color var(--duration-fast) var(--ease-out);
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
 }
 
-.knowledge-modal__dropzone--active {
+/* Its two lines are text only, so dragging over them isn't a dragleave. */
+.knowledge-modal__dropzone > span {
+  pointer-events: none;
+}
+
+.knowledge-modal__dropzone-hint {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+}
+
+.knowledge-modal__dropzone[data-dragging] {
   border-color: var(--color-accent);
-  color: var(--color-text);
+  background: var(--color-surface-raised);
 }
 
-.knowledge-modal__error {
-  margin-bottom: var(--space-2);
+.knowledge-modal__content .knowledge-modal__error {
+  margin: 0 0 var(--space-3);
   color: var(--color-danger);
 }
 
+.knowledge-modal__content .knowledge-modal__empty {
+  margin-bottom: var(--space-4);
+}
+
 .knowledge-modal__files {
-  margin: 0 0 var(--space-3);
+  margin: 0 0 var(--space-4);
   padding: 0;
   list-style: none;
 }
 
+/* Name, size, then Remove at the row's end. */
 .knowledge-modal__files li {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--space-2);
-  margin-bottom: var(--space-1);
   overflow-wrap: anywhere;
+}
+
+.knowledge-modal__files li + li {
+  margin-top: var(--space-1);
+}
+
+.knowledge-modal__file-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-modal__file-size {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .knowledge-modal__rules-label {
@@ -453,13 +482,30 @@ button:active {
   display: block;
   width: 100%;
   min-height: 72px;
-  margin-top: var(--space-1);
+  margin-top: var(--space-2);
   padding: var(--space-2);
   border: var(--border-width) solid var(--color-border-strong);
   border-radius: var(--radius-control);
   background: var(--color-surface);
   font-weight: var(--weight-regular);
   resize: vertical;
+}
+
+.knowledge-modal__rules[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+/* Used / limit, under the field's end edge. */
+.knowledge-modal__content .knowledge-modal__counter {
+  margin: var(--space-1) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+/* Over the limit: the danger colour, and the alert below says it in words. */
+.knowledge-modal__content .knowledge-modal__counter[data-over] {
+  color: var(--color-danger);
 }
 
 .knowledge-modal__close {

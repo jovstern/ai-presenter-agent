@@ -72,7 +72,11 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
       page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
       one live announcement of the reason; F8 and Tab handled inside the shadow root).)*
-- [ ] R21 The knowledge modal is polished and has a component test.
+- [x] R21 The knowledge modal is polished and has a component test. *(M7 T5:
+      `KnowledgeModal.jsx` reads the store through `useSyncExternalStore`, owns the knowledge
+      button as its `Dialog.Trigger`, and does its own Tab wrap in the shadow root;
+      `KnowledgeModal.test.jsx`, and the keyboard walk in `e2e/a11y.spec.js`. Issue #5's
+      "rules polish" — the character-limit feedback — is this task's counter and alert.)*
 
 **M8: deploy and close the cycle (new issue)**
 - [ ] R22 Live on Render over HTTPS, with config parsed at startup.
@@ -153,8 +157,9 @@ verified against it); agent-client `react` / `react-dom` `19.3.0`, `@radix-ui/re
 `npm install --save-exact`.
 
 No `useReducer`, context or state library. `useLiveAgent` keeps `useState` and refs. The
-knowledge store keeps `useSyncExternalStore`. `KnowledgeModal` stops mirroring the store
-into `useState` in M7 (R21).
+knowledge store keeps `useSyncExternalStore`. `KnowledgeModal` stopped mirroring the store
+into `useState` in M7 T5 (R21); its one local state for the rules is text the store refused
+(over the limit), kept so nothing typed is lost.
 
 ## Data model: the bridge protocol (ADR 0001)
 
@@ -215,9 +220,18 @@ come from `status`.
   distinct.
 - **Knowledge:** an icon button with an accessible name and a count badge, opening the Radix
   dialog. Its states:
-  - empty: explain the feature and the next action;
-  - error: an inline `role="alert"`;
-  - a rules character counter.
+  - empty: explain the feature and the next action ("No files yet. Add product notes or a
+    script, and the presenter draws on them when it talks."), under Add files;
+  - Add files: a real button that opens the file picker (keyboard and pointer), and the drop
+    target for dragged files;
+  - each file: name, size, and a Remove button named "Remove <file name>"; removing moves focus
+    to the next file's Remove, else the previous, else Add files;
+  - error: an inline `role="alert"` ("<file> wasn't added." and the store's reason);
+  - rules: a used / limit counter (`1,850 / 2,000`) the field is described by; a polite note
+    once within 200 characters and again at the limit (not per keystroke); over the limit the
+    text stays, unsaved, with `aria-invalid` and a `role="alert"` saying by how much;
+  - focus: Add files on open; Tab and Shift+Tab wrap inside the dialog; Escape or Close
+    returns focus to the knowledge button (M7 T5).
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
 - **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus

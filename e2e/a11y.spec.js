@@ -90,8 +90,74 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
 
       const { violations, checkedInShadowRoot } = await analyze(page);
       expect(violations).toEqual([]);
-      expect(checkedInShadowRoot('textarea')).toBe(true);
+      // The dialog's controls (axe names the rules field by its generated id,
+      // so its label stands in for it).
+      expect(checkedInShadowRoot('.knowledge-modal__dropzone')).toBe(true);
+      expect(checkedInShadowRoot('label')).toBe(true);
     });
+
+    // Keyboard only, in the real shadow root, where document.activeElement is
+    // the host: Radix's own trap let Tab walk out of the dialog and Escape
+    // left focus nowhere (KnowledgeModal.jsx). The file picker is reached by
+    // Enter on Add files, and Tab then wraps inside the dialog both ways.
+    test('the knowledge dialog by keyboard: picker, Tab wraps, Escape returns focus', async ({
+      page,
+    }) => {
+      await page.goto('/');
+      const knowledge = cardButton(page, 'Knowledge files: 0');
+      await expect(knowledge).toBeVisible();
+      // Tab from the top of the page to the knowledge button.
+      for (let i = 0; i < 30 && !(await isFocused(knowledge)); i++) {
+        await page.keyboard.press('Tab');
+      }
+      await expect(knowledge).toBeFocused();
+
+      await page.keyboard.press('Enter');
+      const dialog = page.locator(HOST).getByRole('dialog', { name: 'Knowledge' });
+      await expect(dialog).toBeVisible();
+      const add = dialog.getByRole('button', { name: /^Add files/ });
+      await expect(add).toBeFocused();
+
+      const [chooser] = await Promise.all([
+        page.waitForEvent('filechooser'),
+        page.keyboard.press('Enter'),
+      ]);
+      await chooser.setFiles({
+        name: 'notes.md',
+        mimeType: 'text/markdown',
+        buffer: Buffer.from('# Pricing\nThe pro plan is $20.'),
+      });
+      const remove = dialog.getByRole('button', { name: 'Remove notes.md', exact: true });
+      await expect(remove).toBeVisible();
+      await expect(add).toBeFocused();
+
+      // Forward through every control, and from the last back to the first.
+      const rules = dialog.getByRole('textbox', { name: 'Rules' });
+      const close = dialog.getByRole('button', { name: 'Close', exact: true });
+      for (const next of [remove, rules, close, add]) {
+        await page.keyboard.press('Tab');
+        await expect(next).toBeFocused();
+      }
+      // And backwards from the first to the last.
+      await page.keyboard.press('Shift+Tab');
+      await expect(close).toBeFocused();
+
+      const { violations, checkedInShadowRoot } = await analyze(page);
+      expect(violations).toEqual([]);
+      expect(checkedInShadowRoot('.knowledge-modal__file-name')).toBe(true);
+
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(cardButton(page, 'Knowledge files: 1')).toBeFocused();
+    });
+  });
+}
+
+/** Whether `locator` has focus in its own tree (the shadow root's, for the card). */
+function isFocused(/** @type {import('@playwright/test').Locator} */ locator) {
+  return locator.evaluate((node) => {
+    const root = node.getRootNode();
+    return root instanceof ShadowRoot && root.activeElement === node;
   });
 }
 

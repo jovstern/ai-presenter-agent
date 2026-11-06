@@ -23,15 +23,34 @@ const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
 // Rules are meant to be short standing instructions, not a document.
 const MAX_RULES_CHARS = 2000;
 
+// The last parse, by the stored string it came from: while that string is
+// unchanged, every read returns the same array. KnowledgeModal reads the list
+// through useSyncExternalStore, which needs a stable snapshot (a fresh array
+// on each read would re-render forever). Callers never mutate it.
+let cachedRaw = /** @type {string | null | undefined} */ (undefined);
+let cachedFiles = /** @type {KnowledgeFile[]} */ ([]);
+
 // A value that fails to parse, or isn't an array, reads as empty: a non-array
 // (written by another script on this origin, or by hand) used to reach
 // totalBytes' reduce and throw inside useSyncExternalStore.
 /** @returns {KnowledgeFile[]} */
 function readFiles() {
+  const raw = localStorage.getItem(FILES_KEY);
+  if (raw === cachedRaw) return cachedFiles;
+  cachedRaw = raw;
+  cachedFiles = parseFiles(raw);
+  return cachedFiles;
+}
+
+/**
+ * @param {string | null} raw
+ * @returns {KnowledgeFile[]}
+ */
+function parseFiles(raw) {
   /** @type {unknown} */
   let parsed;
   try {
-    parsed = JSON.parse(localStorage.getItem(FILES_KEY) ?? '[]');
+    parsed = JSON.parse(raw ?? '[]');
   } catch {
     return [];
   }
@@ -84,10 +103,6 @@ export function listFiles() {
 
 export function totalBytes() {
   return readFiles().reduce((sum, f) => sum + f.size, 0);
-}
-
-export function fileCount() {
-  return readFiles().length;
 }
 
 // Resolves ok({ file }) or fail(reason). Refuses outright on a rejected

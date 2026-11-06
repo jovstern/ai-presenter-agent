@@ -1,17 +1,12 @@
 import { useRef, useState } from 'react';
 import * as Toast from '@radix-ui/react-toast';
+import { focusedIn } from './shadowFocus.js';
 
 /** @import { KeyboardEvent, FocusEvent, RefObject } from 'react' */
 
 // Long enough to read the reason and reach the action; Radix pauses it while
 // the pointer or focus is in the toast. The reason stays in the card after.
 const TOAST_DURATION_MS = 8000;
-
-/** @param {Element} node What has focus in the node's own tree (the shadow root's, in the widget). */
-function focusedIn(node) {
-  const root = node.getRootNode();
-  return root instanceof Document || root instanceof ShadowRoot ? root.activeElement : null;
-}
 
 /**
  * The failure toast (spec Screens, R20): a Radix toast, once per failure.
