@@ -1,7 +1,7 @@
 # Plan — cycle 1 (M4 finish → M8)
 
 Spec: `docs/superpowers/specs/design.md`. Assessment: `docs/superpowers/specs/assessment.md`.
-ADRs: `docs/adr/0001–0003`.
+ADRs: `docs/adr/0001–0004`.
 
 ## Global constraints
 
@@ -700,3 +700,43 @@ What pushes it to the worst case:
 | M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min (~105 re-scaled) | ~150 min (1.43×) | The React Compiler had never run (T2b, a user ruling); Radix focus inside the shadow root needed our own Tab handling in the toast and the dialog; the UI review's Must fix (sliced transcript lines) and the observer's CLS miss led to a 7-commit fix wave and two more rounds. Usage-limit pauses aren't counted. M4–M7 together: ~557 vs ~495 min (1.13×), so M8 ~80. |
 | M8 | ~70 min | | |
+
+### Calibration
+
+Estimated (as first planned) vs actual, agent time, usage-limit pauses not counted:
+
+| Milestone | Kind | Estimated | Actual | Ratio |
+|---|---|---|---|---|
+| M4 closed loop | integration fix wave, real-browser checks | ~110 min | ~127 min | 1.15× |
+| M5 quality baseline | tooling, tests, CI, live e2e | ~150 min | ~130 min | 0.87× |
+| M6 hardening + tuning | robustness + live-API tuning | ~130 min | ~150 min | 1.15× |
+| M7 presentable widget | UI-heavy | ~100 min | ~150 min | 1.50× |
+| M8 deploy + close | deploy, docs | ~70 min | | |
+| **M4–M7** | | **~490 min** | **~557 min** | **1.14×** |
+
+The task sizes held: where a milestone ran over, it was the end-of-milestone overhead (reviews,
+fix waves, extra review rounds) or a task of a kind the calibration has no row for. M5, the
+one milestone of plain tooling and tests, came in under.
+
+Proposed edits to the calibration paragraph of `~/Mnt/portfolio/.claude/skills/build/SKILL.md`
+§4 (proposed only; the kit is not edited from here):
+
+1. **Milestone overhead by kind.** Replace "about 20–35 min for the three reviews, the fix wave,
+   the gates and the demo" with: about 20–35 min for a milestone with little or no UI, and
+   **about 45–60 min for a UI-heavy one** (a new or redesigned screen). M7's UI review found a
+   Must fix and the observer a field-CLS miss that Lighthouse can't see, which took a
+   7-commit fix wave and two more review rounds.
+2. **A row for live-API tuning.** Add: a task that tunes against a live third-party API
+   (prompts, timeouts, retry knobs measured from real runs) about **30–45 min**, counted as
+   roughly 2–3 min per live run times the runs expected (M6 T5 took 19 runs). Say in the
+   plan how many runs the estimate assumes.
+3. **Third-party UI primitives inside a shadow root or iframe count as risky** (15–25 min, not
+   the medium 8–12): their focus and `aria-hidden` handling assumes the light DOM (M7: Radix's
+   FocusScope and `hideOthers` both needed our own handling).
+4. **A tool the build depends on but no test proves is running counts as unverified**: plan a
+   small task to prove it (a canary test) before building on it. M7's React Compiler had never
+   run (a T2b inserted mid-milestone).
+5. **Re-scale after every milestone, by the cumulative ratio**, not only after M1 — this plan
+   did so from M4 on and the remaining estimate stayed within ~15 %. Note that usage-limit
+   pauses are excluded from actuals.
+

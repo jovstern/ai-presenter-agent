@@ -22,55 +22,55 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 ## Requirements checklist
 
 **M4: finish the closed loop (issue #4, PR #9)**
-- [ ] R1 The sandbox works at both `/` and `/sandbox/` (A1).
-- [ ] R2 Re-connecting never leaves a second mic stream or `AudioContext` alive, and
-      unmount releases everything (A2, M4).
-- [ ] R3 Status is one of `idle`, `connecting`, `open`, `reconnecting`, `failed`, `closed`.
+- ✅ R1 The sandbox works at both `/` and `/sandbox/` (A1). *(M4 T1: one handler templates `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html`; `server/__tests__/app.test.js`.)*
+- ✅ R2 Re-connecting never leaves a second mic stream or `AudioContext` alive, and
+      unmount releases everything (A2, M4). *(M4 T4, M6 fix wave: `useLiveAgent.js` teardown, capture released once; `useLiveAgent.test.jsx`, `audioIO.test.js`.)*
+- ✅ R3 Status is one of `idle`, `connecting`, `open`, `reconnecting`, `failed`, `closed`.
       `failed` is shown only after the retries run out, together with a Retry action (A3,
-      spec goal #6).
-- [ ] R4 Agent ↔ bridge traffic runs on a private MessageChannel (A4, ADR 0001).
-- [ ] R5 A bridge action that throws replies with `success:false` straight away (A5, M3).
-- [ ] R6 `liveSession.js` has unit tests covering reconnect, supersede, serialisation,
-      resumption and status (A6, H2).
-- [ ] R7 Docs are true (assessment §7), and the review checklist is ticked in place.
+      spec goal #6). *(M4 T3; M7 T4 adds the card's states and the toast; `liveSession.test.js`, `e2e/widget.spec.js`.)*
+- ✅ R4 Agent ↔ bridge traffic runs on a private MessageChannel (A4, ADR 0001). *(M4 T2: `bridgeChannel.js` and `sandbox/bridge.js`; `e2e/bridge.spec.js`.)*
+- ✅ R5 A bridge action that throws replies with `success:false` straight away (A5, M3). *(M4 T2: `bridge.test.js`.)*
+- ✅ R6 `liveSession.js` has unit tests covering reconnect, supersede, serialisation,
+      resumption and status (A6, H2). *(M4 T3: `liveSession.test.js`.)*
+- ✅ R7 Docs are true (assessment §7), and the review checklist is ticked in place. *(M4 T5, then every milestone; M8 T4 brought CLAUDE.md, the README and the handoff fully up to date; `code-review-notes.md` all ticked.)*
 
 **M5: quality baseline (new issue)**
-- [x] R8 ESLint and Prettier, with `npm run check` per package and at a thin root. *(M5 T1)*
-- [x] R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002). *(M5 T2)*
-- [x] R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
+- ✅ R8 ESLint and Prettier, with `npm run check` per package and at a thin root. *(M5 T1)*
+- ✅ R9 `tsc --noEmit` with checkJs runs in `check` (ADR 0002). *(M5 T2)*
+- ✅ R10 Server tests cover the token gate; the server uses pino, helmet + CSP and has
       `/health`. *(M5 T3)*
-- [x] R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
+- ✅ R11 A deterministic Playwright e2e covers the bridge, nonce, a11y and console errors.
       *(M5 T4)*
-- [x] R12 An opt-in live e2e (fake-mic WAV) records the app metrics. *(M5 T5)*
-- [x] R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
+- ✅ R12 An opt-in live e2e (fake-mic WAV) records the app metrics. *(M5 T5)*
+- ✅ R13 CI runs `check` and the deterministic e2e on each PR, and `master` is protected.
       *(M5 T6: CI done — `.github/workflows/ci.yml` (job `check`) and `pr-demo-check.yml` (job
       `demo`). `master` protected after PR #14's first run: `check` and `demo` required, admins
       included, no force pushes.)*
 
 **M6: hardening and tuning (issue #5)**
-- [x] R14 Every remaining M and L item is closed or deferred with a reason. *(M6 T6: every M
+- ✅ R14 Every remaining M and L item is closed or deferred with a reason. *(M6 T6: every M
       item and L1, L6, L9–L12 are fixed; L2, L3, L4, L5, L7 and L8 are card items, deferred
       → M7 (its T1–T3 name them). The M4 and M5 re-review items are fixed too:
       `fatal: 'config' | 'token'`, a 10 s setup timeout, the resume handle kept on a network
       failure, the backoff reset after 5 s or the first content, `labelFor`'s order and cap,
       `errorPage` escaping.)*
-- [x] R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
+- ✅ R15 Capture uses an AudioWorklet. *(M6 T3: `agent-client/public/capture-worklet.js`,
       same-origin under `script-src 'self'`; 16 kHz Int16 80 ms frames; `e2e/audio.spec.js`.)*
-- [x] R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
+- ✅ R16 Knobs (snapshot cap, refresh ratio, loop threshold) are tuned from live-e2e
       numbers. *(M6 T5, `docs/metrics/m06.md`: the cap, the ratio and the loop thresholds are
       kept on the numbers; the still-attached retry is 400 ms × the attempt; a resume no
       longer resends knowledge. Task 8 of 10 meets the 80 % budget only just, and the cap and
       ratio are measured on the 8-node target app only.)*
 
 **M7: presentable widget (new issue)**
-- [x] R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.
+- ✅ R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.
       *(M7 T1: the tokens on `:host`, both schemes, reduced motion; M7 T6: `e2e/widget.spec.js`
       checks the placement at 360, 768 and 1440 px and runs axe on the card in both themes.)*
-- [x] R18 A rAF volume meter held in a ref, plus a Profiler render-count test (spec goals
+- ✅ R18 A rAF volume meter held in a ref, plus a Profiler render-count test (spec goals
       #8 and #9). *(M7 T2: `VolumeOrb.jsx`, levels from `getLevel()` in `audioIO.js`;
       `renderIsolation.test.jsx`.)*
-- [x] R19 A coalesced, bounded transcript with `aria-live` (M7 T3).
-- [x] R20 Connection states shown in the card, with a Radix Toast and Retry. *(M7 T4:
+- ✅ R19 A coalesced, bounded transcript with `aria-live` (M7 T3).
+- ✅ R20 Connection states shown in the card, with a Radix Toast and Retry. *(M7 T4:
       `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
       page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
       one live announcement of the reason; F8 and Tab handled inside the shadow root). M7 T6:
@@ -79,7 +79,7 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       Dismiss only, no action button — Retry lives on the card alone — and the card holds its
       reason line while the toast is open (space kept, hidden and `aria-hidden`), showing it in
       place once the toast closes, so the button doesn't move; AgentApp owns the toast's `open`. Still one live announcement (`useLiveAgent.test.jsx`).)*
-- [x] R21 The knowledge modal is polished and has a component test. *(M7 T5:
+- ✅ R21 The knowledge modal is polished and has a component test. *(M7 T5:
       `KnowledgeModal.jsx` reads the store through `useSyncExternalStore`, owns the knowledge
       button as its `Dialog.Trigger`, and does its own Tab wrap in the shadow root;
       `KnowledgeModal.test.jsx`, and the keyboard walk in `e2e/a11y.spec.js`. Issue #5's
@@ -88,15 +88,19 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       and `e2e/widget.spec.js`.)*
 
 **M8: deploy and close the cycle (new issue)**
-- [ ] R22 Live on Render over HTTPS, with config parsed at startup.
-- [ ] R23 Production observability: pino logs, plus client errors and vitals sent to a
+- ❌ R22 Live on Render over HTTPS, with config parsed at startup. *(Open: ticked in T3 when
+      live. M8 T1 built it — `server/config.js` (Zod, a missing key fatal in production),
+      `trust proxy`, `render.yaml`; `server/__tests__/config.test.js`, `app.test.js`.)*
+- ❌ R23 Production observability: pino logs, plus client errors and vitals sent to a
       gated `/api/client-log`. *(M8 T2: built and checked locally — `POST /api/client-log`
       with the token route's gates, its own rate limit, a Zod body and a 4 kB cap, and
       `agent-client/src/clientLog.js`; `server/__tests__/clientLog.test.js`, the
       `connection` beacon in `e2e/widget.spec.js`. Ticked once the lines show in Render's
-      logs, T3.)*
-- [ ] R24 The observer runs against production; the README is final; leftovers are filed
-      as issues.
+      logs, T3.)* *(Open: ticked in T3 when live.)*
+- ❌ R24 The observer runs against production; the README is final; leftovers are filed
+      as issues. *(Open: ticked in T3 when live. M8 T4 did the rest: the README is final but for
+      its Live URL (`<!-- LIVE_URL -->`, T3 fills it), and the leftovers are issues #17–#22
+      (assessment §8). The observer against production is T3's `docs/metrics/m08.md`.)*
 
 ## Assumptions (decided, not asked)
 

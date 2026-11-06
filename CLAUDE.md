@@ -76,7 +76,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     prefix. From the press that starts a session it is a fixed-height box
     (`--transcript-height`), so new lines never move the card (a layout shift); a
     `ResizeObserver` scrolls it to the newest line unless the viewer scrolled up, short content
-    is translated to the box's bottom (a transform, so no layout shift), cut-off edges fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
+    is translated to the box's bottom (a transform, so no layout shift; the content measured
+    with `Math.ceil(getBoundingClientRect().height)`, since a rounded `offsetHeight` could
+    overflow by under a pixel), cut-off edges fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
     into entries and bounds them to 20.
   - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
@@ -221,12 +223,19 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
   checking, 0003 hosting on Render, 0004 Live token locked to the model only.
-- `docs/superpowers/` — the `/build` cycle: `specs/assessment.md`, `specs/design.md` (the spec)
-  and `plans/plan.md` (milestones M4–M7 and their tasks).
+- `docs/superpowers/` — the `/build` cycle: `specs/assessment.md` (every item done or filed as
+  an issue, M8 T4), `specs/design.md` (the spec and its R1–R24 checklist) and `plans/plan.md`
+  (milestones M4–M8 and their tasks, the time log and the kit calibration proposal).
+- `docs/metrics/` — the observer's report per milestone (`m04.md`–`m07.md`), `history.csv`
+  (Lighthouse per route per milestone) and `README.md` (how the live e2e records the app
+  metrics, and the current baseline).
 
 ## Active work area
 
-Recent work concentrates in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
+Cycle 1 (M4–M8) closes with M8: the Render deploy (`render.yaml`, `server/config.js`, trust
+proxy) and production observability (`/api/client-log`, `clientLog.js`). Follow-up work is
+filed as GitHub issues (see `docs/superpowers/specs/assessment.md` §8). Before that the work
+concentrated in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
 grounding (keyframe vs. delta snapshots, a debounced `MutationObserver`, a snapshot that arrives
 during a tool batch sent inside its tool response), the private bridge
 channel, and Live session robustness (one reconnect per drop, `reconnecting`/`failed` status,
@@ -250,7 +259,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 20 vitest files (378 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 20 vitest files (379 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
@@ -265,7 +274,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
-  boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing), `useLiveAgent.test.jsx` (Testing
+  boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
   card's reason after it closes, one announcement, the keyboard walk and focus return; each
   failure reported to `onFailure` once) and

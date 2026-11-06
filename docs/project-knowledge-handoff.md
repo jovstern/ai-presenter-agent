@@ -138,12 +138,15 @@ work, and what this build does instead (a small, authored, same-origin mock targ
 ### 3.1 What exists
 
 ```
-docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/
+docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/, superpowers/,
+                 metrics/ (the observer's report per milestone)
 target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
                  routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
 agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
-server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)
+server/          Express: app.js (token gate, /api/client-log, CSP, pino logs, /health),
+                 config.js (the env parsed with Zod), index.js (listen, shutdown)
+render.yaml      the Render Blueprint (ADR 0003)
 ```
 
 Two npm packages (`agent-client`, `server`) and two static directories (`sandbox`,
@@ -163,6 +166,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
   `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
   `KnowledgeModal.jsx` — the knowledge button and its Radix dialog (§5.1).
+- `clientLog.js` — the production client log (M8 T2): the bundle's own uncaught errors, the
+  real user's LCP / INP / CLS (`web-vitals`) and each connection failure, sent as
+  `navigator.sendBeacon` reports to the server's `/api/client-log`, which logs them with pino.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`, `transcript.js` (fragments → bounded turns).
 
@@ -176,10 +182,12 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 19 files,
-  358 tests after the M7 fix wave, with `KnowledgeModal.test.jsx` and `shadowFocus.test.js`).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 718.9 kB,
-  176.7 kB gzip after the M7 fix wave (175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
+  returned in M7 T2, with `VolumeOrb.test.jsx`. At the end of cycle 1 (M8 T4) the counts are
+  20 files and 379 tests in agent-client, 5 files and 113 tests in `server/` (`config` and
+  `clientLog` added in M8), and 33 deterministic Playwright tests in 5 specs, plus the 3 opt-in
+  live ones; CLAUDE.md lists what each file covers.
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 725.7 kB,
+  179.24 kB gzip at M8 T4 (179.22 after M8 T2's `web-vitals`, 176.7 after the M7 fix wave, 175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -233,8 +241,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   in PR #9 (§3.2) — before the T2–T4 changes to the channel, status and teardown. Since M5 T4,
   `e2e/loop.spec.js` runs the real page and the real SDK socket code against a scripted fake
   Live server (`page.routeWebSocket`): a tool batch, a dropped socket and one token per
-  reconnect, in CI with no key. That still isn't Google's server; an automated real-key run is
-  M5's opt-in live e2e (#13).
+  reconnect, in CI with no key. That still isn't Google's server; the real-key run is the
+  opt-in live e2e (`npm run e2e:live`, M5 T5), last run 5 times after the M7 fix wave (runs
+  44–48: the six-step task 4 of 5, every reconnect resumed; `docs/metrics/m07.md`).
 - **Reconnect behaviour (`liveSession.js`).** A drop (`onerror` and/or `onclose`, a failed token
   fetch, or a rejected `live.connect()`) retires the session's generation and schedules a single
   retry on the backoff 0 s, 1 s, 3 s, 7 s, 15 s, 30 s. The status is `reconnecting` (with
@@ -332,7 +341,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   so neither is stressed. A real, larger page is the test that's still missing.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
   `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
-  T1, and the service itself goes live in M8 T3. `getUserMedia` and AudioWorklet need a
+  T1, the client log (`/api/client-log`, `clientLog.js`) in M8 T2, checked locally only; the
+  service itself goes live in M8 T3, which records `docs/metrics/m08.md`. Two Render facts are
+  unverified until then: the proxy hop count (`TRUST_PROXY_HOPS` overrides it) and whether a
+  PR preview copies the key. `getUserMedia` and AudioWorklet need a
   secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Talk now stops
   before opening a session and the card says "Voice needs a secure connection (https)…"
   (`voiceSupportError()` in `audioIO.js`; code-review-notes L6). Of the two `crypto.randomUUID`
@@ -423,6 +435,19 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Host on Render** (2026-10-28) — a web service from a `render.yaml` blueprint: automatic HTTPS
   (the mic needs a secure context), the key as a dashboard secret, PR previews; free-tier cold
   starts accepted. Deploy is M8. See [ADR 0003](./adr/0003-hosting-on-render.md).
+
+- **Config parsed once, a missing key fatal only in production (M8 T1).** `server/config.js`
+  reads the env with Zod and names a bad variable, never its value. A production start without
+  `GEMINI_API_KEY` fails, so Render keeps the previous deploy instead of going live with a card
+  that can only say Try again; locally and in the e2e the `not_configured` path stays.
+  `trust proxy` is 1 hop in production: without it the same-origin check sees `http` behind
+  Render's TLS proxy and every viewer shares the proxy's IP in both rate limiters.
+- **Client reports by beacon, `web-vitals` 5.3.0 (M8 T2).** Errors, vitals and connection
+  failures go to `POST /api/client-log` with `sendBeacon` (the nonce in the query, since a
+  beacon can't set headers), behind the token route's gates plus its own rate limit. No fetch
+  fallback: its failures would hit the console. `web-vitals` is pinned to 5.3.0 and only
+  `onLCP` / `onINP` / `onCLS` are imported: 6.x took the bundle to 180.11 kB, past the 180 kB
+  budget.
 
 - **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
   Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the

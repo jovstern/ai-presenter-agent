@@ -5,6 +5,12 @@ A rebuild of the runtime half of a Presenter Agent — an AI avatar embedded in 
 the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`/`.md` files, and
 standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
+**Live:** <!-- LIVE_URL --> (Render's free plan: the first visit after it has been idle takes
+about 30 s to wake it). Open it on https, press **Talk to the presenter**, allow the mic, and
+ask it to "increment the counter twice, then go to Settings, turn on notifications and save".
+
+![The widget: Talk, Live with the orb and transcript, a lost connection, Retry](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m07/demo.gif?raw=true)
+
 Start with [`docs/project-knowledge-handoff.md`](./docs/project-knowledge-handoff.md) — the full
 origin story, what's actually verified vs. just written, every caveat, and what's planned next.
 [`docs/demostack-ai-presenter-agent.md`](./docs/demostack-ai-presenter-agent.md) is the build spec
@@ -22,7 +28,8 @@ performance — see the docs for why.
 ## Layout
 
 ```
-docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/)
+docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/),
+                 the observer's metrics per milestone (docs/metrics/)
 target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
                  routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
@@ -36,6 +43,47 @@ render.yaml      the Render Blueprint (see Deploy)
 Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
 and a thin root `package.json` (no workspaces) holding Prettier, Playwright and the
 cross-package scripts. `e2e/` holds the Playwright suite.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Page["Sandbox page (server-templated, CSP, page nonce)"]
+    direction LR
+    subgraph Shadow["agent-client: one IIFE in a shadow root"]
+      Card["AgentApp.jsx card<br/>Transcript, VolumeOrb,<br/>FailureToast, KnowledgeModal"] --> Hook["useLiveAgent.js"]
+      Hook --> LS["liveSession.js<br/>reconnect, resumption,<br/>tool batches, loop guard"]
+      Hook --> AIO["audioIO.js<br/>AudioWorklet capture,<br/>playback, barge-in"]
+      Card --> KS["knowledgeStore.js<br/>localStorage"]
+      CL["clientLog.js<br/>errors, vitals, failures"]
+    end
+    Bridge["sandbox/bridge.js<br/>action library, allowlist,<br/>DOM snapshots"]
+    Target["iframe: target-app<br/>(same origin)"]
+    LS <-->|"private MessageChannel<br/>(ADR 0001)"| Bridge
+    Bridge -->|DOM| Target
+  end
+  Server["server/ (Express)<br/>page + nonce, static, CSP,<br/>/api/live-token, /api/client-log,<br/>pino logs, /health"]
+  Gemini[("Gemini Live")]
+  Server -->|"single-use token,<br/>model-locked (ADR 0004)"| LS
+  CL -->|sendBeacon| Server
+  LS <-->|"WebSocket: audio,<br/>transcripts, tool calls"| Gemini
+```
+
+The agent-client gets a short-lived token from the server (the API key never reaches the
+browser) and talks to Gemini Live directly. The model's tool calls (click, fill, scroll,
+navigate) go over a private `MessageChannel` to `sandbox/bridge.js`, which acts on the
+same-origin iframe and sends back DOM snapshots — a keyframe, or a delta when little changed —
+so the model can see what its actions did. A dropped socket reconnects once per drop on a
+backoff and resumes the session.
+
+Decisions:
+- [ADR 0001](docs/adr/0001-private-bridge-channel.md) — the agent ↔ bridge traffic runs on a
+  private `MessageChannel`, not `window.postMessage`.
+- [ADR 0002](docs/adr/0002-type-checking-with-checkjs.md) — type checking with `checkJs` +
+  `strict` on plain JS, not a TypeScript migration.
+- [ADR 0003](docs/adr/0003-hosting-on-render.md) — hosting on Render from a Blueprint.
+- [ADR 0004](docs/adr/0004-live-token-constraints.md) — the Live token is locked to the model
+  only.
 
 ## Run it
 
@@ -64,8 +112,8 @@ to the presenter, a pending Cancel while connecting, End while live or reconnect
 the connection is lost for good. When retrying can't help, it says what can: Reload page when
 the page's token is rejected, or Try again (asks the server once more) when the server isn't
 configured, which a reload can't fix. A failure also shows a toast above the card, once, with
-the reason and the same action (F8 reaches it from the keyboard); the reason stays under the
-status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
+the reason and Dismiss (F8 reaches it from the keyboard); once it closes, the reason stays
+under the status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
@@ -143,7 +191,7 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 20 files, 378 tests
+npm test        # vitest: 20 files, 379 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -180,8 +228,11 @@ The suite in `agent-client/src/__tests__/`:
   once, at most 10 errors and 20 reports per page, a missing or refusing `sendBeacon` dropped
   silently; `useLiveAgent.test.jsx` checks the card reports each failure once.
 - `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
-  turn, one space across a turn boundary), bounded to 20; the last 3 rendered in a polite live
-  region that announces additions only, a node per fragment, the speaker named for assistive tech.
+  turn, one space across a turn boundary), bounded to 20; rendered in a polite live region that
+  announces additions only, a node per fragment, the speaker named for assistive tech; the
+  reserved box, short content drawn at its bottom, following the newest line unless the viewer
+  scrolled up, a Tab stop only when it overflows, and a fractional content height that doesn't
+  overflow by a fraction of a pixel.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
@@ -319,7 +370,53 @@ CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and ever
 `npm run e2e`, with no secrets (the Playwright report is uploaded when it fails). A second
 workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no demo image.
 
-## What's deliberately not here yet
+## Metrics
+
+Measured by the observer at the end of each milestone (`docs/metrics/m04.md`–`m07.md`;
+Lighthouse per route in `docs/metrics/history.csv`). At the end of M7, after its fix wave:
+
+| Metric | Result | Budget |
+|---|---|---|
+| Lighthouse mobile on `/` (Perf / A11y / BP / SEO) | 100 / 100 / 100 / 100 (M4 started at 75 / 80) | ≥ 95 / 100 / 100 / 100 |
+| `/` mobile LCP / CLS / TBT | 0.90 s / 0 / 13 ms | ≤ 2.0 s / 0.05 / 150 ms |
+| CLS while Live, transcript growing (390 px) | 0 (was 0.151 before the M7 fix) | ≤ 0.05 |
+| `agent-client.js` gzip | 179.24 kB at M8 T4 (149.5 at M4) | ≤ 180 kB |
+| axe violations, 13 states in light and dark | 0 | 0 |
+| React commits per second while the orb animates | 0 | ~0 |
+| Live e2e: six-step task success | 4 of 5 runs | ≥ 4 of 5 |
+| Live e2e: connect, click → `open` | median 1.49 s, worst 1.87 s | ≤ 2.5 s |
+| Live e2e: first agent audio after `open` | median 0.55 s | ≤ 2.0 s |
+| Live e2e: reconnect, forced close → `open` | worst 1.74 s | ≤ 3 s |
+| Tool round trip (click / navigate / fill) | worst 3 / 18 / 2 ms | ≤ 300 ms / 1.5 s |
+
+The production numbers (the observer against the Render URL) land in `docs/metrics/m08.md`.
+
+## Demos
+
+One per milestone, recorded from the e2e harness for each pull request:
+
+- M4, the closed loop: ![M4 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m04/demo.gif?raw=true)
+- M5, the quality baseline: ![M5 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m05/demo.gif?raw=true)
+- M6, hardening and tuning: ![M6 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m06/demo.gif?raw=true)
+- M7, the presentable widget: ![M7 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m07/demo.gif?raw=true)
+
+## What's next
+
+Filed as issues at the close of cycle 1 (`docs/superpowers/specs/assessment.md` §8):
+
+- [#17](https://github.com/jovstern/ai-presenter-agent/issues/17) widget motion: the dialog's
+  enter and exit, an orb pulse while reconnecting;
+- [#18](https://github.com/jovstern/ai-presenter-agent/issues/18) card and dialog details: an
+  outline End button, counter colours near the limit, clamped file names;
+- [#19](https://github.com/jovstern/ai-presenter-agent/issues/19) verify mic capture in Safari
+  and Firefox (verified in Chromium only);
+- [#20](https://github.com/jovstern/ai-presenter-agent/issues/20) bundle headroom: 0.76 kB under
+  the 180 kB budget (drop the Gemini SDK for a direct socket, or load it on Talk);
+- [#21](https://github.com/jovstern/ai-presenter-agent/issues/21) typecheck the unit tests;
+- [#22](https://github.com/jovstern/ai-presenter-agent/issues/22) tune the snapshot cap and
+  refresh ratio on a larger target page.
+
+Deliberately not here:
 
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.

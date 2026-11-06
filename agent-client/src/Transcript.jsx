@@ -77,7 +77,12 @@ export function Transcript({ entries, reserve }) {
     let ownTop = -1;
 
     const sync = () => {
-      const gap = Math.max(0, Math.floor(box.clientHeight - content.offsetHeight));
+      // The content's real height, rounded up: offsetHeight rounds, so a
+      // 191.4 px list read as 191 left a 1 px gap whose translate pushed it
+      // past the box by a fraction of a pixel, an overflow with nothing cut
+      // off (a stray Tab stop and a faded top edge).
+      const height = Math.ceil(content.getBoundingClientRect().height);
+      const gap = Math.max(0, box.clientHeight - height);
       content.style.translate = gap ? `0 ${gap}px` : '';
       if (following) {
         box.scrollTop = box.scrollHeight;
