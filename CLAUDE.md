@@ -97,8 +97,11 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     reporter `main.jsx` passes to `AgentApp` as `onFailure`; `useLiveAgent` calls it from
     `onStatusChange` once per `failed` (the failures `failureCount` counts). Each report is a
     `navigator.sendBeacon` to `/api/client-log?nonce=…` with a JSON Blob; a missing or refusing
-    `sendBeacon` drops it (no fetch fallback, whose failures would hit the console). Per page:
-    a repeated error once, at most 10 errors and 20 reports. The report builders are pure.
+    `sendBeacon` drops it (no fetch fallback). A beacon the server rejects still logs a console
+    error, so a `token` failure (the page nonce is dead) is not sent and `disable()`s the log for
+    the rest of the page; a page whose nonce expired or outlived a server restart loses its
+    reports until then. Per page: a repeated error once, at most 10 errors and 20 reports. The
+    report builders are pure.
     `web-vitals` is the agent-client's one runtime dependency beyond React, Radix and the
     Gemini SDK, pinned to 5.3.0: 6.x adds ~0.9 kB gzip of soft-navigation support this page
     never uses, which the 180 kB budget couldn't take.
@@ -259,12 +262,12 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 20 vitest files (379 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 20 vitest files (381 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
   the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
-  `sendBeacon` dropped), `bridge` (runs
+  `sendBeacon` dropped, nothing sent once disabled or from a `token` failure on), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore` (incl.

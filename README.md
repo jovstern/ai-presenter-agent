@@ -166,14 +166,23 @@ tab shows (one JSON object per line; its search box matches any text in it).
     target app's; a repeated error is sent once, at most 10 per page;
   - `client connection failed` (warn) — each time the card goes to a failed connection, once
     per failure (`{ kind, reason, attempt }`; `kind` is `config` — no key, or Google rejects
-    it —, `token` — the page's token request is refused, a reload fixes it — or `exhausted` —
-    the reconnect backoff ran out).
+    it — or `exhausted` — the reconnect backoff ran out). A `token` failure (the server
+    refused the page's nonce) is not sent: the beacon carries the same nonce and would be
+    refused too.
 
   At most 20 reports per page. The endpoint has the token route's gates — same origin, the
   page nonce (in the query: a beacon can't set headers) and a per-IP rate limit of its own (60
   a minute, so log spam can't spend the token budget) — and a 4 kB body cap (413), a Zod body
   (400 for anything else) and a 204 answer. Strings are cut to length and URLs lose their
   query and fragment before they are logged, so a socket URL's token never reaches the log.
+
+  **What gets lost.** A beacon the server rejects (403) still logs a console error in the
+  viewer's browser, and its report is gone. Nonces live in the server's memory for 1 h, so a
+  page open longer than that, or one that outlived a server restart (the free plan spins down
+  after ~15 min idle), has a dead nonce and its reports are rejected. Once the card's token
+  request is refused, the page stops sending; until then its reports are lost. So field vitals
+  under-count long sessions — and INP and CLS, sent when the page is hidden, are the ones most
+  often lost.
 
 To find a viewer's problems in Render: search `client connection failed` or `client error`;
 for real-user performance, search `client vital` and read `client.name`, `client.value` and
@@ -191,7 +200,7 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 20 files, 379 tests
+npm test        # vitest: 20 files, 381 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -226,7 +235,8 @@ The suite in `agent-client/src/__tests__/`:
   value, rating and id; a failure's kind (`exhausted` when not fatal); one beacon per report
   with the nonce in the query and a JSON Blob, nothing without a nonce, a repeated error sent
   once, at most 10 errors and 20 reports per page, a missing or refusing `sendBeacon` dropped
-  silently; `useLiveAgent.test.jsx` checks the card reports each failure once.
+  silently, nothing sent once disabled, and a `token` failure neither sent nor followed by
+  anything; `useLiveAgent.test.jsx` checks the card reports each failure once.
 - `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
   turn, one space across a turn boundary), bounded to 20; rendered in a polite live region that
   announces additions only, a node per fragment, the speaker named for assistive tech; the

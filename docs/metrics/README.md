@@ -13,7 +13,10 @@ A third source, from M8 on: **real-user vitals** — each viewer's LCP, INP and 
 by `agent-client/src/clientLog.js` and logged by the server as `client vital` lines (Render's
 logs in production; README § Observability). They are field data, one line per viewer and
 metric, not a lab run, so they complement the observer's Lighthouse numbers rather than
-replace them.
+replace them. They under-count long sessions: a beacon rides on the page nonce, which dies
+after 1 h or with a server restart (the free plan spins down after ~15 min idle), and a
+rejected beacon's report is lost, most often INP and CLS, which are sent when the page is
+hidden (README § Observability).
 
 ## The live e2e (R12)
 

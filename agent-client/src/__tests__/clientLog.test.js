@@ -138,19 +138,19 @@ describe('createClientLog', () => {
 
   it('sends each report as JSON to the client-log path with the page nonce in the query', () => {
     const send = vi.fn();
-    createClientLog({ nonce: NONCE, send })(VITAL);
+    createClientLog({ nonce: NONCE, send }).report(VITAL);
     expect(send).toHaveBeenCalledWith(`${CLIENT_LOG_PATH}?nonce=${NONCE}`, JSON.stringify(VITAL));
   });
 
   it('sends nothing without a nonce (the server would only answer 400)', () => {
     const send = vi.fn();
-    createClientLog({ nonce: '', send })(VITAL);
+    createClientLog({ nonce: '', send }).report(VITAL);
     expect(send).not.toHaveBeenCalled();
   });
 
   it('sends a repeated error once', () => {
     const send = vi.fn();
-    const report = createClientLog({ nonce: NONCE, send });
+    const { report } = createClientLog({ nonce: NONCE, send });
     const error = { type: 'error', message: 'boom', source: `${SCRIPT}:1:1` };
     report(error);
     report({ ...error });
@@ -160,7 +160,7 @@ describe('createClientLog', () => {
 
   it(`sends at most ${MAX_ERROR_REPORTS} distinct errors per page`, () => {
     const send = vi.fn();
-    const report = createClientLog({ nonce: NONCE, send });
+    const { report } = createClientLog({ nonce: NONCE, send });
     for (let i = 0; i < MAX_ERROR_REPORTS + 5; i += 1) report({ type: 'error', message: `e${i}` });
     expect(send).toHaveBeenCalledTimes(MAX_ERROR_REPORTS);
     // Other reports still go out.
@@ -170,17 +170,27 @@ describe('createClientLog', () => {
 
   it(`sends at most ${MAX_REPORTS} reports per page`, () => {
     const send = vi.fn();
-    const report = createClientLog({ nonce: NONCE, send });
+    const { report } = createClientLog({ nonce: NONCE, send });
     for (let i = 0; i < MAX_REPORTS + 5; i += 1) {
       report({ type: 'connection', kind: 'exhausted', attempt: i });
     }
     expect(send).toHaveBeenCalledTimes(MAX_REPORTS);
   });
 
+  it('sends nothing once disabled (the page nonce is dead, so a beacon would 403)', () => {
+    const send = vi.fn();
+    const log = createClientLog({ nonce: NONCE, send });
+    log.report(VITAL);
+    log.disable();
+    log.report(VITAL);
+    log.report({ type: 'error', message: 'later' });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('sends with sendBeacon and a JSON Blob by default', async () => {
     const sendBeacon = vi.fn(() => true);
     vi.stubGlobal('navigator', { sendBeacon });
-    createClientLog({ nonce: NONCE })(VITAL);
+    createClientLog({ nonce: NONCE }).report(VITAL);
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     const [url, blob] = sendBeacon.mock.calls[0];
     expect(url).toBe(`${CLIENT_LOG_PATH}?nonce=${NONCE}`);
@@ -191,15 +201,15 @@ describe('createClientLog', () => {
 
   it('drops the report silently when sendBeacon is missing, refuses or throws', () => {
     vi.stubGlobal('navigator', {});
-    expect(() => createClientLog({ nonce: NONCE })(VITAL)).not.toThrow();
+    expect(() => createClientLog({ nonce: NONCE }).report(VITAL)).not.toThrow();
     vi.stubGlobal('navigator', { sendBeacon: vi.fn(() => false) });
-    expect(() => createClientLog({ nonce: NONCE })(VITAL)).not.toThrow();
+    expect(() => createClientLog({ nonce: NONCE }).report(VITAL)).not.toThrow();
     vi.stubGlobal('navigator', {
       sendBeacon: vi.fn(() => {
         throw new TypeError('Illegal invocation');
       }),
     });
-    expect(() => createClientLog({ nonce: NONCE })(VITAL)).not.toThrow();
+    expect(() => createClientLog({ nonce: NONCE }).report(VITAL)).not.toThrow();
   });
 });
 
@@ -224,5 +234,16 @@ describe('startClientLog', () => {
       }),
       { type: 'connection', kind: 'config', reason: 'No key.', attempt: 0 },
     ]);
+  });
+
+  it('sends no token failure and nothing after it: the server rejected the page nonce', () => {
+    const send = vi.fn();
+    const reportFailure = startClientLog({ nonce: NONCE, scriptUrl: SCRIPT, send });
+
+    reportFailure({ attempt: 0, maxAttempts: 6, reason: 'Reload.', fatal: 'token' });
+    window.dispatchEvent(errorEvent(SCRIPT, errorFrom(SCRIPT, 'after the token failure')));
+    reportFailure({ attempt: 6, maxAttempts: 6, reason: 'Gave up.' });
+
+    expect(send).not.toHaveBeenCalled();
   });
 });

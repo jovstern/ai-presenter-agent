@@ -8,6 +8,13 @@ import { onCLS, onINP, onLCP } from 'web-vitals';
 // POST /api/client-log, which validates them and logs them through pino
 // (server/app.js). Best effort: a report that can't be sent is dropped, and
 // nothing here ever throws into the page.
+//
+// The beacons ride on the page nonce (server/app.js gates the endpoint on it,
+// as it does the token route), and a rejected beacon does log a console error
+// ("Failed to load resource … 403"). So once the page knows its nonce is dead,
+// a `token` failure, the log stops: that failure is not sent, nor is anything
+// after it. A page whose nonce expired (1 h) or outlived a server restart
+// loses its reports silently until then (README § Observability).
 
 /** @typedef {{ type: 'error', message: string, source?: string, stack?: string }} ErrorReport */
 /**
@@ -115,23 +122,30 @@ function sendBeacon(url, body) {
 /**
  * The per-page reporter: caps the count, drops repeated errors, and sends
  * each report with the page nonce in the query (a beacon can't set headers).
+ * `disable` stops it for the rest of the page.
  * @param {{ nonce: string, send?: SendReport }} options
- * @returns {(report: ClientReport) => void}
+ * @returns {{ report: (report: ClientReport) => void, disable: () => void }}
  */
 export function createClientLog({ nonce, send = sendBeacon }) {
   const url = `${CLIENT_LOG_PATH}?nonce=${encodeURIComponent(nonce)}`;
   const seenErrors = new Set();
   let sent = 0;
-  return (report) => {
-    // Without a nonce the server can only answer 400.
-    if (!nonce || sent >= MAX_REPORTS) return;
-    if (report.type === 'error') {
-      const key = `${report.message}\n${report.source ?? ''}`;
-      if (seenErrors.has(key) || seenErrors.size >= MAX_ERROR_REPORTS) return;
-      seenErrors.add(key);
-    }
-    sent += 1;
-    send(url, JSON.stringify(report));
+  let disabled = false;
+  return {
+    report(report) {
+      // Without a nonce the server can only answer 400.
+      if (disabled || !nonce || sent >= MAX_REPORTS) return;
+      if (report.type === 'error') {
+        const key = `${report.message}\n${report.source ?? ''}`;
+        if (seenErrors.has(key) || seenErrors.size >= MAX_ERROR_REPORTS) return;
+        seenErrors.add(key);
+      }
+      sent += 1;
+      send(url, JSON.stringify(report));
+    },
+    disable() {
+      disabled = true;
+    },
   };
 }
 
@@ -139,10 +153,11 @@ export function createClientLog({ nonce, send = sendBeacon }) {
  * Starts the client log for this page: the error listeners and the vitals.
  * Called once, by main.jsx.
  * @param {{ nonce: string, scriptUrl: string, send?: SendReport }} options
- * @returns {(details: StatusDetails) => void} Reports one `failed` connection.
+ * @returns {(details: StatusDetails) => void} Reports one `failed` connection; a
+ *   `token` failure (the page nonce is dead) is not sent and stops the log.
  */
 export function startClientLog({ nonce, scriptUrl, send }) {
-  const report = createClientLog({ nonce, send });
+  const { report, disable } = createClientLog({ nonce, send });
   window.addEventListener('error', (event) => {
     const errorReport = errorEventReport(event, scriptUrl);
     if (errorReport) report(errorReport);
@@ -156,5 +171,13 @@ export function startClientLog({ nonce, scriptUrl, send }) {
   onLCP(reportVital);
   onINP(reportVital);
   onCLS(reportVital);
-  return (details) => report(connectionReport(details));
+  return (details) => {
+    // The server rejected the page nonce, which gates this log too: every
+    // beacon from here on would 403 into the console. Stop instead.
+    if (details.fatal === 'token') {
+      disable();
+      return;
+    }
+    report(connectionReport(details));
+  };
 }
