@@ -709,7 +709,7 @@ What pushes it to the worst case:
 | M5 | ~150 min (~175 re-scaled) | ~130 min (0.87×) | T1–T4 ran under estimate; T5's live runs took the planned ~45 min; two fix-wave rounds. A ~3 h usage-limit pause isn't counted. M4+M5 together: 257 vs 260 min, so the remaining estimates stay as written (M6 ~130, M7 ~100, M8 ~70). |
 | M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min (~105 re-scaled) | ~150 min (1.43×) | The React Compiler had never run (T2b, a user ruling); Radix focus inside the shadow root needed our own Tab handling in the toast and the dialog; the UI review's Must fix (sliced transcript lines) and the observer's CLS miss led to a 7-commit fix wave and two more rounds. Usage-limit pauses aren't counted. M4–M7 together: ~557 vs ~495 min (1.13×), so M8 ~80. |
-| M8 | ~70 min (~80 re-scaled) | ~75 min without T3 (1.07×, 0.94× re-scaled) | T1, T2 and T4 ran to size; one review fix wave and a doc-only second round. T3 (go live) was deferred to #23 by the user's call, so its ~15 min isn't counted. M4–M8 together: ~632 vs ~560 min as first planned (1.13×). |
+| M8 | ~70 min (~80 re-scaled) | ~75 min without T3 (1.07×, 0.94× re-scaled) | T1, T2 and T4 ran to size; one review fix wave and a doc-only second round. T3 (go live) was deferred to #23 by the user's call, so its ~15 min isn't counted. M4–M8 together: ~632 vs ~545 min as first planned without T3 (1.16×). |
 
 ### Calibration
 
