@@ -90,7 +90,11 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 **M8: deploy and close the cycle (new issue)**
 - [ ] R22 Live on Render over HTTPS, with config parsed at startup.
 - [ ] R23 Production observability: pino logs, plus client errors and vitals sent to a
-      gated `/api/client-log`.
+      gated `/api/client-log`. *(M8 T2: built and checked locally — `POST /api/client-log`
+      with the token route's gates, its own rate limit, a Zod body and a 4 kB cap, and
+      `agent-client/src/clientLog.js`; `server/__tests__/clientLog.test.js`, the
+      `connection` beacon in `e2e/widget.spec.js`. Ticked once the lines show in Render's
+      logs, T3.)*
 - [ ] R24 The observer runs against production; the README is final; leftovers are filed
       as issues.
 
@@ -152,7 +156,7 @@ Language: JS with checkJs (ADR 0002).
 | @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `1.64.1`, `4.14.0` |
 | @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention. Same release as `@radix-ui/react-dialog` (upgraded with it from `1.1.23`), so the shared primitives are one copy each — `1.3.1` |
 | zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `4.6.7` |
-| web-vitals | agent-client | real-user vitals in production (R23) |
+| web-vitals | agent-client | real-user vitals in production (R23) — `5.3.0`: only `onLCP` / `onINP` / `onCLS` imported; 6.x adds ~0.9 kB gzip of soft-navigation support this page never uses, past the 180 kB budget |
 | compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile — `1.8.2` |
 | @rolldown/plugin-babel | agent-client | runs the React Compiler (M7 T2b, code-review-notes M10): `@vitejs/plugin-react` 6 compiles JSX with oxc and ignores a `babel` option, so its `reactCompilerPreset` goes through this plugin, its documented stable path. `0.2.4`, the newest in plugin-react 6.1.1's peer range (`^0.1.7 \|\| ^0.2.0`) — `0.2.4` |
 | @babel/core | agent-client | the peer `@rolldown/plugin-babel` and `babel-plugin-react-compiler` run on; Babel 7, the line `babel-plugin-react-compiler` 1.0.0's `@babel/types` and eslint-plugin-react-hooks already use (deduped to one copy) — `7.29.13` |

@@ -97,13 +97,15 @@ function micErrorText(error) {
 }
 
 /**
- * @param {{ bridge: BridgeChannel, nonce: string, workletUrl: string, portalContainer: HTMLElement }} props
+ * @param {{ bridge: BridgeChannel, nonce: string, workletUrl: string, portalContainer: HTMLElement,
+ *   onFailure?: (details: StatusDetails) => void }} props
  *   `nonce` is the page nonce for the token request; `workletUrl` is where the
  *   capture worklet is served; `portalContainer` keeps Radix portals (the
- *   dialog, the toast's announcer) inside the shadow root (all from main.jsx).
+ *   dialog, the toast's announcer) inside the shadow root; `onFailure` reports
+ *   each connection failure to the client log (all from main.jsx).
  */
-export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
-  const agent = useLiveAgent(bridge, nonce, workletUrl);
+export function AgentApp({ bridge, nonce, workletUrl, portalContainer, onFailure }) {
+  const agent = useLiveAgent(bridge, nonce, workletUrl, onFailure);
   const { status, details, transcript, micError, connectCount, failureCount } = agent;
   const { outputLevel, micLevel } = agent;
   const action = primaryAction(status, details, agent);

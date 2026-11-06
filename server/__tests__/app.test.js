@@ -1,46 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import pino from 'pino';
 import request from 'supertest';
 import ROUTES from '../../target-app/routes.json' with { type: 'json' };
-import { createApp, errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
-
-const HOST = 'agent.test';
-const ORIGIN = `http://${HOST}`;
-const NONCE_ATTR = /data-ds-nonce="([0-9a-f-]{36})"/;
-
-function clock(start = 1_000_000) {
-  let t = start;
-  return {
-    now: () => t,
-    advance: (ms) => {
-      t += ms;
-    },
-  };
-}
-
-/** A pino logger whose JSON lines land in `lines`, so tests can read what was logged. */
-function capturingLogger() {
-  /** @type {Record<string, unknown>[]} */
-  const lines = [];
-  const logger = pino({ level: 'debug' }, { write: (line) => lines.push(JSON.parse(line)) });
-  return { logger, lines };
-}
-
-function setup(overrides = {}) {
-  const c = clock();
-  const { logger, lines } = capturingLogger();
-  const mintToken = vi.fn(async () => 'auth_tokens/stub-token');
-  const app = createApp({ mintToken, now: c.now, logger, ...overrides });
-  return { app, clock: c, mintToken, lines };
-}
-
-/** Serves the sandbox page the way a browser would and returns the nonce it embedded. */
-async function pageNonce(app, path = '/') {
-  const res = await request(app).get(path).set('Host', HOST);
-  const match = NONCE_ATTR.exec(res.text);
-  if (!match) throw new Error(`no nonce in ${path}`);
-  return match[1];
-}
+import { errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
+import { HOST, NONCE_ATTR, ORIGIN, clock, pageNonce, setup } from './harness.js';
 
 function tokenRequest(app, nonce, { origin = ORIGIN } = {}) {
   const req = request(app).get('/api/live-token').set('Host', HOST);

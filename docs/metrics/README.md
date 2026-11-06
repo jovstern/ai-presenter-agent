@@ -9,6 +9,12 @@ Two kinds of numbers are kept here:
   measured by the opt-in live e2e described below. The budgets are in
   `docs/superpowers/specs/design.md` § Budgets ("App metrics, from the live e2e").
 
+A third source, from M8 on: **real-user vitals** — each viewer's LCP, INP and CLS, beaconed
+by `agent-client/src/clientLog.js` and logged by the server as `client vital` lines (Render's
+logs in production; README § Observability). They are field data, one line per viewer and
+metric, not a lab run, so they complement the observer's Lighthouse numbers rather than
+replace them.
+
 ## The live e2e (R12)
 
 `e2e/live.spec.js` runs the real `/` page, the real server with its real key and the real Gemini

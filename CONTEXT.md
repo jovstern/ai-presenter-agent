@@ -124,6 +124,16 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   No chunking, embeddings or retrieval (`agent-client/src/knowledgeStore.js`,
   `agent-client/src/KnowledgeModal.jsx`).
 
+## Observability
+
+- **Client log** — what the agent-client reports about itself in production: its own errors,
+  the real-user vitals (LCP, INP, CLS) and each failed connection
+  (`agent-client/src/clientLog.js`). The server validates each report and logs it as one pino
+  line (`POST /api/client-log`, `server/app.js`).
+- **Beacon** — one client-log report, sent with `navigator.sendBeacon` (it survives the page
+  closing and needs no answer), the page nonce in its query. Best effort: one that can't be
+  sent is dropped.
+
 ## Hosting
 
 - **Blueprint** — `render.yaml`, the file Render creates and updates the service from

@@ -28,7 +28,8 @@ target-app/      static mock "cloned app" (2 pages + their scripts, a few data-t
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
-                 with a CSP and security headers (helmet), JSON request logs (pino), /health
+                 with a CSP and security headers (helmet), JSON request logs (pino), /health,
+                 and /api/client-log for the agent-client's error and vitals beacons
 render.yaml      the Render Blueprint (see Deploy)
 ```
 
@@ -97,6 +98,39 @@ route's same-origin check sees `https` and both rate limiters see each viewer's 
 deployed `X-Forwarded-For` turns out to carry more hops, set `TRUST_PROXY_HOPS` instead of
 changing code.
 
+## Observability
+
+Everything lands in the server's stdout as pino JSON lines, which is what Render's **Logs**
+tab shows (one JSON object per line; its search box matches any text in it).
+
+- **Requests** — every request is one `"msg":"request completed"` line with the request id
+  (`reqId`, also sent back as `x-request-id`), method, path (never the query, which carries the
+  page nonce), status and `responseTime` in ms. A failed token mint is an error line, `live token
+  mint failed`; a minted one is `live token minted` (never the token).
+- **Client reports** — the agent-client (`agent-client/src/clientLog.js`, started once per
+  page by `main.jsx`) sends `navigator.sendBeacon` reports to `POST /api/client-log`, each
+  logged as one line with a `client` object and the beacon's `reqId`:
+  - `client vital` (info) — the real user's LCP, INP and CLS from `web-vitals`
+    (`{ name, value, rating, id }`; value in ms, CLS unitless), sent when each is final (LCP
+    on the first input, INP and CLS when the page is hidden);
+  - `client error` (warn) — an uncaught error or unhandled rejection thrown from the
+    agent-client's own script (`{ message, source, stack }`), not the host page's or the
+    target app's; a repeated error is sent once, at most 10 per page;
+  - `client connection failed` (warn) — each time the card goes to a failed connection, once
+    per failure (`{ kind, reason, attempt }`; `kind` is `config` — no key, or Google rejects
+    it —, `token` — the page's token request is refused, a reload fixes it — or `exhausted` —
+    the reconnect backoff ran out).
+
+  At most 20 reports per page. The endpoint has the token route's gates — same origin, the
+  page nonce (in the query: a beacon can't set headers) and a per-IP rate limit of its own (60
+  a minute, so log spam can't spend the token budget) — and a 4 kB body cap (413), a Zod body
+  (400 for anything else) and a 204 answer. Strings are cut to length and URLs lose their
+  query and fragment before they are logged, so a socket URL's token never reaches the log.
+
+To find a viewer's problems in Render: search `client connection failed` or `client error`;
+for real-user performance, search `client vital` and read `client.name`, `client.value` and
+`client.rating`.
+
 ## Test
 
 ```bash
@@ -109,14 +143,14 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 19 files, 358 tests
+npm test        # vitest: 20 files, 378 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 4 files, 76 tests
+npm test        # vitest + supertest: 5 files, 113 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -139,6 +173,12 @@ The suite in `agent-client/src/__tests__/`:
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Talk, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (a pending Cancel, End while reconnecting, Retry,
   Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and the mic alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark, the session's fragments coalesced into turns; the failure toast shown once per failure (not again after it closes, a new one for a new failure), the reason announced exactly once (by the toast, not a card alert), its action and Escape leaving focus on the card's button, and the Tab walk from F8.
+- `clientLog.test.js` — the client log: only the bundle's own errors and rejections reported
+  (by its script URL), with their message, source and clipped stack; a vital cut to name,
+  value, rating and id; a failure's kind (`exhausted` when not fatal); one beacon per report
+  with the nonce in the query and a JSON Blob, nothing without a nonce, a repeated error sent
+  once, at most 10 errors and 20 reports per page, a missing or refusing `sendBeacon` dropped
+  silently; `useLiveAgent.test.jsx` checks the card reports each failure once.
 - `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
   turn, one space across a turn boundary), bounded to 20; the last 3 rendered in a polite live
   region that announces additions only, a node per fragment, the speaker named for assistive tech.
@@ -217,7 +257,9 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   automatic retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload
   page", which reloads, both driven from the keyboard with focus kept on the button; the
   `not_configured` path also checks the toast inside the shadow root — once per failure, F8 then
-  Tab through it and back to the card, Escape closing it with focus back on the button. A
+  Tab through it and back to the card, Escape closing it with focus back on the button — and
+  sends one `connection` beacon per failure to `/api/client-log`, which the real server answers
+  with 204. A
   blocked mic shows its guidance and leaves the card on Talk, with no toast. At 360, 768 and
   1440 px: the card's placement (bottom-right, full width between the gutters at 400 px and
   below), a keyboard walk from the top of the page through the transcript, the primary button
@@ -260,6 +302,14 @@ The suite in `server/__tests__/`:
   Origin or Referer passes with `X-Forwarded-Proto: https`, two `X-Forwarded-For` clients get
   separate buckets in both limiters, a forged first entry doesn't pick the bucket, and without
   a trusted proxy `X-Forwarded-For` is ignored.
+- `clientLog.test.js` — `POST /api/client-log`: each report type accepted with 204 and logged
+  once with the request id (a vital at info, an error and a connection failure at warn), only
+  the schema's fields logged, strings truncated, URL queries, fragments and token-shaped values
+  stripped (no nonce in any line), 400 for an unknown type, a vital outside LCP / INP / CLS, a
+  bad rating or value, malformed or non-JSON bodies (the body never logged), 413 over 4 kB,
+  403 cross-origin or with no Origin/Referer, 403 for an unknown or expired nonce, 400 for a
+  missing or malformed one, 429 past its own per-IP limit (60 a minute by default) without
+  touching the token route's.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
 - `geminiMint.test.js` — the token config sent to `authTokens.create`: single use, the 60 s
   session window, locked to `liveModel.json`'s model only (`lockAdditionalFields: []`, ADR 0004).

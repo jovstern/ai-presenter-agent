@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AgentApp } from './AgentApp.jsx';
 import { connectBridge } from './bridgeChannel.js';
+import { startClientLog } from './clientLog.js';
 import styles from './styles.css?inline';
 
 const HOST_ID = 'ai-presenter-agent-host';
@@ -15,17 +16,20 @@ const HOST_ID = 'ai-presenter-agent-host';
 // easily — which is the residual H1 gap, not a regression.
 const script = document.currentScript;
 const NONCE = script instanceof HTMLScriptElement ? (script.dataset.dsNonce ?? '') : '';
+// This bundle's own URL, captured here for the same reason. Not
+// import.meta.url: this IIFE build replaces `import.meta` with `{}` (Vite 8
+// warns as much), so its `url` is undefined. The client log reports only
+// errors thrown from this URL.
+const SCRIPT_URL = script instanceof HTMLScriptElement ? script.src : '';
 // The capture worklet (public/capture-worklet.js) ships next to this bundle,
-// so it is resolved against this script's own URL, captured here for the same
-// reason. Not import.meta.url: this IIFE build replaces `import.meta` with
-// `{}` (Vite 8 warns as much), so its `url` is undefined. The fallback is
-// where server/app.js serves the bundle.
-const WORKLET_URL = new URL(
-  'capture-worklet.js',
-  script instanceof HTMLScriptElement && script.src
-    ? script.src
-    : `${location.origin}/agent-client/`,
-).href;
+// so it is resolved against SCRIPT_URL. The fallback is where server/app.js
+// serves the bundle.
+const WORKLET_URL = new URL('capture-worklet.js', SCRIPT_URL || `${location.origin}/agent-client/`)
+  .href;
+
+// Started here, once per page and before the mount, so an error while
+// mounting is reported and LCP is observed from the start (spec R23).
+const reportFailure = startClientLog({ nonce: NONCE, scriptUrl: SCRIPT_URL });
 
 function mount() {
   if (document.getElementById(HOST_ID)) return; // already mounted
@@ -70,6 +74,7 @@ function mount() {
         nonce={NONCE}
         workletUrl={WORKLET_URL}
         portalContainer={portalContainer}
+        onFailure={reportFailure}
       />
     </StrictMode>,
   );
