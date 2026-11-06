@@ -66,10 +66,13 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     reason (so the card has no alert for it). F8 reaches it; its own capture handlers walk Tab
     (Radix compares `document.activeElement`, which in a shadow root is the host) and send
     focus back to the primary button.
-  - `Transcript.jsx` — the card's first row: the last 3 coalesced turns in an
-    `aria-live="polite"` list that announces additions only (one node per fragment), a hidden
-    "Presenter:" / "You:" prefix, scrolling past `--transcript-max-height` pinned to the newest
-    line. `transcript.js` (pure) merges fragments into entries and bounds them to 20.
+  - `Transcript.jsx` — the card's first row: the coalesced turns in an `aria-live="polite"`
+    list that announces additions only (one node per fragment), a hidden "Presenter:" / "You:"
+    prefix. From the press that starts a session it is a fixed-height box
+    (`--transcript-height`), so new lines never move the card (a layout shift); a
+    `ResizeObserver` scrolls it to the newest line unless the viewer scrolled up, cut-off edges
+    fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
+    into entries and bounds them to 20.
   - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
     node — no React state, so a frame renders nothing (spec goals #8 and #9). No loop under
@@ -221,7 +224,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   oversize alert, drop, the rules counter and over-limit alert, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
-  boundary, the bound of 20), `Transcript.test.jsx` (last 3, live-region attributes, a node per fragment), `useLiveAgent.test.jsx` (Testing
+  boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, one announcement, the
   keyboard walk and focus return) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
   under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against

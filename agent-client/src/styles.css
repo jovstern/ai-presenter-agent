@@ -58,7 +58,7 @@
   --card-width: 344px; /* "Talk to the presenter" on one line, with room for wider system fonts */
   --dialog-width: 360px;
   --control-height: 44px;
-  --transcript-max-height: 200px;
+  --transcript-height: 192px; /* 8 lines of transcript text */
 
   /* Shape. */
   --radius-card: 12px;
@@ -323,25 +323,64 @@ button:active {
 }
 
 /*
- * The transcript (Transcript.jsx), the card's first row. It is the scroll
- * container, and `column-reverse` makes its scroll origin the bottom: past
- * --transcript-max-height the newest line stays in view as fragments arrive,
- * with no script. The list inside keeps its normal top-to-bottom order.
+ * The transcript (Transcript.jsx), the card's first row. While a session runs,
+ * or once it has lines, the box has a fixed height, so a new line never moves
+ * the card's top edge (a layout shift, docs/metrics/m07.md); the list flows
+ * top-down inside it, and Transcript.jsx scrolls it to the newest line. An
+ * edge a line is cut at fades out (data-fade-top / -bottom, set while
+ * scrolled), so no line looks sliced. The mask would fade a focus ring on the
+ * box too, so the ring is drawn on the unmasked wrapper around it.
  */
 .transcript {
-  display: flex;
   flex-basis: 100%;
-  flex-direction: column-reverse;
-  max-height: var(--transcript-max-height);
   margin-bottom: var(--space-2);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  border-radius: var(--radius-control);
 }
 
-/* Empty, it stays in the page as a live region but out of the card's flow,
-   so it adds no row and no gap. */
-.transcript[data-empty] {
+/* Idle and empty, it stays in the page as a live region but out of the card's
+   flow, so it adds no row and no gap. */
+.transcript:not([data-reserved]) {
   position: absolute;
+}
+
+.transcript:has(> .transcript__box:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.transcript__box {
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent
+  );
+}
+
+.transcript__box:focus-visible {
+  outline: none;
+}
+
+.transcript[data-reserved] .transcript__box {
+  height: var(--transcript-height);
+}
+
+.transcript__box[data-fade-top] {
+  --fade-top: var(--space-5);
+}
+
+.transcript__box[data-fade-bottom] {
+  --fade-bottom: var(--space-5);
+}
+
+.transcript__placeholder {
+  margin: 0;
+  color: var(--color-text-muted);
 }
 
 .transcript__list {
@@ -350,7 +389,9 @@ button:active {
   list-style: none;
   font-size: var(--text-md);
   overflow-wrap: anywhere;
-  text-wrap: pretty;
+  /* Greedy wrapping, not `pretty`: the text streams in a word at a time, and
+     pretty rebalances the last lines on each word, moving words already shown
+     between lines (layout shifts, e2e/widget.spec.js). */
 }
 
 .transcript__entry + .transcript__entry {

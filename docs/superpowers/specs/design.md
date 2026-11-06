@@ -221,8 +221,17 @@ come from `status`.
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
 
-- **Transcript:** the last 3 coalesced turns, `aria-live="polite"`, with user turns visually
-  distinct.
+- **Transcript:** the coalesced turns (the last 20, `MAX_ENTRIES`), `aria-live="polite"`, with
+  user turns visually distinct. From the press that starts a session (connecting, open,
+  reconnecting), and whenever it has lines, it is a box of fixed height (`--transcript-height`,
+  192 px, eight lines) above the controls, so a new line never moves the bottom-anchored card
+  (CLS 0.151 at 390 px before the M7 fix wave, 0 after; `e2e/widget.spec.js` asserts ≤ 0.05).
+  Empty while reserved, it says "The conversation appears here."; idle and empty it takes no
+  room. The list flows top-down and the box scrolls to follow the newest line; a viewer who
+  scrolls up is left there until they scroll back to the bottom. Cut-off edges fade (a mask).
+  It is a Tab stop only while it overflows, its focus ring on the unmasked wrapper with the
+  control radius. No `text-wrap: pretty` on it: rebalancing as words stream in moved shown
+  words between lines.
 - **Knowledge:** an icon button with an accessible name and a count badge, opening the Radix
   dialog. Its states:
   - empty: explain the feature and the next action ("No files yet. Add product notes or a

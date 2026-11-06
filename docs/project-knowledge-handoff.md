@@ -161,7 +161,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `AgentApp.jsx` — the card (the volume orb, one Talk to the presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
   failure's reason, mic alerts, transcript, `📄` knowledge button); `FailureToast.jsx` — the Radix
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
-  `Transcript.jsx` — the last 3 coalesced turns, `aria-live="polite"` (additions only);
+  `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
   `KnowledgeModal.jsx` — the knowledge button and its Radix dialog (§5.1).
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
   `knowledgeStore.js`, `transcript.js` (fragments → bounded turns).

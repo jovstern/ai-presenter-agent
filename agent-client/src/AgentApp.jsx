@@ -124,9 +124,12 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
       {/* A named landmark: the transcript and the alerts sit outside the host
           page's <main>, and axe's `region` rule wants all content in one. */}
       <aside className="agent-app" aria-label="AI presenter">
-        {/* First, above the controls: a growing turn moves the card's top edge,
-            not the buttons (Transcript.jsx). */}
-        <Transcript entries={transcript} />
+        {/* First, above the controls, in a box of fixed height from the press
+            that starts a session: new lines never move the card (Transcript.jsx). */}
+        <Transcript
+          entries={transcript}
+          reserve={status === 'connecting' || status === 'open' || status === 'reconnecting'}
+        />
         {/* Animates outside React: its frames render nothing, and a card render
             (a transcript line) skips it, since its props are unchanged (VolumeOrb.jsx). */}
         <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />

@@ -272,6 +272,11 @@ const VIEWPORTS = [
 ];
 const GUTTER = 16;
 const CARD_WIDTH = 344;
+// Longer than the transcript box at any width, so it scrolls.
+const LONG_TURN = Array.from(
+  { length: 12 },
+  (_, i) => `Sentence ${i + 1} of a long answer that wraps in the card.`,
+).join(' ');
 
 for (const viewport of VIEWPORTS) {
   test.describe(`at ${viewport.width} px`, () => {
@@ -310,11 +315,17 @@ for (const viewport of VIEWPORTS) {
       await expect(status).toHaveText('Live');
       await expect(button('End')).toBeFocused();
 
-      // With a transcript, its scrollable region is a stop before the button.
+      // A transcript that fits is no Tab stop; once it overflows, its
+      // scrollable region is one, before the button, with the focus ring on
+      // the unmasked box around it.
       live.sendToLatest({ serverContent: { outputTranscription: { text: 'Welcome.' } } });
       await expect(transcript.getByRole('listitem')).toHaveText(['Presenter: Welcome.']);
+      await expect(transcript).not.toHaveAttribute('tabindex');
+      live.sendToLatest({ serverContent: { outputTranscription: { text: ` ${LONG_TURN}` } } });
+      await expect(transcript).toHaveAttribute('tabindex', '0');
       await page.keyboard.press('Shift+Tab');
       await expect(transcript).toBeFocused();
+      await expect(transcript.locator('..')).toHaveCSS('outline-style', 'solid');
       await page.keyboard.press('Tab');
       await expect(button('End')).toBeFocused();
       await page.keyboard.press('Tab');
@@ -372,6 +383,84 @@ for (const viewport of VIEWPORTS) {
     });
   });
 }
+
+/** @typedef {{ value: number, time: number, recent: boolean }} LayoutShift */
+
+// The card is anchored to the viewport's bottom, so a transcript that grew
+// with its text moved the card's top edge on every wrapped line: CLS 0.15 at
+// phone width (docs/metrics/m07.md, miss 1). The box is now a fixed height
+// from the press that starts the session, and follows the newest line by
+// scrolling, which isn't a shift.
+test.describe('at 390 px, while the transcript grows', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('the card does not shift (worst CLS session window ≤ 0.05) and the newest line stays in view', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      /** @type {LayoutShift[]} */
+      const shifts = [];
+      Object.assign(window, { __layoutShifts: shifts });
+      new PerformanceObserver((list) => {
+        // A layout-shift entry: PerformanceEntry plus these two (not in the DOM lib).
+        const entries =
+          /** @type {Array<PerformanceEntry & { value: number, hadRecentInput: boolean }>} */ (
+            list.getEntries()
+          );
+        for (const entry of entries) {
+          shifts.push({ value: entry.value, time: entry.startTime, recent: entry.hadRecentInput });
+        }
+      }).observe({ type: 'layout-shift', buffered: true });
+    });
+    await stubToken(page, TOKEN_OK);
+    const live = await fakeGeminiLive(page);
+    const { status, transcript, button } = card(page);
+    await page.goto('/');
+    await button('Talk to the presenter').click();
+    await expect(status).toHaveText('Live');
+    // Past the press's 500 ms input window: what follows is speech, not input.
+    await page.waitForTimeout(600);
+    const start = await page.evaluate(() => performance.now());
+
+    // Six turns, agent and user in turn, a word at a time, each longer than the last.
+    const words = LONG_TURN.split(' ');
+    for (let turn = 0; turn < 6; turn++) {
+      const kind = turn % 2 ? 'inputTranscription' : 'outputTranscription';
+      for (const word of words.slice(0, 8 + turn * 2)) {
+        live.sendToLatest({ serverContent: { [kind]: { text: ` ${word}` } } });
+        await page.waitForTimeout(40);
+      }
+      if (turn % 2 === 0) live.sendToLatest({ serverContent: { turnComplete: true } });
+    }
+    await expect(transcript.getByRole('listitem')).toHaveCount(6);
+    await expect
+      .poll(() => transcript.evaluate((box) => box.scrollHeight - box.scrollTop - box.clientHeight))
+      .toBeLessThanOrEqual(4);
+    await expect(transcript).toHaveAttribute('tabindex', '0');
+
+    // CLS session windows: shifts less than 1 s apart, at most 5 s long.
+    await page.waitForTimeout(200);
+    const shifts = await page.evaluate(
+      (since) =>
+        /** @type {Window & { __layoutShifts: LayoutShift[] }} */ (window).__layoutShifts.filter(
+          (shift) => shift.time >= since && !shift.recent,
+        ),
+      start,
+    );
+    let worst = 0;
+    let session = { start: -Infinity, last: -Infinity, sum: 0 };
+    for (const shift of shifts) {
+      if (shift.time - session.last < 1000 && shift.time - session.start < 5000) {
+        session.sum += shift.value;
+        session.last = shift.time;
+      } else {
+        session = { start: shift.time, last: shift.time, sum: shift.value };
+      }
+      worst = Math.max(worst, session.sum);
+    }
+    expect(worst, JSON.stringify(shifts)).toBeLessThanOrEqual(0.05);
+  });
+});
 
 /**
  * Whether Chromium's own accessibility tree (what a screen reader browses)

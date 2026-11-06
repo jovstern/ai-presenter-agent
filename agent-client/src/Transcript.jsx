@@ -1,7 +1,10 @@
+import { useEffect, useRef, useState } from 'react';
+
 /** @import { TranscriptEntry } from './transcript.js' */
 
-// The card's transcript (spec Screens): the last 3 coalesced turns, user turns
-// set apart, inside a polite live region (docs/code-review-notes.md L2, L5).
+// The card's transcript (spec Screens): the coalesced turns transcript.js
+// keeps (at most MAX_ENTRIES), user turns set apart, inside a polite live
+// region (docs/code-review-notes.md L2, L5).
 //
 // What a screen reader hears. Live streams a turn a few words at a time, so
 // the region is built for additions only: `aria-relevant="additions"` with
@@ -9,53 +12,121 @@
 // fragment is a node of its own (fragments are append-only, transcript.js),
 // so a new turn reads "Presenter: Hello", then " there!", then " How can I
 // help?" — the turn once, as it arrives — rather than the growing sentence
-// re-read on every fragment, or (atomic) the whole list. An entry scrolling
-// out of the last 3 is a removal, which isn't announced. The hidden
+// re-read on every fragment, or (atomic) the whole list. An entry dropping
+// out of the kept list is a removal, which isn't announced. The hidden
 // "Presenter:" / "You:" prefix names the speaker, which the visual style
 // (italic, muted for the user) can't. The region stays in the page while
 // empty, since one added together with its first content isn't announced.
 //
-// Layout: it sits above the controls, so on the bottom-anchored card a growing
-// turn moves the card's top edge, never the buttons under the pointer. Past
-// --transcript-max-height it scrolls, pinned to the newest line by
-// `column-reverse` (styles.css), and is then a focusable named region so the
-// keyboard can scroll it too.
+// Layout (docs/metrics/m07.md, miss 1): a box that grew with its text moved
+// the bottom-anchored card's top edge on every wrapped line, a layout shift
+// each time. So while a session runs, or once there is something to show,
+// the box has a fixed height (--transcript-height) and the card resizes once,
+// on the press that starts the session. Inside it the list flows top-down
+// and the box follows the newest line by scrolling, which moves nothing on
+// the page. A viewer who scrolls up to read is left there, and following
+// resumes once they scroll back to the bottom. The edges a line is cut at
+// fade out (styles.css), and the box is a Tab stop only when it overflows,
+// since only then is there anything for the keyboard to scroll.
 
-const VISIBLE_ENTRIES = 3;
+// How close to the bottom counts as at it: scroll positions can be fractional.
+const BOTTOM_SLACK_PX = 4;
+
+/** @param {HTMLElement} box */
+function atBottom(box) {
+  return box.scrollHeight - box.scrollTop - box.clientHeight <= BOTTOM_SLACK_PX;
+}
+
+/** @param {HTMLElement} box Marks the edges where a line is cut off. */
+function markEdges(box) {
+  box.toggleAttribute('data-fade-top', box.scrollTop > 0);
+  box.toggleAttribute('data-fade-bottom', !atBottom(box));
+}
+
 /** @type {Record<TranscriptEntry['role'], string>} */
 const SPEAKER = { agent: 'Presenter', user: 'You' };
 
-/** @param {{ entries: TranscriptEntry[] }} props */
-export function Transcript({ entries }) {
-  const visible = entries.slice(-VISIBLE_ENTRIES);
-  const hasEntries = visible.length > 0;
+/**
+ * @param {{ entries: TranscriptEntry[], reserve: boolean }} props
+ *   `reserve` is true while a session is starting or running: the box keeps
+ *   its height even before the first line.
+ */
+export function Transcript({ entries, reserve }) {
+  const boxRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const listRef = useRef(/** @type {HTMLOListElement | null} */ (null));
+  const [overflows, setOverflows] = useState(false);
+  const hasEntries = entries.length > 0;
+  const reserved = reserve || hasEntries;
+
+  // Syncs the scroll position with the list's size, a layout fact React
+  // doesn't see: a ResizeObserver runs after layout and before paint, so the
+  // newest line is in view in the frame it appears in. The box is observed
+  // too, for a change of the card's width or of the reserved height.
+  useEffect(() => {
+    const box = boxRef.current;
+    const list = listRef.current;
+    if (!box || !list || typeof ResizeObserver === 'undefined') return;
+    let following = true;
+    // The position this effect last scrolled to: the scroll event that
+    // follows is its own, not the viewer's, even if more text has arrived
+    // by the time it fires.
+    let ownTop = -1;
+
+    const sync = () => {
+      if (following) {
+        box.scrollTop = box.scrollHeight;
+        ownTop = box.scrollTop;
+      }
+      markEdges(box);
+      setOverflows(box.scrollHeight > box.clientHeight);
+    };
+    const handleScroll = () => {
+      if (box.scrollTop !== ownTop) following = atBottom(box);
+      markEdges(box);
+    };
+
+    const observer = new ResizeObserver(sync);
+    observer.observe(box);
+    observer.observe(list);
+    box.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      observer.disconnect();
+      box.removeEventListener('scroll', handleScroll);
+    };
+  }, []);
 
   return (
-    <div
-      className="transcript"
-      data-empty={hasEntries ? undefined : ''}
-      role={hasEntries ? 'region' : undefined}
-      aria-label={hasEntries ? 'Transcript' : undefined}
-      tabIndex={hasEntries ? 0 : undefined}
-    >
-      <ol
-        className="transcript__list"
-        aria-live="polite"
-        aria-relevant="additions"
-        aria-atomic="false"
+    <div className="transcript" data-reserved={reserved ? '' : undefined}>
+      <div
+        ref={boxRef}
+        className="transcript__box"
+        role={hasEntries ? 'region' : undefined}
+        aria-label={hasEntries ? 'Transcript' : undefined}
+        tabIndex={hasEntries && overflows ? 0 : undefined}
       >
-        {visible.map((entry) => (
-          <li key={entry.id} className="transcript__entry" data-role={entry.role}>
-            <span className="visually-hidden">{SPEAKER[entry.role]}: </span>
-            <span className="transcript__text">
-              {/* Append-only, so the index is a stable key. */}
-              {entry.fragments.map((fragment, i) => (
-                <span key={i}>{fragment}</span>
-              ))}
-            </span>
-          </li>
-        ))}
-      </ol>
+        {reserved && !hasEntries && (
+          <p className="transcript__placeholder">The conversation appears here.</p>
+        )}
+        <ol
+          ref={listRef}
+          className="transcript__list"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-atomic="false"
+        >
+          {entries.map((entry) => (
+            <li key={entry.id} className="transcript__entry" data-role={entry.role}>
+              <span className="visually-hidden">{SPEAKER[entry.role]}: </span>
+              <span className="transcript__text">
+                {/* Append-only, so the index is a stable key. */}
+                {entry.fragments.map((fragment, i) => (
+                  <span key={i}>{fragment}</span>
+                ))}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </div>
     </div>
   );
 }

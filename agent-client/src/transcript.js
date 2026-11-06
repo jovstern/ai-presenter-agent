@@ -25,7 +25,7 @@
  *   continues this entry after a space.
  */
 
-/** The bound on kept entries; the card shows the last 3 of them. */
+/** The bound on kept entries, all of which the card's transcript box scrolls through. */
 export const MAX_ENTRIES = 20;
 
 /**

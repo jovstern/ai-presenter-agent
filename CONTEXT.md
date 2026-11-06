@@ -106,7 +106,7 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   fragments** Live streams (a few words each, `onTranscript`) merged until the other speaker
   talks (`agent-client/src/transcript.js`). Within a turn fragments join verbatim; a turn end
   (`turnComplete` or `interrupted`, `onTurnEnd`) followed by the same speaker continues the entry
-  after one space. The list keeps 20 entries; the card shows the last 3 (`Transcript.jsx`).
+  after one space. The list keeps 20 entries, all in the card's scrolling transcript box (`Transcript.jsx`).
 - **Primary button** — the card's one action, never disabled so focus stays on it: Talk to the
   presenter, a **pending** Cancel while connecting, End while live or reconnecting, then Retry,
   Try again or Reload page on `failed` (`AgentApp.jsx`).

@@ -786,6 +786,11 @@ so a card render that hands it new getter functions never restarts its animation
   (`MAX_ENTRIES`; consecutive fragments of one speaker merged, a same-speaker turn after
   `turnComplete`/`interrupted` joined with one space), and `Transcript.jsx` renders the last 3 of
   them (`transcript.test.js`, `Transcript.test.jsx`).*
+  *M7 fix wave: one bound in the strictest sense — `Transcript.jsx` now renders all 20 kept
+  entries in a fixed-height box that scrolls to the newest line. Slicing to 3 inside a fixed box
+  moved every line when the oldest dropped out (a layout shift); scrolled out of view, a dropped
+  20th-oldest entry moves nothing on screen (`Transcript.test.jsx`, `e2e/widget.spec.js`'s
+  390 px layout-shift test).*
 - [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.

@@ -130,7 +130,7 @@ test.beforeEach(() => {
 /**
  * The card's transcript, one line per turn as the card coalesces them
  * (transcript.js), so a failed run says what the agent heard and answered.
- * The card shows the last 3 turns, so that is what a failure records.
+ * The card keeps the last 20 turns, so that is what a failure records.
  * @param {import('@playwright/test').Page} page
  */
 async function readTranscript(page) {
