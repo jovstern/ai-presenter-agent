@@ -97,6 +97,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   session is open, a `requestAnimationFrame` loop writes the two levels to CSS variables
   (`--level`, `--mic-level`) on its node, and its rings follow them — with no React render per
   frame (**render isolation**, `renderIsolation.test.jsx`).
+- **Transcript entry** — one speaker's consecutive speech on the card: the **transcription
+  fragments** Live streams (a few words each, `onTranscript`) merged until the other speaker
+  talks (`agent-client/src/transcript.js`). Within a turn fragments join verbatim; a turn end
+  (`turnComplete` or `interrupted`, `onTurnEnd`) followed by the same speaker continues the entry
+  after one space. The list keeps 20 entries; the card shows the last 3 (`Transcript.jsx`).
 
 ## Knowledge
 

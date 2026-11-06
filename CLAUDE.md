@@ -42,8 +42,12 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     never-disabled Connect/Cancel/Disconnect/Retry/Try again/Reload page button, a status line
     ("Can't connect" on a fatal failure), an alert on `failed` (keyed by the connect attempt, so
     a repeat is announced), the transcript, the `📄` knowledge button and the volume orb. The
-    old `TranscriptLog` and `Toast.jsx` didn't survive the rebuild; their successors (coalesced
-    transcript, Radix toast) return with the designed card in M7 (issue #11, T3 and T4).
+    old `Toast.jsx` didn't survive the rebuild; its successor (Radix toast) returns with the
+    designed card in M7 (issue #11, T4).
+  - `Transcript.jsx` — the card's first row: the last 3 coalesced turns in an
+    `aria-live="polite"` list that announces additions only (one node per fragment), a hidden
+    "Presenter:" / "You:" prefix, scrolling past `--transcript-max-height` pinned to the newest
+    line. `transcript.js` (pure) merges fragments into entries and bounds them to 20.
   - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
     node — no React state, so a frame renders nothing (spec goals #8 and #9). No loop under
@@ -55,7 +59,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `display: block`. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
     as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
-    `knowledgeStore.js`.
+    `knowledgeStore.js`, `transcript.js`.
   - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by
     `server/geminiMint.js` for the token's constraint.
   - `bridgeProtocol.js` — types only: the bridge messages as JSDoc `@typedef`s. `sandbox/bridge.js`
@@ -184,14 +188,15 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 14 vitest files (278 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 16 vitest files (300 tests): `actionTools`,
   `audioIO` (the secure-context check; capture releases everything once; both `getLevel()`s
   against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
   `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
-  animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `useLiveAgent.test.jsx` (Testing
+  animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
+  boundary, the bound of 20), `Transcript.test.jsx` (last 3, live-region attributes, a node per fragment), `useLiveAgent.test.jsx` (Testing
   Library) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
   under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
@@ -210,7 +215,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after Disconnect) and
   `a11y.spec.js` (5: axe with zero violations on `/` idle, with the knowledge dialog open —
-  inside the shadow root —, connected with a transcript line (the fake-Live harness in
+  inside the shadow root —, connected with a coalesced transcript line (the fake-Live harness in
   `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
   Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.

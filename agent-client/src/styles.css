@@ -192,6 +192,7 @@ button:active {
 /* ---- The card ------------------------------------------------------------ */
 
 .agent-app {
+  position: relative; /* holds the empty transcript region */
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -286,8 +287,7 @@ button:active {
 /* Everything after the button row takes a full line of its own. */
 .agent-app__status,
 .agent-app__error,
-.agent-app__mic-error,
-.agent-app__transcript {
+.agent-app__mic-error {
   flex-basis: 100%;
 }
 
@@ -300,25 +300,44 @@ button:active {
   color: var(--color-danger);
 }
 
-.agent-app__transcript {
+/*
+ * The transcript (Transcript.jsx), the card's first row. It is the scroll
+ * container, and `column-reverse` makes its scroll origin the bottom: past
+ * --transcript-max-height the newest line stays in view as fragments arrive,
+ * with no script. The list inside keeps its normal top-to-bottom order.
+ */
+.transcript {
+  display: flex;
+  flex-basis: 100%;
+  flex-direction: column-reverse;
   max-height: var(--transcript-max-height);
+  margin-bottom: var(--space-2);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Empty, it stays in the page as a live region but out of the card's flow,
+   so it adds no row and no gap. */
+.transcript[data-empty] {
+  position: absolute;
+}
+
+.transcript__list {
   margin: 0;
   padding: 0;
-  overflow-y: auto;
   list-style: none;
   font-size: var(--text-md);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
-.agent-app__line + .agent-app__line {
-  margin-top: var(--space-1);
+.transcript__entry + .transcript__entry {
+  margin-top: var(--space-2);
 }
 
-.agent-app__line--agent {
-  color: var(--color-text);
-}
-
-/* User turns are distinct by colour and style both, not colour alone. */
-.agent-app__line--user {
+/* User turns are distinct by colour and style both, not colour alone; the
+   speaker is named for assistive tech by a hidden prefix. */
+.transcript__entry[data-role='user'] {
   color: var(--color-text-muted);
   font-style: italic;
 }

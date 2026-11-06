@@ -1676,3 +1676,36 @@ describe('createLiveSession: the loop guard across requests', () => {
     expect(correctives).toHaveLength(0);
   });
 });
+
+describe('createLiveSession: transcription', () => {
+  it('forwards each fragment with its role, then a turn end on turnComplete and on interrupted', async () => {
+    const events = [];
+    const liveSession = createLiveSession({
+      bridge: fakeBridge(),
+      nonce: 'page-nonce',
+      onTranscript: (fragment) => events.push(fragment),
+      onTurnEnd: () => events.push('end'),
+    });
+    created.push(liveSession);
+    const call = await connectAndEstablish(liveSession);
+    const send = (serverContent) => call.params.callbacks.onmessage({ serverContent });
+
+    send({ inputTranscription: { text: 'Go to settings.' } });
+    send({ outputTranscription: { text: 'Navigating' } });
+    // A fragment and the turn's end in one message: the fragment comes first.
+    send({ outputTranscription: { text: ' now.' }, turnComplete: true });
+    send({ outputTranscription: { text: 'Next I' } });
+    send({ interrupted: true });
+    // No turn end for content that ends nothing.
+    send({ modelTurn: { parts: [] } });
+
+    expect(events).toEqual([
+      { role: 'user', text: 'Go to settings.' },
+      { role: 'agent', text: 'Navigating' },
+      { role: 'agent', text: ' now.' },
+      'end',
+      { role: 'agent', text: 'Next I' },
+      'end',
+    ]);
+  });
+});

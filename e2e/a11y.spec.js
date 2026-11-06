@@ -85,8 +85,12 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   await page.goto('/');
   await button('Connect').click();
   await expect(status).toHaveText('Live');
-  live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello there.' } } });
-  await expect(page.locator(HOST).getByText('Hello there.')).toBeVisible();
+  // Fragments as Live streams them: coalesced into one turn (transcript.js).
+  live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello' } } });
+  live.sendToLatest({ serverContent: { outputTranscription: { text: ' there.' } } });
+  const transcript = page.locator(HOST).getByRole('region', { name: 'Transcript' });
+  await expect(transcript.getByRole('listitem')).toHaveText(['Presenter: Hello there.']);
+  await expect(transcript.getByText('Hello there.')).toBeVisible();
 
   const { violations, checkedInShadowRoot } = await analyze(page);
   expect(violations).toEqual([]);

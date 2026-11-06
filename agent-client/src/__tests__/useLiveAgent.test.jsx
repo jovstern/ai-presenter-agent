@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { AgentApp } from '../AgentApp.jsx';
 
@@ -429,16 +429,39 @@ describe('AgentApp + useLiveAgent', () => {
     await click('Connect');
     act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
     const card = screen.getByRole('complementary', { name: 'AI presenter' });
-    expect(card.querySelector('ul').textContent).toBe('Hello!');
+    expect(within(card).getByRole('region', { name: 'Transcript' }).textContent).toBe(
+      'Presenter: Hello!',
+    );
   });
 
-  it('renders the transcript list only once it has entries', async () => {
-    const { container } = renderApp();
+  it("coalesces the session's fragments into turns, spacing a turn the same speaker continues", async () => {
+    renderApp();
     await click('Connect');
-    expect(container.querySelector('ul')).toBeNull();
+    const { onTranscript, onTurnEnd } = fakes.sessions[0].options;
+    act(() => {
+      onTranscript({ role: 'agent', text: 'Hello' });
+      onTranscript({ role: 'agent', text: ' there!' });
+      onTurnEnd();
+      onTranscript({ role: 'agent', text: 'Ask me anything.' });
+      onTranscript({ role: 'user', text: 'Go to settings.' });
+    });
+    const lines = within(screen.getByRole('list')).getAllByRole('listitem');
+    expect(lines.map((line) => line.textContent)).toEqual([
+      'Presenter: Hello there! Ask me anything.',
+      'You: Go to settings.',
+    ]);
+  });
+
+  it('shows no transcript entries, and no transcript region, until the first fragment', async () => {
+    renderApp();
+    await click('Connect');
+    expect(screen.queryByRole('region', { name: 'Transcript' })).toBeNull();
+    expect(screen.queryAllByRole('listitem')).toHaveLength(0);
 
     act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
-    expect(container.querySelector('ul').textContent).toBe('Hello!');
+    expect(screen.getByRole('region', { name: 'Transcript' }).textContent).toBe(
+      'Presenter: Hello!',
+    );
   });
 
   it('names the knowledge button with its visible file count, hiding the emoji from assistive tech', () => {

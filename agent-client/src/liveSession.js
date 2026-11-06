@@ -32,7 +32,9 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * @typedef {{ attempt: number, maxAttempts: number, reason?: string, fatal?: FatalKind }} StatusDetails
  */
 /**
- * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptEntry
+ * One transcription fragment as Live streams it: a few words of one speaker,
+ * with its own leading space (transcript.js coalesces them into entries).
+ * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptFragment
  */
 /**
  * @typedef {object} LiveSessionOptions
@@ -42,7 +44,9 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  *   echoed on every token request (docs/code-review-notes.md H1).
  * @property {(status: SessionStatus, details?: StatusDetails) => void} [onStatusChange]
  * @property {(base64Pcm: string) => void} [onAudioChunk] 24 kHz 16-bit PCM from the model.
- * @property {(entry: TranscriptEntry) => void} [onTranscript]
+ * @property {(fragment: TranscriptFragment) => void} [onTranscript]
+ * @property {() => void} [onTurnEnd] The model's turn ended (turnComplete) or was
+ *   cut off (interrupted); after that message's fragment, if it had one.
  * @property {() => void} [onInterrupted] The user barged in: stop playback now.
  */
 /**
@@ -189,6 +193,7 @@ export function createLiveSession({
   onStatusChange,
   onAudioChunk,
   onTranscript,
+  onTurnEnd,
   onInterrupted,
 }) {
   /** @type {Set<string>} */
@@ -531,6 +536,7 @@ export function createLiveSession({
     if (outText) onTranscript?.({ role: 'agent', text: outText });
     const inText = message.serverContent?.inputTranscription?.text;
     if (inText) onTranscript?.({ role: 'user', text: inText });
+    if (message.serverContent?.turnComplete || message.serverContent?.interrupted) onTurnEnd?.();
     trackUtterances(message.serverContent);
 
     const resumption = message.sessionResumptionUpdate;

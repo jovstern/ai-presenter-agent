@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createLiveSession } from './liveSession.js';
 import { startCapture, createPlayer, voiceSupportError } from './audioIO.js';
 import { decodeOutputChunk } from './pcm.js';
+import { appendFragment, endTurn } from './transcript.js';
 
-/** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails, TranscriptEntry } from './liveSession.js' */
+/** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails } from './liveSession.js' */
+/** @import { TranscriptEntry } from './transcript.js' */
 
 /**
  * `idle` until the first connect; then whatever the session last reported.
@@ -13,7 +15,8 @@ import { decodeOutputChunk } from './pcm.js';
  * @typedef {object} LiveAgent
  * @property {AgentStatus} status
  * @property {StatusDetails | null} details Set with `reconnecting` and `failed` only.
- * @property {TranscriptEntry[]} transcript Every line so far, in order.
+ * @property {TranscriptEntry[]} transcript The coalesced turns so far, oldest first, bounded
+ *   (transcript.js).
  * @property {Error | null} micError Why the mic couldn't start (or can't on this page), until
  *   the next connect.
  * @property {number} connectCount How many times connect() has run: a key for the alerts, so
@@ -79,8 +82,11 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
         onAudioChunk: (base64) => {
           playerRef.current?.enqueue(decodeOutputChunk(base64));
         },
-        onTranscript: (entry) => {
-          setTranscript((prev) => [...prev, entry]);
+        onTranscript: (fragment) => {
+          setTranscript((prev) => appendFragment(prev, fragment));
+        },
+        onTurnEnd: () => {
+          setTranscript(endTurn);
         },
         onInterrupted: () => {
           playerRef.current?.interrupt();

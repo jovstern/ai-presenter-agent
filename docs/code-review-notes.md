@@ -3,13 +3,11 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance (M7 T2b): B1–B4, H1–H5, M1–M10, L1, L3, L4, L6–L12 are done
+> code instead. Status at a glance (M7 T3): every item is done — B1–B4, H1–H5, M1–M10, L1–L12
 > (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and L10
 > in M6 T4; M9 in M6 T5; M6 and M9 refined in the M6 fix wave; L3, L4 and L7 in M7 T1; L8 in M7
-> T2; M10, found in M7 T2, in M7 T2b). **Two items are still open:** L2 and L5, card items
-> marked "Deferred → M7 (issue #11, Tn)" (L2's orb half is done in M7 T2, its transcript half
-> is T3). The M4 and M5 re-review items accepted for M6 are fixed in M6
-> T6 (see B2, H1 and H5).
+> T2; M10, found in M7 T2, in M7 T2b; L2 (orb half in M7 T2) and L5 in M7 T3). The M4 and M5
+> re-review items accepted for M6 are fixed in M6 T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -730,7 +728,7 @@ so a card render that hands it new getter functions never restarts its animation
   copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
   sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
   thread into `public/capture-worklet.js`.*
-- [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
+- [x] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
   *Deferred → M7 (issue #11, T2, T3): `VolumeMeter` didn't survive the rebuild; its
@@ -741,6 +739,11 @@ so a card render that hands it new getter functions never restarts its animation
   `prefers-reduced-motion` it runs no animation loop at all (followed live through
   `matchMedia`) and `styles.css` holds the rings at a static level. It stays `aria-hidden`: the
   card's `role="status"` line says "Live". The `aria-live` transcript is T3, which ticks this.*
+  *Transcript half fixed in M7 T3: `agent-client/src/Transcript.jsx` renders the last 3 turns in
+  an `aria-live="polite"` list with `aria-relevant="additions"` and `aria-atomic="false"`; each
+  transcription fragment is its own appended node, so a screen reader hears each turn once, as it
+  arrives, prefixed "Presenter:" or "You:" (visually hidden), never the growing sentence re-read
+  per fragment (`Transcript.test.jsx`; axe-clean connected, `e2e/a11y.spec.js`).*
 - [x] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
@@ -762,11 +765,15 @@ so a card render that hands it new getter functions never restarts its animation
   *Fixed in M7 T1: `agent-client/src/styles.css`'s `:host` keeps `all: initial` (the page's
   inherited styles stay out) and then sets `display: block` explicitly; the host, not the card,
   is the fixed box, so the card no longer survives by coincidence.*
-- [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
+- [x] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
   *Deferred → M7 (issue #11, T3): today's card keeps and renders every line (no bound at all,
   the M1 rebuild dropped both); the coalesced transcript bounds the list to 20 and renders the
   last 3 → M7 (issue #11, T3).*
+  *Fixed in M7 T3: one bound — `agent-client/src/transcript.js` keeps 20 coalesced entries
+  (`MAX_ENTRIES`; consecutive fragments of one speaker merged, a same-speaker turn after
+  `turnComplete`/`interrupted` joined with one space), and `Transcript.jsx` renders the last 3 of
+  them (`transcript.test.js`, `Transcript.test.jsx`).*
 - [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.

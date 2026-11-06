@@ -124,28 +124,19 @@ test.beforeEach(() => {
 });
 
 /**
- * The card's transcript with consecutive chunks of one speaker joined, so a
- * failed run says what the agent heard and answered.
+ * The card's transcript, one line per turn as the card coalesces them
+ * (transcript.js), so a failed run says what the agent heard and answered.
+ * The card shows the last 3 turns, so that is what a failure records.
  * @param {import('@playwright/test').Page} page
  */
 async function readTranscript(page) {
-  const lines = await page
-    .locator('#ai-presenter-agent-host li.agent-app__line')
-    .evaluateAll((items) =>
-      items.map((item) => ({
-        role: item.classList.contains('agent-app__line--user') ? 'user' : 'agent',
-        text: item.textContent ?? '',
-      })),
-    );
-  /** @type {string[]} */
-  const turns = [];
-  let lastRole = '';
-  for (const { role, text } of lines) {
-    if (role === lastRole) turns[turns.length - 1] += text;
-    else turns.push(`${role}: ${text}`);
-    lastRole = role;
-  }
-  return turns.map((turn) => turn.replace(/\s+/g, ' ').trim());
+  return page.locator('#ai-presenter-agent-host li.transcript__entry').evaluateAll((items) =>
+    items.map((item) => {
+      const role = item instanceof HTMLElement ? item.dataset.role : '';
+      const text = item.querySelector('.transcript__text')?.textContent ?? '';
+      return `${role}: ${text.replace(/\s+/g, ' ').trim()}`;
+    }),
+  );
 }
 
 // After every test, passed or not: a failed run's partial numbers still count,

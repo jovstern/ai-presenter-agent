@@ -74,12 +74,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 4 specs, 21 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 4 specs, 23 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 14 files, 278 tests
+npm test        # vitest: 16 files, 300 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -107,7 +107,10 @@ The suite in `agent-client/src/__tests__/`:
   kinds (`config`, `token`).
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
-  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark.
+  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark, the session's fragments coalesced into turns.
+- `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
+  turn, one space across a turn boundary), bounded to 20; the last 3 rendered in a polite live
+  region that announces additions only, a node per fragment, the speaker named for assistive tech.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
@@ -207,8 +210,8 @@ workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no 
 
 - A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the
   underlying store is tested, the UI isn't yet (M7, issue #11).
-- The rest of the designed widget — coalesced transcript, connection toast — is M7 (issue #11);
-  the volume orb and its render-isolation test landed in M7 T2.
+- The rest of the designed widget — the connection toast — is M7 (issue #11); the volume orb
+  and its render-isolation test landed in M7 T2, the coalesced transcript in M7 T3.
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.
 - Anything from the agent-creation side of the real product (see the docs' scope note).

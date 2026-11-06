@@ -67,7 +67,7 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - [x] R18 A rAF volume meter held in a ref, plus a Profiler render-count test (spec goals
       #8 and #9). *(M7 T2: `VolumeOrb.jsx`, levels from `getLevel()` in `audioIO.js`;
       `renderIsolation.test.jsx`.)*
-- [ ] R19 A coalesced, bounded transcript with `aria-live`.
+- [x] R19 A coalesced, bounded transcript with `aria-live` (M7 T3).
 - [ ] R20 Connection states shown in the card, with a Radix Toast and Retry.
 - [ ] R21 The knowledge modal is polished and has a component test.
 

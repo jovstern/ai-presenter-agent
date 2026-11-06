@@ -160,9 +160,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   `agent-client/public/capture-worklet.js` (§4).
 - `AgentApp.jsx` — the minimal card (the volume orb, one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
   on `failed`, transcript, `📄` knowledge button); `VolumeOrb.jsx` — the orb's rAF loop (§4);
+  `Transcript.jsx` — the last 3 coalesced turns, `aria-live="polite"` (additions only);
   `KnowledgeModal.jsx` — the Radix dialog.
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
-  `knowledgeStore.js`.
+  `knowledgeStore.js`, `transcript.js` (fragments → bounded turns).
 
 ### 3.2 What's built and actually verified (not just written)
 
@@ -174,10 +175,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 14 files,
-  278 tests after M7 T2b).
+  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 16 files,
+  300 tests after M7 T3).
 - `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 682.3 kB,
-  165.5 kB gzip after M7 T2b (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  166.2 kB gzip after M7 T3 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
