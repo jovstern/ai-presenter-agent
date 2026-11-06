@@ -175,6 +175,7 @@ describe('Transcript: following the newest line', () => {
     let content = 0;
     let top = 0;
     Object.defineProperty(box, 'clientHeight', { get: () => clientHeight });
+    Object.defineProperty(box.firstElementChild, 'offsetHeight', { get: () => content });
     Object.defineProperty(box, 'scrollHeight', { get: () => Math.max(content, clientHeight) });
     Object.defineProperty(box, 'scrollTop', {
       get: () => top,
@@ -201,6 +202,19 @@ describe('Transcript: following the newest line', () => {
     const box = screen.getByRole('region', { name: 'Transcript' });
     return { box, ...fakeLayout(box, 192) };
   }
+
+  // By a translate, not layout: a layout change would move the lines above
+  // each new one (a layout shift).
+  it('draws content shorter than the box at its bottom, next to the controls', () => {
+    const { box, grow } = setup();
+    const content = /** @type {HTMLElement} */ (box.firstElementChild);
+    grow(100);
+    expect(content.style.translate).toBe('0 92px');
+    grow(150);
+    expect(content.style.translate).toBe('0 42px');
+    grow(400);
+    expect(content.style.translate).toBe('');
+  });
 
   it('is no Tab stop while everything fits, and one once it overflows', () => {
     const { box, grow } = setup();
@@ -233,6 +247,17 @@ describe('Transcript: following the newest line', () => {
     expect(box.hasAttribute('data-fade-bottom')).toBe(false);
     grow(600);
     expect(box.scrollTop).toBe(408);
+  });
+
+  // Its own position counts once: a viewer who scrolls up and back down to
+  // the bottom — the same position it last scrolled to — is followed again.
+  it('follows again when the viewer returns to the bottom at its own last position', () => {
+    const { box, grow, scrollTo } = setup();
+    grow(400); // scrolls itself to 208; that scroll's event never came
+    scrollTo(50);
+    scrollTo(208); // the viewer, back at the bottom
+    grow(460);
+    expect(box.scrollTop).toBe(268);
   });
 
   it('treats the scroll event of its own scrolling as its own, even after more text arrived', () => {

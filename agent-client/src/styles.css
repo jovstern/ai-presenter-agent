@@ -402,7 +402,6 @@ button:active {
 .transcript[data-reserved] .transcript__box {
   height: var(--transcript-height);
 }
-
 .transcript__box[data-fade-top] {
   --fade-top: var(--space-5);
 }

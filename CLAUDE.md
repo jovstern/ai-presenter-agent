@@ -74,8 +74,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     list that announces additions only (one node per fragment), a hidden "Presenter:" / "You:"
     prefix. From the press that starts a session it is a fixed-height box
     (`--transcript-height`), so new lines never move the card (a layout shift); a
-    `ResizeObserver` scrolls it to the newest line unless the viewer scrolled up, cut-off edges
-    fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
+    `ResizeObserver` scrolls it to the newest line unless the viewer scrolled up, short content
+    is translated to the box's bottom (a transform, so no layout shift), cut-off edges fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
     into entries and bounds them to 20.
   - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its

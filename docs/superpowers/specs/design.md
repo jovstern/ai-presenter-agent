@@ -232,7 +232,9 @@ come from `status`.
   (CLS 0.151 at 390 px before the M7 fix wave, 0 after; `e2e/widget.spec.js` asserts ≤ 0.05).
   Empty while reserved, it says "The conversation appears here."; idle and empty it takes no
   room. The list flows top-down and the box scrolls to follow the newest line; a viewer who
-  scrolls up is left there until they scroll back to the bottom. Cut-off edges fade (a mask).
+  scrolls up is left there until they scroll back to the bottom. Content shorter than the box is
+  drawn at its bottom, next to the controls, with a `translate` rather than layout (bottom-aligned
+  in layout, each new line moved the ones above it: 0.024 at 390 px; a transform isn't a shift). Cut-off edges fade (a mask).
   It is a Tab stop only while it overflows, its focus ring on the unmasked wrapper with the
   control radius. No `text-wrap: pretty` on it: rebalancing as words stream in moved shown
   words between lines.
