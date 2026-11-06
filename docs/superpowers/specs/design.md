@@ -74,7 +74,11 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
       page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
       one live announcement of the reason; F8 and Tab handled inside the shadow root). M7 T6:
-      `e2e/widget.spec.js` drives every state, the backoff run out to the toast included.)*
+      `e2e/widget.spec.js` drives every state, the backoff run out to the toast included.
+      M7 fix wave (the coordinator's ruling on the UI review): the toast carries the reason and
+      Dismiss only, no action button — Retry lives on the card alone — and the card hides its
+      reason line while the toast is open, showing it once the toast closes; AgentApp owns the
+      toast's `open`. Still one live announcement (`useLiveAgent.test.jsx`).)*
 - [x] R21 The knowledge modal is polished and has a component test. *(M7 T5:
       `KnowledgeModal.jsx` reads the store through `useSyncExternalStore`, owns the knowledge
       button as its `Dialog.Trigger`, and does its own Tab wrap in the shadow root;
@@ -216,7 +220,7 @@ come from `status`.
 | connecting | the button pending (a spinner, still enabled) as Cancel, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
-| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) and the reason as plain text under it, plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once per failure, above the card: the reason, the same action, Dismiss; it is the one live announcement of the reason (assertive), so the card's copy is not an alert (M7 T4) |
+| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) in the text colour at medium weight (`data-status="failed"`), plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once per failure, above the card: the reason and Dismiss only, with a visually hidden line naming the card's button ("Use the Retry button on the presenter card."); it is the one live announcement of the reason (assertive). While it is open the card hides its own reason line; once it closes (dismissed, Escape, swiped or timed out after 8 s) the card shows the reason as plain text under the headline, so the screen holds one reason and one Retry, and the reason is announced once (M7 T4; ruling of the M7 fix wave) |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |

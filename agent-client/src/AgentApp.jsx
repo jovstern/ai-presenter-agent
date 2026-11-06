@@ -111,6 +111,11 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
   const failureReason = status === 'failed' ? details?.reason : undefined;
+  // The failure whose toast has closed: the toast is open for each new
+  // failure (failureCount) with a reason until then, and the card shows the
+  // reason itself only once it has closed — one reason on screen, one Retry.
+  const [toastClosedFor, setToastClosedFor] = useState(0);
+  const toastOpen = Boolean(failureReason) && toastClosedFor !== failureCount;
 
   return (
     // Inert while the knowledge dialog is open: the dialog is modal, but
@@ -150,13 +155,14 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
           open={knowledgeOpen}
           onOpenChange={setKnowledgeOpen}
         />
-        <span className="agent-app__status" role="status">
+        <span className="agent-app__status" role="status" data-status={status}>
           {statusText(status, details)}
         </span>
-        {/* The failure's reason, kept in the card for as long as the failure
-            lasts, as plain text: the toast is what announces it, once, so a
-            role="alert" here would make a screen reader say it twice. */}
-        {failureReason && <p className="agent-app__error">{failureReason}</p>}
+        {/* The failure's reason, once its toast has closed, for as long as the
+            failure lasts; while the toast is open it says it. Plain text: the
+            toast is what announces it, once, so a role="alert" here would
+            make a screen reader say it twice. */}
+        {failureReason && !toastOpen && <p className="agent-app__error">{failureReason}</p>}
         {/* role="alert", not "status": the guidance asks the user to act, so
             it is announced at once. There is no toast for these: they aren't
             a connection failing but something on this side to fix first.
@@ -171,8 +177,9 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
       <FailureToast
         failureId={failureCount}
         reason={failureReason}
+        open={toastOpen}
+        onClose={() => setToastClosedFor(failureCount)}
         actionLabel={action.label}
-        onAction={action.onClick}
         returnFocusTo={primaryRef}
         announcerContainer={portalContainer}
       />

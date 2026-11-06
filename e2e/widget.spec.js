@@ -97,15 +97,16 @@ test.describe('the card through every connection state', () => {
       await page.clock.fastForward(RECONNECT_DELAYS_MS[attempt - 1]);
     }
 
-    // failed: Connection lost, the reason in the card, Retry on the same
-    // button, and one toast with the same action.
+    // failed: Connection lost, Retry on the same button, and one toast with
+    // the reason and Dismiss; the card holds its own copy of the reason back
+    // while the toast shows it — one reason, one Retry on screen.
     const reason = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
     await expect(status).toHaveText('Connection lost');
-    await expect(panel).toContainText(reason);
     await expect(button('Retry')).toBeFocused();
     await expect(toasts).toHaveCount(1);
     await expect(toasts).toContainText(reason);
-    await expect(toasts.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+    await expect(toasts.getByRole('button')).toHaveText(['×Dismiss']);
+    await expect(panel).not.toContainText(reason);
     expect(token.count).toBe(1 + MAX_ATTEMPTS);
     expect(live.sockets).toHaveLength(2); // the refused tokens never opened a socket
     await pause();
@@ -155,13 +156,14 @@ test.describe('when the server has no API key', () => {
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
-    // The reason stays in the card as plain text; the toast is what announces
-    // it, so there is no alert to announce it a second time.
-    await expect(panel).toContainText(reason);
+    // The toast says the reason (and is what announces it); the card shows
+    // it, as plain text, once the toast has closed, so there is no alert to
+    // announce it a second time.
     await expect(alert).toHaveCount(0);
     await expect(toasts).toHaveCount(1);
     await expect(toasts).toContainText(reason);
-    await expect(toasts.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+    await expect(panel).not.toContainText(reason);
+    await expect(toasts.getByRole('button', { name: 'Try again' })).toHaveCount(0);
     await expect(button('Try again')).toBeFocused();
     await expect(button('Reload page')).toHaveCount(0);
     // The backoff's first retry is immediate; give it room to (wrongly) happen.
@@ -170,9 +172,9 @@ test.describe('when the server has no API key', () => {
     expect(live.sockets).toHaveLength(0);
 
     // The keyboard path into the toast, inside the shadow root: F8 (Radix's
-    // hotkey) focuses the viewport, Tab walks the toast, its action and
-    // Dismiss, then leaves for the card's button; Escape closes the toast from
-    // inside it and focus goes back to the card.
+    // hotkey) focuses the viewport, Tab walks the toast and Dismiss, then
+    // leaves for the card's button; Escape closes the toast from inside it,
+    // focus goes back to the card, and the card shows the reason.
     const viewport = page
       .locator(HOST)
       .getByRole('region', { name: 'Notifications (F8)' })
@@ -181,8 +183,6 @@ test.describe('when the server has no API key', () => {
     await expect(viewport).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(toasts).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(toasts.getByRole('button', { name: 'Try again', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(toasts.getByRole('button', { name: 'Dismiss', exact: true })).toBeFocused();
     await page.keyboard.press('Tab');
@@ -193,6 +193,8 @@ test.describe('when the server has no API key', () => {
     await page.keyboard.press('Escape');
     await expect(toasts).toHaveCount(0);
     await expect(button('Try again')).toBeFocused();
+    await expect(panel).toContainText(reason);
+    await expect(alert).toHaveCount(0);
     // Once per failure: closed, it stays closed while the failure lasts.
     await page.waitForTimeout(500);
     await expect(toasts).toHaveCount(0);
@@ -226,9 +228,8 @@ test.describe('when the page nonce is rejected', () => {
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
-    await expect(panel).toContainText(reason);
     await expect(toasts).toContainText(reason);
-    await expect(toasts.getByRole('button', { name: 'Reload page', exact: true })).toBeVisible();
+    await expect(panel).not.toContainText(reason);
     await expect(button('Reload page')).toBeFocused();
     await page.waitForTimeout(1500);
     expect(token.count).toBe(1);

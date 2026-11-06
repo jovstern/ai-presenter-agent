@@ -214,7 +214,7 @@ describe('AgentApp + useLiveAgent', () => {
 
     expect(fakes.captures[0].stop).toHaveBeenCalled();
     expect(fakes.players[0].close).toHaveBeenCalled();
-    expect(within(card()).getByText(/Reload the page to reconnect/)).toBeTruthy();
+    expect(within(toasts()[0]).getByText(/Reload the page to reconnect/)).toBeTruthy();
     expect(statusLine().textContent).toMatch(/Connection lost/);
 
     await click('Retry');
@@ -270,7 +270,7 @@ describe('AgentApp + useLiveAgent', () => {
       fatal: 'token',
     });
 
-    expect(within(card()).getByText(/Reload the page/)).toBeTruthy();
+    expect(within(toasts()[0]).getByText(/Reload the page to reconnect/)).toBeTruthy();
     expect(statusLine().textContent).toBe("Can't connect");
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await click('Reload page');
@@ -296,7 +296,7 @@ describe('AgentApp + useLiveAgent', () => {
       fatal: 'config',
     });
 
-    expect(within(card()).getByText(/Contact the site owner/)).toBeTruthy();
+    expect(within(toasts()[0]).getByText(/Contact the site owner/)).toBeTruthy();
     // Fatal: nothing was lost, the session never connected.
     expect(statusLine().textContent).toBe("Can't connect");
     expect(within(card()).queryByRole('button', { name: 'Reload page' })).toBeNull();
@@ -483,9 +483,11 @@ describe('AgentApp + useLiveAgent', () => {
   });
 });
 
-// The failure toast (spec Screens, R20): a Radix toast, once per failure. The
-// toast is the one live announcement of the reason; the card keeps the
-// reason as plain text, so a screen reader hears it once.
+// The failure toast (spec Screens, R20): a Radix toast, once per failure, with
+// the reason and Dismiss; the card's button is the one action. The toast is
+// the one live announcement of the reason; the card shows the reason as plain
+// text once the toast has closed, so one reason is on screen and a screen
+// reader hears it once.
 describe('the failure toast', () => {
   const REASON = 'Could not reconnect after 6 attempts.';
   const EXHAUSTED = { attempt: 6, maxAttempts: 6, reason: REASON };
@@ -507,24 +509,64 @@ describe('the failure toast', () => {
     return button;
   }
 
-  it("shows the reason with the card's action, and the card the same reason as plain text", async () => {
+  it('shows the reason and Dismiss, no action of its own, and the card hides its reason while it is open', async () => {
     await failOnce();
     const [toast] = toasts();
     expect(within(toast).getByText(REASON)).toBeTruthy();
-    expect(within(toast).getByRole('button', { name: 'Retry' })).toBeTruthy();
-    expect(within(toast).getByRole('button', { name: 'Dismiss' })).toBeTruthy();
-    expect(within(card()).getByText(REASON)).toBeTruthy();
+    expect(
+      within(toast)
+        .getAllByRole('button')
+        .map((button) => button.textContent),
+    ).toEqual(['×Dismiss']);
+    expect(within(card()).queryByText(REASON)).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(within(card()).queryByRole('alert')).toBeNull();
   });
 
-  it('announces the reason exactly once, through the toast', async () => {
+  it('shows the reason in the card, as plain text, once the toast is dismissed', async () => {
+    await failOnce();
+    await act(async () => {
+      fireEvent.click(within(toasts()[0]).getByRole('button', { name: 'Dismiss' }));
+    });
+    expect(toasts()).toHaveLength(0);
+    const line = within(card()).getByText(REASON);
+    expect(line.closest('[role="alert"], [role="status"], [aria-live]')).toBeNull();
+  });
+
+  it('shows the reason in the card once the toast times out', async () => {
+    vi.useFakeTimers();
+    try {
+      await failOnce();
+      expect(within(card()).queryByText(REASON)).toBeNull();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(8000);
+      });
+      expect(toasts()).toHaveLength(0);
+      expect(within(card()).getByText(REASON)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('marks the failed headline for its own style', async () => {
+    await failOnce();
+    expect(statusLine().dataset.status).toBe('failed');
+  });
+
+  it('announces the reason exactly once, through the toast, and not again when the card shows it', async () => {
     await failOnce();
     await waitFor(() => expect(liveRegionsWith(REASON)).toHaveLength(1));
     const [announcer] = liveRegionsWith(REASON);
     expect(announcer.getAttribute('aria-live')).toBe('assertive');
-    // The action's alternative is announced with it, for whoever can't reach the toast in time.
+    // Where to act is announced with it: the toast has no button of its own.
     expect(announcer.textContent).toContain('Use the Retry button on the presenter card.');
     expect(card().contains(announcer)).toBe(false);
+
+    await act(async () => {
+      fireEvent.keyDown(toasts()[0], { key: 'Escape' });
+    });
+    expect(within(card()).getByText(REASON)).toBeTruthy();
+    expect(liveRegionsWith(REASON).filter((region) => card().contains(region))).toEqual([]);
   });
 
   it('does not come back once closed, whatever re-renders the card', async () => {
@@ -553,22 +595,16 @@ describe('the failure toast', () => {
     await waitFor(() => expect(liveRegionsWith(REASON)).toHaveLength(1));
   });
 
-  it("names the action after the card's: Reload page for a rejected token", async () => {
+  it("names the card's button, Reload page for a rejected token, in the toast's hidden line", async () => {
     renderApp();
     await click(TALK);
     emitStatus('failed', { ...EXHAUSTED, reason: 'Reload the page to reconnect.', fatal: 'token' });
-    expect(within(toasts()[0]).getByRole('button', { name: 'Reload page' })).toBeTruthy();
-  });
-
-  it("runs the card's action from the toast and leaves focus on the card's button", async () => {
-    const button = await failOnce();
-    const retry = within(toasts()[0]).getByRole('button', { name: 'Retry' });
-    retry.focus();
-    await act(async () => {
-      fireEvent.click(retry);
-    });
-    expect(fakes.sessions[0].connect).toHaveBeenCalledTimes(2);
-    expect(document.activeElement).toBe(button);
+    const [toast] = toasts();
+    expect(
+      within(toast).getByText('Use the Reload page button on the presenter card.'),
+    ).toBeTruthy();
+    expect(within(toast).queryByRole('button', { name: 'Reload page' })).toBeNull();
+    expect(within(card()).getByRole('button', { name: 'Reload page' })).toBeTruthy();
   });
 
   it("returns focus to the card's button when the toast closes with focus inside it", async () => {
@@ -591,25 +627,24 @@ describe('the failure toast', () => {
 
   // Radix moves Tab through the toast by comparing document.activeElement,
   // which in the shadow root is the host, so FailureToast.jsx does it: the
-  // toast, its action, Dismiss, then back to the card's button, either way.
+  // toast, Dismiss, then back to the card's button, either way.
   it('walks Tab from F8 through the toast and back to the card, and Shift+Tab back again', async () => {
     const button = await failOnce();
     const viewport = within(screen.getByRole('region', { name: 'Notifications (F8)' })).getByRole(
       'list',
     );
     const [toast] = toasts();
-    const action = within(toast).getByRole('button', { name: 'Retry' });
     const dismiss = within(toast).getByRole('button', { name: 'Dismiss' });
 
     fireEvent.keyDown(document, { key: 'F8', code: 'F8' });
     expect(document.activeElement).toBe(viewport);
-    for (const next of [toast, action, dismiss, button]) {
+    for (const next of [toast, dismiss, button]) {
       fireEvent.keyDown(document.activeElement, { key: 'Tab' });
       expect(document.activeElement).toBe(next);
     }
 
     dismiss.focus();
-    for (const previous of [action, toast, button]) {
+    for (const previous of [toast, button]) {
       fireEvent.keyDown(document.activeElement, { key: 'Tab', shiftKey: true });
       expect(document.activeElement).toBe(previous);
     }

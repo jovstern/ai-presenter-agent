@@ -60,8 +60,10 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
     its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` / `tabStops`,
     shared with `FailureToast.jsx`.
-  - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason, the card's
-    action under the same label, Dismiss. Its viewport sits above the card in the shadow root
+  - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason and Dismiss
+    (no action: the card's button is the one Retry), plus a visually hidden line naming the
+    card's button. `AgentApp.jsx` owns its `open` and hides the card's reason line while it is
+    open, showing it once the toast closes. Its viewport sits above the card in the shadow root
     and its announcer in `main.jsx`'s portal container; it is the one live announcement of the
     reason (so the card has no alert for it). F8 reaches it; its own capture handlers walk Tab
     (Radix compares `document.activeElement`, which in a shadow root is the host) and send

@@ -1,66 +1,66 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import * as Toast from '@radix-ui/react-toast';
 import { focusedIn } from './shadowFocus.js';
 
 /** @import { KeyboardEvent, FocusEvent, RefObject } from 'react' */
 
-// Long enough to read the reason and reach the action; Radix pauses it while
-// the pointer or focus is in the toast. The reason stays in the card after.
+// Long enough to read the reason; Radix pauses it while the pointer or focus
+// is in the toast. The card shows the reason again once it closes.
 const TOAST_DURATION_MS = 8000;
 
 /**
- * The failure toast (spec Screens, R20): a Radix toast, once per failure.
- *
- * Open while there is a failure with a reason, until it closes (its timer,
- * Escape, a swipe, Dismiss or its action); the failure it closed for is
- * remembered, so a re-render never reopens it, while the next failure (a new
- * `failureId`) gets a toast of its own, announced anew. No reason (the card
- * left `failed`) closes it.
+ * The failure toast (spec Screens, R20): a Radix toast, once per failure,
+ * with the reason and Dismiss. No action of its own: the card's primary
+ * button (Retry, Try again or Reload page) is the one action on screen, and
+ * the card hides its own copy of the reason while the toast is open, so the
+ * screen holds one reason and one Retry (AgentApp.jsx owns `open`).
  *
  * It is the one live announcement of the reason: Radix's announcer reads the
- * toast's text (the reason, then the action's alt text) once, assertively.
- * The card shows the same reason as plain text for as long as the failure
- * lasts, so a screen reader hears it once.
+ * toast's text once, assertively — the reason, then a visually hidden line
+ * naming the card's button, for anyone who can't see where to act. The
+ * card's copy, shown once the toast has closed, is plain text, so a screen
+ * reader hears the reason once.
  *
  * Focus: the toast never takes it. F8 (Radix's hotkey) does, and Tab then
- * walks the toast, its action and Dismiss, and leaves it for the card's
- * primary button either way; a toast that closes with focus inside sends it
- * there too. Radix does those moves by comparing document.activeElement,
- * which inside the widget's shadow root is the host, so its Tab handling
- * skipped out of the toast and its focus proxies landed on Dismiss: the
- * region's capture handlers below do both moves instead.
+ * walks the toast and Dismiss, and leaves it for the card's primary button
+ * either way; a toast that closes with focus inside sends it there too.
+ * Radix does those moves by comparing document.activeElement, which inside
+ * the widget's shadow root is the host, so its Tab handling skipped out of
+ * the toast and its focus proxies landed on Dismiss: the region's capture
+ * handlers below do both moves instead.
  *
  * @param {{
  *   failureId: number,
  *   reason: string | undefined,
+ *   open: boolean,
+ *   onClose: () => void,
  *   actionLabel: string,
- *   onAction: () => void,
  *   returnFocusTo: RefObject<HTMLElement | null>,
  *   announcerContainer: HTMLElement | undefined,
  * }} props
- *   `failureId` names the failure (useLiveAgent's failureCount); `actionLabel`
- *   and `onAction` are the card's primary action, which the toast repeats;
- *   `returnFocusTo` is that button; `announcerContainer` keeps Radix's live
- *   region in the shadow root.
+ *   `failureId` names the failure (useLiveAgent's failureCount), a new toast
+ *   per failure; `open` and `onClose` are the card's (it closes for good on
+ *   its timer, Escape, a swipe or Dismiss); `actionLabel` is the card's
+ *   primary button, which the hidden line names; `returnFocusTo` is that
+ *   button; `announcerContainer` keeps Radix's live region in the shadow root.
  */
 export function FailureToast({
   failureId,
   reason,
+  open,
+  onClose,
   actionLabel,
-  onAction,
   returnFocusTo,
   announcerContainer,
 }) {
-  const [closedFor, setClosedFor] = useState(0);
-  const open = Boolean(reason) && closedFor !== failureId;
   const regionRef = useRef(/** @type {HTMLDivElement | null} */ (null));
 
   /** @param {boolean} nextOpen */
   function handleOpenChange(nextOpen) {
     if (nextOpen) return;
-    setClosedFor(failureId);
     const region = regionRef.current;
     if (region?.contains(focusedIn(region))) returnFocusTo.current?.focus();
+    onClose();
   }
 
   // The toasts' Tab stops in order: each toast, then its buttons.
@@ -68,7 +68,7 @@ export function FailureToast({
    * @param {HTMLElement} region
    * @returns {HTMLElement[]}
    */
-  function tabStops(region) {
+  function toastTabStops(region) {
     return [...region.querySelectorAll('li.toast')].flatMap((toast) => [
       /** @type {HTMLLIElement} */ (toast),
       ...toast.querySelectorAll('button'),
@@ -80,7 +80,7 @@ export function FailureToast({
   /** @param {KeyboardEvent<HTMLDivElement>} event */
   function handleKeyDownCapture(event) {
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
-    const stops = tabStops(event.currentTarget);
+    const stops = toastTabStops(event.currentTarget);
     const current = stops.indexOf(/** @type {HTMLElement} */ (focusedIn(event.currentTarget)));
     // Past either end (or backwards from the viewport itself, after F8) is
     // undefined: the card's button.
@@ -98,7 +98,7 @@ export function FailureToast({
     const viewport = event.currentTarget.querySelector('.toast-viewport');
     if (viewport?.contains(/** @type {Node} */ (event.target))) return;
     event.stopPropagation();
-    const [newest] = tabStops(event.currentTarget);
+    const [newest] = toastTabStops(event.currentTarget);
     (newest ?? returnFocusTo.current)?.focus();
   }
 
@@ -112,21 +112,14 @@ export function FailureToast({
         onKeyDownCapture={handleKeyDownCapture}
         onFocusCapture={handleFocusCapture}
       >
-        {/* Keyed by the failure, so each one is a new toast. Its alt text is
-            what the announcement says in place of the action, for anyone who
-            can't reach the toast before it goes. */}
+        {/* Keyed by the failure, so each one is a new toast. */}
         <Toast.Root key={failureId} className="toast" open={open} onOpenChange={handleOpenChange}>
           <Toast.Title className="toast__title">{reason}</Toast.Title>
-          <Toast.Action
-            className="toast__action"
-            altText={`Use the ${actionLabel} button on the presenter card.`}
-            onClick={() => {
-              returnFocusTo.current?.focus();
-              onAction();
-            }}
-          >
-            {actionLabel}
-          </Toast.Action>
+          {/* Read with the reason, not shown: the toast has no button of its
+              own to act with, so it says where the action is. */}
+          <Toast.Description className="visually-hidden">
+            Use the {actionLabel} button on the presenter card.
+          </Toast.Description>
           <Toast.Close className="toast__close">
             <span aria-hidden="true">×</span>
             <span className="visually-hidden">Dismiss</span>

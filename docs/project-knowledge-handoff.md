@@ -516,22 +516,23 @@ Connection lost, or Can't connect for a fatal failure) and one primary button wh
 the status and is never disabled, so focus stays on it (Talk to the presenter; a pending Cancel
 while connecting; End while live or reconnecting, so the viewer can hang up during the backoff;
 Retry on `failed`, Reload page when the page's token is rejected, or Try again when the server
-isn't configured — a reload can't fix that, M6 T6). On `failed` the reason stays under the status
-line as plain text.
+isn't configured — a reload can't fix that, M6 T6). On `failed` the reason shows under the status
+line as plain text once the toast has closed (while it is open, the toast says it).
 
 The toast (`FailureToast.jsx`) appears once per failure: above the card (never over its
-button), with the reason, the card's action under the same label, and Dismiss; it closes on its
-8 s timer (paused on hover and focus), Escape, a swipe, Dismiss or its action, and a re-render
+button), with the reason and Dismiss — no action of its own since the M7 fix wave, so the screen
+holds one Retry, the card's — and the card hides its reason line until the toast closes; it
+closes on its 8 s timer (paused on hover and focus), Escape, a swipe or Dismiss, and a re-render
 never reopens it — the next failure (`useLiveAgent`'s `failureCount`) gets a new one. Who
 announces what: the toast is the one live announcement of the reason (Radix's announcer,
-assertive, with the action's alt text "Use the Retry button on the presenter card."), so the
+assertive, with a visually hidden line "Use the Retry button on the presenter card."), so the
 card's copy of it is not an alert, and a screen reader hears it once; a blocked mic and the
 other capture or voice-support problems are not connection failures and get no toast, only the
 card's `role="alert"` with what to do. F8 (Radix's hotkey) takes focus into the toast. Radix
 moves Tab inside the toast, and from its focus proxies, by comparing `document.activeElement`,
 which inside the shadow root is the host, so Tab skipped straight out of the toast;
-`FailureToast.jsx` handles those moves itself in capture phase (the toast, its action, Dismiss,
-then back to the card's button) and returns focus to the button when a focused toast closes.
+`FailureToast.jsx` handles those moves itself in capture phase (the toast, Dismiss, then back to
+the card's button) and returns focus to the button when a focused toast closes.
 `e2e/loop.spec.js` walks it in the real shadow root.
 
 ### 5.3 The `server/` scope question

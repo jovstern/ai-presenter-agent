@@ -316,6 +316,13 @@ button:active {
   color: var(--color-text-muted);
 }
 
+/* Failed is the state to act on: its headline in the text colour, medium
+   weight, above the reason in the danger colour. */
+.agent-app__status[data-status='failed'] {
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
 .agent-app__error,
 .agent-app__mic-error {
   margin: 0;
@@ -575,15 +582,12 @@ button:active {
   list-style: none;
 }
 
-/* The reason and Dismiss on the first row, the action under the reason. A
-   danger edge marks it as a failure, and the words say so too. */
+/* The reason and Dismiss, on one row. A danger edge marks it as a failure,
+   and the words say so too. */
 .toast {
   display: grid;
   grid-template-columns: 1fr auto;
-  grid-template-areas:
-    'title close'
-    'action action';
-  align-items: start;
+  align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
   border: var(--border-width) solid var(--color-border);
@@ -618,20 +622,12 @@ button:active {
 }
 
 .toast__title {
-  grid-area: title;
-  align-self: center;
   font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
   text-wrap: pretty;
 }
 
-.toast__action {
-  grid-area: action;
-  justify-self: start;
-}
-
 .toast__close {
-  grid-area: close;
   padding: 0;
   border-color: transparent;
   background: transparent;
