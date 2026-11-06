@@ -645,7 +645,8 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 
 *(medium, 10 min)*
 
-**T3 — Go live (user + agent).**
+**T3 — Go live (user + agent).** *Deferred (2026-11-06, the user's call): the M8 PR opened
+without the deploy; this task moved to #23, done from `master` after the merge.*
 - The user creates the Render service from the blueprint and sets `GEMINI_API_KEY`.
 - The agent runs the e2e against the URL and the observer against production, and records
   `docs/metrics/m08.md`.

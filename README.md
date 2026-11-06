@@ -5,7 +5,7 @@ A rebuild of the runtime half of a Presenter Agent — an AI avatar embedded in 
 the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`/`.md` files, and
 standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
-**Live:** <!-- LIVE_URL --> (Render's free plan: the first visit after it has been idle takes
+**Live:** <!-- LIVE_URL --> not deployed yet ([#23](https://github.com/jovstern/ai-presenter-agent/issues/23)); once it is (Render's free plan: the first visit after it has been idle takes
 about 30 s to wake it). Open it on https, press **Talk to the presenter**, allow the mic, and
 ask it to "increment the counter twice, then go to Settings, turn on notifications and save".
 

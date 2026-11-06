@@ -342,7 +342,8 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
   `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
   T1, the client log (`/api/client-log`, `clientLog.js`) in M8 T2, checked locally only; the
-  service itself goes live in M8 T3, which records `docs/metrics/m08.md`. Two Render facts are
+  service itself is not live yet: M8 shipped without it (2026-11-06) and #23 deploys it and
+  records `docs/metrics/m08.md`. Two Render facts are
   unverified until then: the proxy hop count (`TRUST_PROXY_HOPS` overrides it) and whether a
   PR preview copies the key. `getUserMedia` and AudioWorklet need a
   secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Talk now stops

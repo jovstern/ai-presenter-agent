@@ -88,19 +88,19 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       and `e2e/widget.spec.js`.)*
 
 **M8: deploy and close the cycle (new issue)**
-- ❌ R22 Live on Render over HTTPS, with config parsed at startup. *(Open: ticked in T3 when
-      live. M8 T1 built it — `server/config.js` (Zod, a missing key fatal in production),
+- ❌ R22 Live on Render over HTTPS, with config parsed at startup. *(Open: going live was deferred
+      to #23 on 2026-11-06. M8 T1 built it — `server/config.js` (Zod, a missing key fatal in production),
       `trust proxy`, `render.yaml`; `server/__tests__/config.test.js`, `app.test.js`.)*
 - ❌ R23 Production observability: pino logs, plus client errors and vitals sent to a
       gated `/api/client-log`. *(M8 T2: built and checked locally — `POST /api/client-log`
       with the token route's gates, its own rate limit, a Zod body and a 4 kB cap, and
       `agent-client/src/clientLog.js`; `server/__tests__/clientLog.test.js`, the
       `connection` beacon in `e2e/widget.spec.js`. Ticked once the lines show in Render's
-      logs, T3.)*
+      logs, #23.)*
 - ❌ R24 The observer runs against production; the README is final; leftovers are filed
-      as issues. *(Open: ticked in T3 when live. M8 T4 did the rest: the README is final but for
-      its Live URL (`<!-- LIVE_URL -->`, T3 fills it), and the leftovers are issues #17–#22
-      (assessment §8). The observer against production is T3's `docs/metrics/m08.md`.)*
+      as issues. *(Open: the production half is #23. M8 T4 did the rest: the README is final but for
+      its Live URL (`<!-- LIVE_URL -->`, #23 fills it), and the leftovers are issues #17–#22
+      (assessment §8). The observer against production is #23's `docs/metrics/m08.md`.)*
 
 ## Assumptions (decided, not asked)
 
