@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { Profiler } from 'react';
+import { Profiler, useState } from 'react';
 import { AgentApp } from '../AgentApp.jsx';
 import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
 
@@ -12,9 +12,11 @@ import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
 // Counting renders alone would pass trivially if the orb never animated, so
 // the test also proves the frames did reach the page: --level changes on every
 // one of the 50 ticks. And it proves the counter can see a render: a
-// transcript line does re-render the card, without disturbing the orb's loop.
+// transcript line does re-render the card, while the React Compiler skips the
+// orb and the knowledge dialog (their props didn't change) and the orb's loop
+// carries on undisturbed.
 
-const commits = vi.hoisted(() => ({ card: 0, orb: 0 }));
+const commits = vi.hoisted(() => ({ card: 0, orb: 0, knowledge: 0 }));
 const fakes = vi.hoisted(() => ({ sessions: [], levels: { output: 0, mic: 0 } }));
 
 // The real VolumeOrb, inside a Profiler of its own: a commit there is a
@@ -26,6 +28,19 @@ vi.mock('../VolumeOrb.jsx', async (importOriginal) => {
     VolumeOrb: (props) => (
       <Profiler id="orb" onRender={() => commits.orb++}>
         <actual.VolumeOrb {...props} />
+      </Profiler>
+    ),
+  };
+});
+
+// A sibling the transcript doesn't touch, probed the same way.
+vi.mock('../KnowledgeModal.jsx', async (importOriginal) => {
+  const actual = /** @type {typeof import('../KnowledgeModal.jsx')} */ (await importOriginal());
+  return {
+    /** @param {import('react').ComponentProps<typeof actual.KnowledgeModal>} props */
+    KnowledgeModal: (props) => (
+      <Profiler id="knowledge" onRender={() => commits.knowledge++}>
+        <actual.KnowledgeModal {...props} />
       </Profiler>
     ),
   };
@@ -74,6 +89,7 @@ let frames;
 beforeEach(() => {
   commits.card = 0;
   commits.orb = 0;
+  commits.knowledge = 0;
   fakes.sessions.length = 0;
   fakes.levels = { output: 0, mic: 0 };
   frames = fakeAnimationFrames();
@@ -103,7 +119,10 @@ describe('render isolation', () => {
     expect(orb).not.toBeNull();
     const cardBefore = commits.card;
     const orbBefore = commits.orb;
-    expect(orbBefore).toBeGreaterThan(0); // the probe does count the orb
+    const knowledgeBefore = commits.knowledge;
+    // The probes do count: both rendered on mount, and the orb again to go live.
+    expect(orbBefore).toBeGreaterThan(1);
+    expect(knowledgeBefore).toBeGreaterThan(0);
 
     let levelChanges = 0;
     let micChanges = 0;
@@ -126,23 +145,54 @@ describe('render isolation', () => {
     // The orb and every sibling: rendered once (to go live), not per frame.
     expect(commits.card).toBe(cardBefore);
     expect(commits.orb).toBe(orbBefore);
+    expect(commits.knowledge).toBe(knowledgeBefore);
     // ...while the frames really did reach the page.
     expect(levelChanges).toBe(50);
     expect(micChanges).toBe(50);
     expect(Number(lastLevel)).toBeCloseTo(0.59, 3);
 
     // A transcript line is React state: the card does re-render, so the
-    // counter above could have seen a render. The orb's loop carries on
-    // through it: no frame cancelled, the level not reset.
+    // counter above could have seen a render. The siblings whose props it
+    // didn't change are skipped (the compiler caches their elements), and the
+    // orb's loop carries on through it: no frame cancelled, the level not reset.
     const cancelsBefore = frames.cancel.mock.calls.length;
     act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
     expect(screen.getByText('Hello!')).toBeTruthy();
     expect(commits.card).toBeGreaterThan(cardBefore);
+    expect(commits.orb).toBe(orbBefore);
+    expect(commits.knowledge).toBe(knowledgeBefore);
     expect(frames.cancel.mock.calls.length).toBe(cancelsBefore);
     expect(frames.pendingCount).toBe(1);
     expect(orb.style.getPropertyValue('--level')).toBe(lastLevel);
     fakes.levels = { output: 0.9, mic: 0.9 };
     act(() => frames.tick());
     expect(Number(orb.style.getPropertyValue('--level'))).toBeCloseTo(0.9, 3);
+  });
+
+  // A canary for the build: the isolation above leans on the compiler
+  // (docs/code-review-notes.md M10, where it silently wasn't running). This
+  // file is compiled like src/, so a component here is too: a parent's state
+  // change leaves a child whose props didn't change unrendered.
+  it('runs under the React Compiler: an unchanged child is skipped', () => {
+    let childRenders = 0;
+    /** @param {{ label: string }} props */
+    function Child({ label }) {
+      childRenders++;
+      return <span>{label}</span>;
+    }
+    function Parent() {
+      const [count, setCount] = useState(0);
+      return (
+        <>
+          <button onClick={() => setCount(count + 1)}>{count}</button>
+          <Child label="still" />
+        </>
+      );
+    }
+    render(<Parent />);
+    fireEvent.click(screen.getByRole('button', { name: '0' }));
+    fireEvent.click(screen.getByRole('button', { name: '1' }));
+    expect(screen.getByRole('button', { name: '2' })).toBeTruthy();
+    expect(childRenders).toBe(1);
   });
 });

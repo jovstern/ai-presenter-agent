@@ -3,12 +3,12 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance (M7 T2): B1–B4, H1–H5, M1–M9, L1, L3, L4, L6–L12 are done
+> code instead. Status at a glance (M7 T2b): B1–B4, H1–H5, M1–M10, L1, L3, L4, L6–L12 are done
 > (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and L10
 > in M6 T4; M9 in M6 T5; M6 and M9 refined in the M6 fix wave; L3, L4 and L7 in M7 T1; L8 in M7
-> T2). **Three items are still open:** L2 and L5, card items marked "Deferred → M7 (issue #11,
-> Tn)" (L2's orb half is done in M7 T2, its transcript half is T3), and M10, found in M7 T2:
-> the React Compiler isn't running (fixing it changes the build config, the user's call). The M4 and M5 re-review items accepted for M6 are fixed in M6
+> T2; M10, found in M7 T2, in M7 T2b). **Two items are still open:** L2 and L5, card items
+> marked "Deferred → M7 (issue #11, Tn)" (L2's orb half is done in M7 T2, its transcript half
+> is T3). The M4 and M5 re-review items accepted for M6 are fixed in M6
 > T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
@@ -681,7 +681,7 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 > (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
 > while no session was up, or one sent into the session after its newest handle.
 
-### [ ] M10 — The React Compiler isn't running
+### [x] M10 — The React Compiler isn't running
 
 Found in M7 T2. `vite.config.js` passes the compiler as `react({ babel: { plugins:
 ['babel-plugin-react-compiler'] } })`, but `@vitejs/plugin-react` 6 (in use since before M5)
@@ -703,6 +703,18 @@ Rewrite hoisted function references", a Todo bailout). M7 T2 moved `disconnect()
 The volume orb doesn't depend on either: it reads its level sources through `useEffectEvent`,
 so a card render that hands it new getter functions never restarts its animation loop
 (`renderIsolation.test.jsx`).
+
+> Fixed in M7 T2b, the user's choice of the documented stable path: `agent-client/vite.config.js`
+> is `plugins: [react(), babel({ presets: [reactCompilerPreset()] })]` with
+> `@rolldown/plugin-babel` `0.2.4` (the newest in plugin-react 6.1.1's peer range) and
+> `@babel/core` `7.29.13`; the dead `babel` option is gone. The preset applies to client code,
+> vitest included. Proof: the bundle's memo caches now wrap our components (`VolumeOrb`'s JSX and
+> `AgentApp`'s `<VolumeOrb>` element sit behind `t[n]` cache checks; 19 cache-sentinel checks,
+> against react-dom's one before). A one-off build with `panicThreshold: 'all_errors'` passed:
+> no bail-out in any component or hook. `renderIsolation.test.jsx` now asserts that a transcript
+> line re-renders the card while the orb and the knowledge dialog are skipped, plus a canary (a
+> parent's state change leaves an unchanged child unrendered); with the plugin removed both
+> tests fail. Cost: 163.81 → 165.46 kB gzip (budget 180) and about 0.45 → 0.75 s per build.
 
 ---
 

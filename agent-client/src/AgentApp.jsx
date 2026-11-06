@@ -112,7 +112,7 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
     // page's <main>, and axe's `region` rule wants all content in one.
     <aside className="agent-app" aria-label="AI presenter">
       {/* Animates outside React: its frames render nothing, and a card render
-          (a transcript line) doesn't restart its loop (VolumeOrb.jsx). */}
+          (a transcript line) skips it, since its props are unchanged (VolumeOrb.jsx). */}
       <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />
       <button className="agent-app__primary" onClick={action.onClick}>
         {action.label}

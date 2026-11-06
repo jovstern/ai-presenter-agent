@@ -138,6 +138,8 @@ Language: JS with checkJs (ADR 0002).
 | zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |
 | compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile — `1.8.2` |
+| @rolldown/plugin-babel | agent-client | runs the React Compiler (M7 T2b, code-review-notes M10): `@vitejs/plugin-react` 6 compiles JSX with oxc and ignores a `babel` option, so its `reactCompilerPreset` goes through this plugin, its documented stable path. `0.2.4`, the newest in plugin-react 6.1.1's peer range (`^0.1.7 \|\| ^0.2.0`) — `0.2.4` |
+| @babel/core | agent-client | the peer `@rolldown/plugin-babel` and `babel-plugin-react-compiler` run on; Babel 7, the line `babel-plugin-react-compiler` 1.0.0's `@babel/types` and eslint-plugin-react-hooks already use (deduped to one copy) — `7.29.13` |
 
 Dependencies from before this cycle, pinned exactly in M6 T4 (code-review-notes M8):
 `@google/genai` `2.32.0` (both packages, upgraded from `^2.22.0` after the Live shapes were

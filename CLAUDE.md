@@ -13,11 +13,12 @@ Two npm packages and two static directories, plus a thin root `package.json` (no
 that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-package scripts:
 
 - `agent-client/` (npm) — React 19 + Vite, with the React Compiler (`babel-plugin-react-compiler`)
-  wired into `vite.config.js`'s `@vitejs/plugin-react` babel config — don't add manual
-  `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't cover the
-  case. **It isn't running today:** plugin-react 6 ignores the `babel` option, so neither the
-  build nor vitest applies it (`docs/code-review-notes.md` M10; the fix changes the build config,
-  so it waits for the user). Write code that would compile cleanly anyway. UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
+  run by `@rolldown/plugin-babel` with plugin-react's `reactCompilerPreset()` in `vite.config.js`
+  (plugin-react 6 has no `babel` option of its own; `docs/code-review-notes.md` M10). It applies
+  to the build and to vitest; `renderIsolation.test.jsx` fails if it stops running. Don't add
+  manual `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't
+  cover the case, and keep components free of bail-outs (a one-off build with
+  `reactCompilerPreset({ panicThreshold: 'all_errors' })` lists them). UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
   (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
   script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
   `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck + test + build).
@@ -183,14 +184,14 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 14 vitest files (277 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 14 vitest files (278 tests): `actionTools`,
   `audioIO` (the secure-context check; capture releases everything once; both `getLevel()`s
   against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
   `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
-  animation frames: no commit, `--level` moved 50 times), `useLiveAgent.test.jsx` (Testing
+  animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `useLiveAgent.test.jsx` (Testing
   Library) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
   under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the

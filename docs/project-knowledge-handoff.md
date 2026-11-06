@@ -142,7 +142,7 @@ docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/
 target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
                  routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
-agent-client/    React 19 app (React Compiler configured, not running: code-review-notes M10), one script in a shadow root
+agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
 server/          Express: app.js (token gate, CSP, pino logs, /health), index.js (listen, shutdown)
 ```
 
@@ -175,9 +175,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
   returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 14 files,
-  277 tests after M7 T2).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 678.7 kB,
-  163.8 kB gzip after M7 T2 (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  278 tests after M7 T2b).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 682.3 kB,
+  165.5 kB gzip after M7 T2b (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -397,10 +397,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. The current bundle is 163.8 kB gzip (§3.2). **Found in M7
-  T2: the compiler isn't running** — `@vitejs/plugin-react` 6 ignores the `babel` option
-  `vite.config.js` passes it in; see `code-review-notes.md` M10 for the fix options, which wait
-  for the user.
+  demonstrably can't cover the case. The current bundle is 165.5 kB gzip (§3.2). **Found in M7
+  T2: the compiler wasn't running** — `@vitejs/plugin-react` 6 ignored the `babel` option
+  `vite.config.js` passed it. Fixed in M7 T2b (the user chose the plugin's Babel preset over the
+  experimental native `oxc-transform-react`): `@rolldown/plugin-babel` + `reactCompilerPreset()`,
+  +1.65 kB gzip for the memo caches; see `code-review-notes.md` M10.
 - **Radix UI as the default for new interactive UI elements** (2026-09-15) — today that is
   `Dialog` for the knowledge modal. The first build's Radix `Toast` and hand-rolled
   `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their successors return in M7 (#11).
