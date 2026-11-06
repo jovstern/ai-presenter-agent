@@ -5,6 +5,12 @@ A rebuild of the runtime half of a Presenter Agent — an AI avatar embedded in 
 the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`/`.md` files, and
 standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
+**Live:** <!-- LIVE_URL --> not deployed yet ([#23](https://github.com/jovstern/ai-presenter-agent/issues/23)); once it is (Render's free plan: the first visit after it has been idle takes
+about 30 s to wake it). Open it on https, press **Talk to the presenter**, allow the mic, and
+ask it to "increment the counter twice, then go to Settings, turn on notifications and save".
+
+![The widget: Talk, Live with the orb and transcript, a lost connection, Retry](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m07/demo.gif?raw=true)
+
 Start with [`docs/project-knowledge-handoff.md`](./docs/project-knowledge-handoff.md) — the full
 origin story, what's actually verified vs. just written, every caveat, and what's planned next.
 [`docs/demostack-ai-presenter-agent.md`](./docs/demostack-ai-presenter-agent.md) is the build spec
@@ -22,18 +28,62 @@ performance — see the docs for why.
 ## Layout
 
 ```
-docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/)
+docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/),
+                 the observer's metrics per milestone (docs/metrics/)
 target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
                  routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
-                 with a CSP and security headers (helmet), JSON request logs (pino), /health
+                 with a CSP and security headers (helmet), JSON request logs (pino), /health,
+                 and /api/client-log for the agent-client's error and vitals beacons
+render.yaml      the Render Blueprint (see Deploy)
 ```
 
 Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
 and a thin root `package.json` (no workspaces) holding Prettier, Playwright and the
 cross-package scripts. `e2e/` holds the Playwright suite.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Page["Sandbox page (server-templated, CSP, page nonce)"]
+    direction LR
+    subgraph Shadow["agent-client: one IIFE in a shadow root"]
+      Card["AgentApp.jsx card<br/>Transcript, VolumeOrb,<br/>FailureToast, KnowledgeModal"] --> Hook["useLiveAgent.js"]
+      Hook --> LS["liveSession.js<br/>reconnect, resumption,<br/>tool batches, loop guard"]
+      Hook --> AIO["audioIO.js<br/>AudioWorklet capture,<br/>playback, barge-in"]
+      Card --> KS["knowledgeStore.js<br/>localStorage"]
+      CL["clientLog.js<br/>errors, vitals, failures"]
+    end
+    Bridge["sandbox/bridge.js<br/>action library, allowlist,<br/>DOM snapshots"]
+    Target["iframe: target-app<br/>(same origin)"]
+    LS <-->|"private MessageChannel<br/>(ADR 0001)"| Bridge
+    Bridge -->|DOM| Target
+  end
+  Server["server/ (Express)<br/>page + nonce, static, CSP,<br/>/api/live-token, /api/client-log,<br/>pino logs, /health"]
+  Gemini[("Gemini Live")]
+  Server -->|"single-use token,<br/>model-locked (ADR 0004)"| LS
+  CL -->|sendBeacon| Server
+  LS <-->|"WebSocket: audio,<br/>transcripts, tool calls"| Gemini
+```
+
+The agent-client gets a short-lived token from the server (the API key never reaches the
+browser) and talks to Gemini Live directly. The model's tool calls (click, fill, scroll,
+navigate) go over a private `MessageChannel` to `sandbox/bridge.js`, which acts on the
+same-origin iframe and sends back DOM snapshots — a keyframe, or a delta when little changed —
+so the model can see what its actions did. A dropped socket reconnects once per drop on a
+backoff and resumes the session.
+
+Decisions:
+- [ADR 0001](docs/adr/0001-private-bridge-channel.md) — the agent ↔ bridge traffic runs on a
+  private `MessageChannel`, not `window.postMessage`.
+- [ADR 0002](docs/adr/0002-type-checking-with-checkjs.md) — type checking with `checkJs` +
+  `strict` on plain JS, not a TypeScript migration.
+- [ADR 0003](docs/adr/0003-hosting-on-render.md) — hosting on Render from a Blueprint.
+- [ADR 0004](docs/adr/0004-live-token-constraints.md) — the Live token is locked to the model
+  only.
 
 ## Run it
 
@@ -62,12 +112,83 @@ to the presenter, a pending Cancel while connecting, End while live or reconnect
 the connection is lost for good. When retrying can't help, it says what can: Reload page when
 the page's token is rejected, or Try again (asks the server once more) when the server isn't
 configured, which a reload can't fix. A failure also shows a toast above the card, once, with
-the reason and the same action (F8 reaches it from the keyboard); the reason stays under the
-status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
+the reason and Dismiss (F8 reaches it from the keyboard); once it closes, the reason stays
+under the status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
 and starts the server in one step.
+
+The server reads its env once at startup (`server/config.js`, Zod): `PORT` (default 3000),
+`GEMINI_API_KEY`, `NODE_ENV` (`development`, `production` or `test`), `LOG_LEVEL` (a pino
+level, default `info`) and `TRUST_PROXY_HOPS` (default 1 in production, 0 otherwise). A bad
+value stops it with a message naming the variable (never its value). Without a key it still
+starts locally and the card offers Try again; with `NODE_ENV=production` a missing key stops
+it, so a deploy without one fails instead of going live broken.
+
+## Deploy (Render)
+
+`render.yaml` is a Render Blueprint ([ADR 0003](docs/adr/0003-hosting-on-render.md)): one free
+Node web service that builds agent-client, installs the server's production dependencies and
+runs `npm --prefix server start`, with `NODE_ENV=production`, a `/health` check and a preview
+instance per pull request. Node comes from `.nvmrc`. A push to `master` deploys only once
+its CI checks pass (`autoDeployTrigger: checksPass`).
+
+1. In the Render dashboard: **New → Blueprint**, pick this repository; Render reads
+   `render.yaml`.
+2. When it asks for `GEMINI_API_KEY` (`sync: false`, so it never lives in the repo), paste the
+   key, then create. A pull request preview copies its base service's env vars, so previews
+   run on the production key: each is a public URL minting on the same quota (accepted for a
+   solo repo; ADR 0003).
+3. Open the service's `onrender.com` URL. The free plan sleeps when idle, so the first visit
+   after a while takes about 30 s.
+
+Behind Render's TLS proxy the server trusts one proxy hop (`trust proxy`), so the token
+route's same-origin check sees `https` and both rate limiters see each viewer's own IP. If the
+deployed `X-Forwarded-For` turns out to carry more hops, set `TRUST_PROXY_HOPS` instead of
+changing code.
+
+## Observability
+
+Everything lands in the server's stdout as pino JSON lines, which is what Render's **Logs**
+tab shows (one JSON object per line; its search box matches any text in it).
+
+- **Requests** — every request but `/health` (Render polls it) is one `"msg":"request completed"` line with the request id
+  (`reqId`, also sent back as `x-request-id`), method, path (never the query, which carries the
+  page nonce), status and `responseTime` in ms. A failed token mint is an error line, `live token
+  mint failed`; a minted one is `live token minted` (never the token).
+- **Client reports** — the agent-client (`agent-client/src/clientLog.js`, started once per
+  page by `main.jsx`) sends `navigator.sendBeacon` reports to `POST /api/client-log`, each
+  logged as one line with a `client` object and the beacon's `reqId`:
+  - `client vital` (info) — the real user's LCP, INP and CLS from `web-vitals`
+    (`{ name, value, rating, id }`; value in ms, CLS unitless), sent when each is final (LCP
+    on the first input, INP and CLS when the page is hidden);
+  - `client error` (warn) — an uncaught error or unhandled rejection thrown from the
+    agent-client's own script (`{ message, source, stack }`), not the host page's or the
+    target app's; a repeated error is sent once, at most 10 per page;
+  - `client connection failed` (warn) — each time the card goes to a failed connection, once
+    per failure (`{ kind, reason, attempt }`; `kind` is `config` — no key, or Google rejects
+    it — or `exhausted` — the reconnect backoff ran out). A `token` failure (the server
+    refused the page's nonce) is not sent: the beacon carries the same nonce and would be
+    refused too.
+
+  At most 20 reports per page. The endpoint has the token route's gates — same origin, the
+  page nonce (in the query: a beacon can't set headers) and a per-IP rate limit of its own (60
+  a minute, so log spam can't spend the token budget) — and a 4 kB body cap (413), a Zod body
+  (400 for anything else) and a 204 answer. Strings are cut to length and URLs lose their
+  query and fragment before they are logged, so a socket URL's token never reaches the log.
+
+  **What gets lost.** A beacon the server rejects (403) still logs a console error in the
+  viewer's browser, and its report is gone. Nonces live in the server's memory for 1 h, so a
+  page open longer than that, or one that outlived a server restart (the free plan spins down
+  after ~15 min idle), has a dead nonce and its reports are rejected. Once the card's token
+  request is refused, the page stops sending; until then its reports are lost. So field vitals
+  under-count long sessions — and INP and CLS, sent when the page is hidden, are the ones most
+  often lost.
+
+To find a viewer's problems in Render: search `client connection failed` or `client error`;
+for real-user performance, search `client vital` and read `client.name`, `client.value` and
+`client.rating`.
 
 ## Test
 
@@ -81,14 +202,14 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 19 files, 358 tests
+npm test        # vitest: 20 files, 381 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 3 files, 54 tests
+npm test        # vitest + supertest: 5 files, 117 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -111,9 +232,19 @@ The suite in `agent-client/src/__tests__/`:
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Talk, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (a pending Cancel, End while reconnecting, Retry,
   Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and the mic alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark, the session's fragments coalesced into turns; the failure toast shown once per failure (not again after it closes, a new one for a new failure), the reason announced exactly once (by the toast, not a card alert), its action and Escape leaving focus on the card's button, and the Tab walk from F8.
+- `clientLog.test.js` — the client log: only the bundle's own errors and rejections reported
+  (by its script URL), with their message, source and clipped stack; a vital cut to name,
+  value, rating and id; a failure's kind (`exhausted` when not fatal); one beacon per report
+  with the nonce in the query and a JSON Blob, nothing without a nonce, a repeated error sent
+  once, at most 10 errors and 20 reports per page, a missing or refusing `sendBeacon` dropped
+  silently, nothing sent once disabled, and a `token` failure neither sent nor followed by
+  anything; `useLiveAgent.test.jsx` checks the card reports each failure once.
 - `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
-  turn, one space across a turn boundary), bounded to 20; the last 3 rendered in a polite live
-  region that announces additions only, a node per fragment, the speaker named for assistive tech.
+  turn, one space across a turn boundary), bounded to 20; rendered in a polite live region that
+  announces additions only, a node per fragment, the speaker named for assistive tech; the
+  reserved box, short content drawn at its bottom, following the newest line unless the viewer
+  scrolled up, a Tab stop only when it overflows, and a fractional content height that doesn't
+  overflow by a fraction of a pixel.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
@@ -189,7 +320,9 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   automatic retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload
   page", which reloads, both driven from the keyboard with focus kept on the button; the
   `not_configured` path also checks the toast inside the shadow root — once per failure, F8 then
-  Tab through it and back to the card, Escape closing it with focus back on the button. A
+  Tab through it and back to the card, Escape closing it with focus back on the button — and
+  sends one `connection` beacon per failure to `/api/client-log`, which the real server answers
+  with 204. A
   blocked mic shows its guidance and leaves the card on Talk, with no toast. At 360, 768 and
   1440 px: the card's placement (bottom-right, full width between the gutters at 400 px and
   below), a keyboard walk from the top of the page through the transcript, the primary button
@@ -217,6 +350,9 @@ How to run it, what each number means and the current baseline: `docs/metrics/RE
 
 The suite in `server/__tests__/`:
 
+- `config.test.js` — `loadConfig`: the defaults, every variable, blank means unset, the key
+  trimmed, a missing or whitespace-only key fatal in production only, each bad variable named
+  and all at once (a missing production key alongside a bad `PORT`), none of the values echoed.
 - `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
   gate (403 cross-origin or with no Origin/Referer, 400 malformed nonce, 403 unknown or expired
   nonce, 429 past the limit, a JSON `not_configured` 500 with no key or when Google rejects
@@ -225,8 +361,20 @@ The suite in `server/__tests__/`:
   client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
   with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
   otherwise), no inline script on any page, `errorPage` escaping its arguments, the CSP and other headers
-  (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
-  nonce cap, and no nonce or token in the logs.
+  (production adds HSTS), `/health` (with no request log line: Render polls it), an HTML 404 for a browser and a JSON one for `/api/*`, the
+  nonce cap, no nonce or token in the logs, and behind a proxy (`trustProxyHops: 1`): an https
+  Origin or Referer passes with `X-Forwarded-Proto: https`, two `X-Forwarded-For` clients get
+  separate buckets in both limiters, a forged first entry doesn't pick the bucket, and without
+  a trusted proxy `X-Forwarded-For` is ignored.
+- `clientLog.test.js` — `POST /api/client-log`: each report type accepted with 204 and logged
+  once with the request id (a vital at info, an error and a connection failure at warn), only
+  the schema's fields logged, strings truncated, URL queries, fragments and token-shaped values
+  stripped (no nonce in any line), 400 for an unknown type, a vital outside LCP / INP / CLS, a
+  bad rating or value, malformed or non-JSON bodies (the body never logged), 413 over 4 kB, 415
+  for a charset or Content-Encoding it can't decode,
+  403 cross-origin or with no Origin/Referer, 403 for an unknown or expired nonce, 400 for a
+  missing or malformed one, 429 past its own per-IP limit (60 a minute by default) without
+  touching the token route's.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
 - `geminiMint.test.js` — the token config sent to `authTokens.create`: single use, the 60 s
   session window, locked to `liveModel.json`'s model only (`lockAdditionalFields: []`, ADR 0004).
@@ -236,7 +384,53 @@ CI (`.github/workflows/ci.yml`, job `check`) runs on every pull request and ever
 `npm run e2e`, with no secrets (the Playwright report is uploaded when it fails). A second
 workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no demo image.
 
-## What's deliberately not here yet
+## Metrics
+
+Measured by the observer at the end of each milestone (`docs/metrics/m04.md`–`m07.md`;
+Lighthouse per route in `docs/metrics/history.csv`). At the end of M7, after its fix wave:
+
+| Metric | Result | Budget |
+|---|---|---|
+| Lighthouse mobile on `/` (Perf / A11y / BP / SEO) | 100 / 100 / 100 / 100 (M4 started at 75 / 80) | ≥ 95 / 100 / 100 / 100 |
+| `/` mobile LCP / CLS / TBT | 0.90 s / 0 / 13 ms | ≤ 2.0 s / 0.05 / 150 ms |
+| CLS while Live, transcript growing (390 px) | 0 (was 0.151 before the M7 fix) | ≤ 0.05 |
+| `agent-client.js` gzip | 179.24 kB at M8 T4 (149.5 at M4) | ≤ 180 kB |
+| axe violations, 13 states in light and dark | 0 | 0 |
+| React commits per second while the orb animates | 0 | ~0 |
+| Live e2e: six-step task success | 4 of 5 runs | ≥ 4 of 5 |
+| Live e2e: connect, click → `open` | median 1.49 s, worst 1.87 s | ≤ 2.5 s |
+| Live e2e: first agent audio after `open` | median 0.55 s | ≤ 2.0 s |
+| Live e2e: reconnect, forced close → `open` | worst 1.74 s | ≤ 3 s |
+| Tool round trip (click / navigate / fill) | worst 3 / 18 / 2 ms | ≤ 300 ms / 1.5 s |
+
+The production numbers (the observer against the Render URL) land in `docs/metrics/m08.md`.
+
+## Demos
+
+One per milestone, recorded from the e2e harness for each pull request:
+
+- M4, the closed loop: ![M4 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m04/demo.gif?raw=true)
+- M5, the quality baseline: ![M5 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m05/demo.gif?raw=true)
+- M6, hardening and tuning: ![M6 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m06/demo.gif?raw=true)
+- M7, the presentable widget: ![M7 demo](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m07/demo.gif?raw=true)
+
+## What's next
+
+Filed as issues at the close of cycle 1 (`docs/superpowers/specs/assessment.md` §8):
+
+- [#17](https://github.com/jovstern/ai-presenter-agent/issues/17) widget motion: the dialog's
+  enter and exit, an orb pulse while reconnecting;
+- [#18](https://github.com/jovstern/ai-presenter-agent/issues/18) card and dialog details: an
+  outline End button, counter colours near the limit, clamped file names;
+- [#19](https://github.com/jovstern/ai-presenter-agent/issues/19) verify mic capture in Safari
+  and Firefox (verified in Chromium only);
+- [#20](https://github.com/jovstern/ai-presenter-agent/issues/20) bundle headroom: 0.76 kB under
+  the 180 kB budget (drop the Gemini SDK for a direct socket, or load it on Talk);
+- [#21](https://github.com/jovstern/ai-presenter-agent/issues/21) typecheck the unit tests;
+- [#22](https://github.com/jovstern/ai-presenter-agent/issues/22) tune the snapshot cap and
+  refresh ratio on a larger target page.
+
+Deliberately not here:
 
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.

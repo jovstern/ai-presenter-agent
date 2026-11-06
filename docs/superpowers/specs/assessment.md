@@ -135,3 +135,47 @@ today, no headroom).
 | `docs/code-review-notes.md` | **drifted** | B1/B2/H3/H4 and most of H1/H5 are fixed per its own editorial notes, but **every box is unchecked** and line refs point at deleted code. Tick and annotate in place. |
 | `docs/agents/*.md` | current | — |
 | `docs/adr/`, `CONTEXT.md` | missing | Create lazily. Worth an ADR each for the decisions §4 of the handoff already logs, only if the user wants them back-filled. A glossary is worth it: keyframe/delta, bridge, nonce, generation, loop guard. |
+
+## 8. Closing status (M8 T4, 2026-11-06)
+
+Every item above is done or filed as a GitHub issue. Where each one landed:
+
+| Item | Status | Where |
+|---|---|---|
+| A1 `/sandbox/` not templated | done | M4 T1: one handler templates `/`, `/sandbox`, `/sandbox/`, `/sandbox/index.html`; `server/__tests__/app.test.js` |
+| A2 a second mic / `AudioContext` on Retry, no unmount cleanup | done | M4 T4 (`useLiveAgent.js` teardown); M6 fix wave (capture releases once); `useLiveAgent.test.jsx`, `audioIO.test.js` |
+| A3 status lies during retries | done | M4 T3 (`reconnecting`, `failed` only when the retries run out); M7 T4 (the card's states and the Radix Toast); `liveSession.test.js`, `e2e/widget.spec.js` |
+| A4 session-token binding on the bridge | done | M4 T2: the private `MessageChannel` ([ADR 0001](../../adr/0001-private-bridge-channel.md)); `e2e/bridge.spec.js` (forged messages ignored) |
+| A5 a throwing action never replies | done | M4 T2: `success: false` at once; `bridge.test.js` |
+| A6 `liveSession.js` untested | done | M4 T3: `liveSession.test.js` |
+| A7 load snapshot before `ds-ready` | done | M4 T2 (`navigated` posted before the snapshot) |
+| A8 transcript one entry per fragment, unbounded, no `aria-live` | done | M7 T3 (`transcript.js`, `Transcript.jsx`) |
+| A9 500s echo `err.message` | done | M4 T1, M5 T3 (the central error handler, `{ error: { code, message } }`) |
+| §3 plain JS vs TypeScript | done | M5 T2: `checkJs` + `strict` ([ADR 0002](../../adr/0002-type-checking-with-checkjs.md)) |
+| §3 server shape (pino, helmet, Zod config, `/health`) | done | M5 T3 (`app.js` / `index.js`, pino, helmet + CSP, `/health`); M8 T1 (`config.js`) |
+| §3 caret ranges | done | M6 T4: `@google/genai` and every other dependency pinned exactly (review item M8) |
+| §4 lint, format, types, `npm run check` | done | M5 T1, T2 |
+| §4 e2e, server tests | done | M5 T3, T4 (and every milestone since: 33 e2e, 113 server tests) |
+| §4 CI, `protect-master.sh` | done | M5 T6: `ci.yml` (`check`), `pr-demo-check.yml` (`demo`), `master` protected |
+| §4 live loop testable without a voice | done | M5 T5: `npm run e2e:live` (fake-mic WAVs) |
+| §6 metrics | done | `docs/metrics/m04.md`–`m07.md`, `history.csv`; app metrics from the live e2e; the bundle budget is 180 kB (raised by the user, spec Budgets) |
+| §7 CLAUDE.md, README, handoff | done | every milestone; brought fully up to date in M8 T4 |
+| §7 spec goals #8 / #9 | done | M7 T2 (`VolumeOrb.jsx`, `renderIsolation.test.jsx`) |
+| §7 `sandbox-simulation.md` typo L12 | done | M4 T5 |
+| §7 review checklist ticked | done | `docs/code-review-notes.md`: B1–B4, H1–H5, M1–M10, L1–L12 all done |
+| §7 ADRs and `CONTEXT.md` | done | `docs/adr/0001`–`0004`; `CONTEXT.md` (M5) |
+
+Follow-up work filed as issues at the close of the cycle:
+
+| Issue | Follow-up | From |
+|---|---|---|
+| [#17](https://github.com/jovstern/ai-presenter-agent/issues/17) | Widget motion: dialog enter/exit and an orb pulse while reconnecting | M7 UI review ideas |
+| [#18](https://github.com/jovstern/ai-presenter-agent/issues/18) | Card and dialog details: outline End button, counter colours near the limit, clamped file names | M7 UI review ideas |
+| [#19](https://github.com/jovstern/ai-presenter-agent/issues/19) | Verify mic capture in Safari and Firefox | handoff §3.3 (Chromium-only verification) |
+| [#20](https://github.com/jovstern/ai-presenter-agent/issues/20) | Bundle headroom: 0.76 kB under the 180 kB budget | spec Budgets, `docs/metrics/m06.md` options C / D |
+| [#21](https://github.com/jovstern/ai-presenter-agent/issues/21) | Typecheck the agent-client unit tests | `jsconfig.json` excludes `src/__tests__/` |
+| [#22](https://github.com/jovstern/ai-presenter-agent/issues/22) | Tune the snapshot cap and refresh ratio on a larger target page | R16, handoff §3.3 |
+
+Not filed: the Render unknowns from M8 T1 (the proxy hop count, the key on PR previews), which
+M8 T3 settles when the service goes live; the "real external site" path and the agent-creation
+side, which are out of scope by design (spec Out of scope).

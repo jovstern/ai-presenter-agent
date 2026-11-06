@@ -1,46 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import pino from 'pino';
 import request from 'supertest';
 import ROUTES from '../../target-app/routes.json' with { type: 'json' };
-import { createApp, errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
-
-const HOST = 'agent.test';
-const ORIGIN = `http://${HOST}`;
-const NONCE_ATTR = /data-ds-nonce="([0-9a-f-]{36})"/;
-
-function clock(start = 1_000_000) {
-  let t = start;
-  return {
-    now: () => t,
-    advance: (ms) => {
-      t += ms;
-    },
-  };
-}
-
-/** A pino logger whose JSON lines land in `lines`, so tests can read what was logged. */
-function capturingLogger() {
-  /** @type {Record<string, unknown>[]} */
-  const lines = [];
-  const logger = pino({ level: 'debug' }, { write: (line) => lines.push(JSON.parse(line)) });
-  return { logger, lines };
-}
-
-function setup(overrides = {}) {
-  const c = clock();
-  const { logger, lines } = capturingLogger();
-  const mintToken = vi.fn(async () => 'auth_tokens/stub-token');
-  const app = createApp({ mintToken, now: c.now, logger, ...overrides });
-  return { app, clock: c, mintToken, lines };
-}
-
-/** Serves the sandbox page the way a browser would and returns the nonce it embedded. */
-async function pageNonce(app, path = '/') {
-  const res = await request(app).get(path).set('Host', HOST);
-  const match = NONCE_ATTR.exec(res.text);
-  if (!match) throw new Error(`no nonce in ${path}`);
-  return match[1];
-}
+import { errorPage, escapeHtml, jsonForScriptBlock } from '../app.js';
+import { HOST, NONCE_ATTR, ORIGIN, clock, pageNonce, setup } from './harness.js';
 
 function tokenRequest(app, nonce, { origin = ORIGIN } = {}) {
   const req = request(app).get('/api/live-token').set('Host', HOST);
@@ -350,6 +312,95 @@ describe('the sandbox page', () => {
   );
 });
 
+describe('behind a proxy (trustProxyHops, M8 T1)', () => {
+  const HTTPS_ORIGIN = `https://${HOST}`;
+
+  /** Render's load balancer: TLS ends there and it forwards plain http with these headers. */
+  function viaProxy(req, clientIp) {
+    return req.set('X-Forwarded-Proto', 'https').set('X-Forwarded-For', clientIp);
+  }
+
+  /** A page load and its token request, both from `clientIp`, through the proxy. */
+  async function proxiedNonce(app, clientIp) {
+    const res = await viaProxy(request(app).get('/').set('Host', HOST), clientIp);
+    const match = NONCE_ATTR.exec(res.text);
+    if (!match) throw new Error('no nonce');
+    return match[1];
+  }
+
+  function proxiedToken(app, nonce, clientIp, header = 'Origin') {
+    const req = request(app).get('/api/live-token').set('Host', HOST).query({ nonce });
+    return viaProxy(
+      req.set(header, header === 'Origin' ? HTTPS_ORIGIN : `${HTTPS_ORIGIN}/`),
+      clientIp,
+    );
+  }
+
+  it.each(['Origin', 'Referer'])(
+    'passes the same-origin check for an https %s when the proxy says https',
+    async (header) => {
+      const { app } = setup({ production: true, trustProxyHops: 1 });
+      const nonce = await proxiedNonce(app, '203.0.113.1');
+
+      expect((await proxiedToken(app, nonce, '203.0.113.1', header)).status).toBe(200);
+    },
+  );
+
+  it('rejects an https Origin when the proxy is not trusted (req.protocol stays http)', async () => {
+    const { app } = setup();
+    const nonce = await proxiedNonce(app, '203.0.113.1');
+
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(403);
+  });
+
+  it('gives two client IPs separate token-route buckets', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { rateLimitMax: 1 } });
+    const nonce = await proxiedNonce(app, '203.0.113.1');
+
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(200);
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(429);
+    expect((await proxiedToken(app, nonce, '198.51.100.2')).status).toBe(200);
+  });
+
+  it('gives two client IPs separate page-load buckets', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { pageRateLimitMax: 1 } });
+    const load = (ip) => viaProxy(request(app).get('/').set('Host', HOST), ip);
+
+    expect((await load('203.0.113.1')).status).toBe(200);
+    expect((await load('203.0.113.1')).status).toBe(429);
+    expect((await load('198.51.100.2')).status).toBe(200);
+  });
+
+  it('trusts only the last hop: a client-forged X-Forwarded-For entry does not pick the bucket', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { pageRateLimitMax: 1 } });
+    // The proxy appends the address it saw, so a forged first entry rides in front of it.
+    const load = (forged) =>
+      viaProxy(request(app).get('/').set('Host', HOST), `${forged}, 203.0.113.1`);
+
+    expect((await load('10.0.0.1')).status).toBe(200);
+    expect((await load('10.0.0.2')).status).toBe(429);
+  });
+
+  it.each([
+    ['token route', { rateLimitMax: 1 }],
+    ['page loads', { pageRateLimitMax: 1 }],
+  ])(
+    'ignores X-Forwarded-For without a trusted proxy (%s: no spoofing locally)',
+    async (_, limits) => {
+      const { app } = setup({ limits });
+      const nonce = await pageNonce(app);
+      const hit = (ip) =>
+        'rateLimitMax' in limits
+          ? tokenRequest(app, nonce).set('X-Forwarded-For', ip)
+          : request(app).get('/').set('Host', HOST).set('X-Forwarded-For', ip);
+      // The page limit already spent one load on pageNonce.
+      if ('rateLimitMax' in limits) expect((await hit('203.0.113.1')).status).toBe(200);
+
+      expect((await hit('198.51.100.2')).status).toBe(429);
+    },
+  );
+});
+
 describe('jsonForScriptBlock', () => {
   it('escapes every < so a value cannot close the script tag or open a comment', () => {
     const value = { evil: '</script><script>alert(1)</script><!--' };
@@ -436,6 +487,17 @@ describe('other routes', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ ok: true });
+  });
+
+  it('logs no request line for /health (Render polls it), but still one for other routes', async () => {
+    const { app, lines } = setup();
+    await request(app).get('/health');
+    await request(app).get('/nope');
+
+    const urls = lines
+      .filter((line) => line.msg === 'request completed')
+      .map((line) => /** @type {{ url: string }} */ (line.req).url);
+    expect(urls).toEqual(['/nope']);
   });
 
   it('an unknown path is a JSON 404 in the one error shape', async () => {

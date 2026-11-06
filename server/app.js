@@ -33,6 +33,8 @@ import { createExpiringMap } from './expiringMap.js';
  * @property {() => number} [now] Epoch ms; injected so tests control expiry.
  * @property {Logger} logger
  * @property {boolean} [production] Adds HSTS and upgrade-insecure-requests.
+ * @property {number} [trustProxyHops] Express `trust proxy` hop count; 0 (the
+ *   default) ignores X-Forwarded-* entirely.
  * @property {Partial<typeof DEFAULT_LIMITS>} [limits]
  */
 
@@ -55,6 +57,10 @@ const DEFAULT_LIMITS = {
   // alone; many addresses still can, which costs only those reloads.
   maxNonces: 10_000,
   maxClients: 10_000,
+  // Client-log beacons per IP per window (POST /api/client-log), counted apart
+  // from token requests so a noisy page can't spend a viewer's token budget.
+  // A page sends at most 20 (agent-client/src/clientLog.js).
+  clientLogRateLimitMax: 60,
 };
 
 // A live Gemini token may only start a session within this window.
@@ -69,6 +75,68 @@ const GEMINI_ORIGINS = [
 // `?nonce=a&nonce=b` which Express parses to an array, junk) is a malformed
 // request, not a wrong nonce.
 const TokenQuery = z.object({ nonce: z.uuid() });
+
+// The client log's body cap. A report is a few hundred bytes; past this the
+// JSON parser refuses it unread (413).
+const CLIENT_LOG_LIMIT = '4kb';
+
+// What a client-log string may carry into a log line: URLs lose their query
+// and fragment (the Live socket URL carries the token as access_token=, the
+// token route's the page nonce), and key=value pairs, token names and Google
+// API keys that slip through are masked. Then the length cap.
+const URL_QUERY = /\b([a-z][a-z0-9+.-]*:\/\/[^\s?#'"()<>]*)[?#][^\s'"()<>]*/gi;
+const SECRET_PAIR = /\b(access_token|token|key|api_key|apikey|nonce|password|secret)=[^\s&'"]+/gi;
+const TOKEN_NAME = /\bauth_tokens\/[\w.-]+/g;
+const GOOGLE_API_KEY = /\bAIza[\w-]{35}\b/g;
+
+/**
+ * @param {string} text
+ * @param {number} max
+ */
+export function redact(text, max) {
+  return text
+    .replace(URL_QUERY, '$1')
+    .replace(SECRET_PAIR, '$1=[redacted]')
+    .replace(TOKEN_NAME, 'auth_tokens/[redacted]')
+    .replace(GOOGLE_API_KEY, '[redacted]')
+    .slice(0, max);
+}
+
+/** @param {number} max */
+const loggedText = (max) => z.string().transform((text) => redact(text, max));
+
+// One beacon from agent-client/src/clientLog.js (spec R23). Unknown keys are
+// dropped, so only these fields reach the log.
+const ClientReport = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('error'),
+    message: loggedText(500),
+    source: loggedText(300).optional(),
+    stack: loggedText(2000).optional(),
+  }),
+  z.object({
+    type: z.literal('vital'),
+    // The metrics clientLog.js reports, and no others.
+    name: z.enum(['LCP', 'INP', 'CLS']),
+    value: z.number().finite().nonnegative(),
+    rating: z.enum(['good', 'needs-improvement', 'poor']),
+    id: z.string().regex(/^[\w.-]{1,64}$/),
+  }),
+  z.object({
+    type: z.literal('connection'),
+    // liveSession.js's FatalKind, or `exhausted`: the backoff ran out.
+    kind: z.enum(['config', 'token', 'exhausted']),
+    reason: loggedText(200).optional(),
+    attempt: z.number().int().min(0).max(100),
+  }),
+]);
+
+/** @type {Record<z.infer<typeof ClientReport>['type'], { level: 'info' | 'warn', msg: string }>} */
+const CLIENT_LOG_LINES = {
+  error: { level: 'warn', msg: 'client error' },
+  vital: { level: 'info', msg: 'client vital' },
+  connection: { level: 'warn', msg: 'client connection failed' },
+};
 
 // target-app/routes.json, the one route list (docs/code-review-notes.md M1):
 // route name -> the page's absolute path. bridge.js and actionTools.js both
@@ -267,8 +335,23 @@ function createRateLimiter({ max, windowMs, maxClients, now }) {
 }
 
 /** @param {AppOptions} options */
-export function createApp({ mintToken, now = Date.now, logger, production = false, limits }) {
-  const { rateLimitMax, pageRateLimitMax, rateLimitWindowMs, nonceTtlMs, maxNonces, maxClients } = {
+export function createApp({
+  mintToken,
+  now = Date.now,
+  logger,
+  production = false,
+  trustProxyHops = 0,
+  limits,
+}) {
+  const {
+    rateLimitMax,
+    pageRateLimitMax,
+    clientLogRateLimitMax,
+    rateLimitWindowMs,
+    nonceTtlMs,
+    maxNonces,
+    maxClients,
+  } = {
     ...DEFAULT_LIMITS,
     ...limits,
   };
@@ -304,6 +387,41 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
     maxClients,
     now,
   });
+  const isClientLogRateLimited = createRateLimiter({
+    max: clientLogRateLimitMax,
+    windowMs: rateLimitWindowMs,
+    maxClients,
+    now,
+  });
+
+  /**
+   * The page gate both API routes share: same origin, under `limited`, and a
+   * nonce this server issued. Answers the request and returns false when it
+   * fails.
+   * @param {Request} req
+   * @param {Response} res
+   * @param {(req: Request) => boolean} limited
+   */
+  function passesPageGate(req, res, limited) {
+    if (!isSameOrigin(req)) {
+      sendError(res, 403, 'cross_origin', 'Cross-origin requests are not allowed');
+      return false;
+    }
+    if (limited(req)) {
+      sendError(res, 429, 'rate_limited', 'Too many requests');
+      return false;
+    }
+    const query = TokenQuery.safeParse(req.query);
+    if (!query.success) {
+      sendError(res, 400, 'invalid_request', 'The nonce query parameter is missing or malformed');
+      return false;
+    }
+    if (!nonces.get(query.data.nonce)) {
+      sendError(res, 403, 'invalid_nonce', 'Unknown or expired nonce');
+      return false;
+    }
+    return true;
+  }
 
   // A1 (assessment): every URL that renders the sandbox page must go through
   // the nonce template, or the page ships the literal %%DS_NONCE%% and every
@@ -320,6 +438,14 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
 
   const app = express();
   app.disable('x-powered-by');
+  // Behind Render's TLS-terminating proxy (ADR 0003) the socket is plain http
+  // from the proxy's address. Trusting its hop makes req.protocol https (from
+  // X-Forwarded-Proto), so isSameOrigin matches the page's https Origin or
+  // Referer, and makes req.ip the client (the last X-Forwarded-For entry),
+  // so each viewer gets their own bucket in both rate limiters instead of
+  // all sharing the proxy's. Off locally: there a client could otherwise
+  // pick its own bucket with a forged X-Forwarded-For.
+  app.set('trust proxy', trustProxyHops);
 
   app.use(
     pinoHttp({
@@ -331,6 +457,9 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
       },
       // Manual req.log lines carry just `reqId`, not the whole request.
       quietReqLogger: true,
+      // Render's health check polls /health (ADR 0003); a line per poll
+      // would bury the real traffic.
+      autoLogging: { ignore: (req) => req.url?.split('?')[0] === '/health' },
       serializers: {
         // The path only: the token route's query carries the page nonce,
         // which is a credential for an hour and never belongs in a log.
@@ -362,23 +491,7 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
   });
 
   app.get('/api/live-token', async (req, res) => {
-    if (!isSameOrigin(req)) {
-      sendError(res, 403, 'cross_origin', 'Cross-origin requests are not allowed');
-      return;
-    }
-    if (isRateLimited(req)) {
-      sendError(res, 429, 'rate_limited', 'Too many requests');
-      return;
-    }
-    const query = TokenQuery.safeParse(req.query);
-    if (!query.success) {
-      sendError(res, 400, 'invalid_request', 'The nonce query parameter is missing or malformed');
-      return;
-    }
-    if (!nonces.get(query.data.nonce)) {
-      sendError(res, 403, 'invalid_nonce', 'Unknown or expired nonce');
-      return;
-    }
+    if (!passesPageGate(req, res, isRateLimited)) return;
     if (!mintToken) {
       // `not_configured` tells the client not to burn its reconnect backoff on
       // this: no amount of retrying (or reloading) sets the key.
@@ -411,6 +524,58 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
     req.log.info('live token minted');
     res.json({ token });
   });
+
+  // The agent-client's beacons (spec R23, agent-client/src/clientLog.js):
+  // navigator.sendBeacon can't set headers, so the nonce rides in the query,
+  // as on the token route. The gate runs before the body is read, so a
+  // rejected caller costs no parsing. The JSON parser's own errors (over the
+  // cap, malformed) are answered by clientLogParseError below, never logged
+  // with their body.
+  app.post(
+    '/api/client-log',
+    (req, res, next) => {
+      if (passesPageGate(req, res, isClientLogRateLimited)) next();
+    },
+    express.json({ limit: CLIENT_LOG_LIMIT }),
+    (req, res) => {
+      const report = ClientReport.safeParse(req.body);
+      if (!report.success) {
+        sendError(res, 400, 'invalid_request', 'The report does not match any known shape');
+        return;
+      }
+      const { level, msg } = CLIENT_LOG_LINES[report.data.type];
+      req.log[level]({ client: report.data }, msg);
+      res.status(204).end();
+    },
+  );
+
+  /**
+   * The client log's body-parser errors: 413 past the cap, 415 for a charset
+   * or Content-Encoding it can't decode, 400 for anything else it refuses.
+   * Logged by type only: a parse error carries the raw body.
+   * @param {unknown} err
+   * @param {Request} req
+   * @param {Response} res
+   * @param {NextFunction} next
+   */
+  function clientLogParseError(err, req, res, next) {
+    const status = statusOf(err);
+    if (status === undefined || status >= 500 || res.headersSent) {
+      next(err);
+      return;
+    }
+    const type =
+      typeof err === 'object' && err !== null && 'type' in err ? String(err.type) : undefined;
+    req.log.warn({ status, type }, 'client log rejected');
+    if (status === 413) {
+      sendError(res, 413, 'payload_too_large', 'The report is larger than 4 kB');
+    } else if (status === 415) {
+      sendError(res, 415, 'unsupported_media_type', 'The report must be UTF-8 JSON');
+    } else {
+      sendError(res, 400, 'invalid_request', 'The report is not valid JSON');
+    }
+  }
+  app.use('/api/client-log', clientLogParseError);
 
   /**
    * Express 5 routing is non-strict, so '/sandbox' matches both '/sandbox' and

@@ -76,7 +76,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     prefix. From the press that starts a session it is a fixed-height box
     (`--transcript-height`), so new lines never move the card (a layout shift); a
     `ResizeObserver` scrolls it to the newest line unless the viewer scrolled up, short content
-    is translated to the box's bottom (a transform, so no layout shift), cut-off edges fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
+    is translated to the box's bottom (a transform, so no layout shift; the content measured
+    with `Math.ceil(getBoundingClientRect().height)`, since a rounded `offsetHeight` could
+    overflow by under a pixel), cut-off edges fade, and it is a Tab stop only while it overflows. `transcript.js` (pure) merges fragments
     into entries and bounds them to 20.
   - `VolumeOrb.jsx` — the decorative (`aria-hidden`) orb: while the session is open, a
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
@@ -88,6 +90,21 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     under `prefers-reduced-motion: reduce`), and the host's own `position: fixed`, `z-index` and
     `display: block`. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
     as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
+  - `clientLog.js` — the client log (spec R23): `startClientLog({ nonce, scriptUrl })`, called
+    once per page by `main.jsx` before the mount, listens for window `error` /
+    `unhandledrejection` thrown from this bundle's own script URL, reports LCP, INP and CLS
+    through `web-vitals` (only those three imported, for the bundle budget), and returns the
+    reporter `main.jsx` passes to `AgentApp` as `onFailure`; `useLiveAgent` calls it from
+    `onStatusChange` once per `failed` (the failures `failureCount` counts). Each report is a
+    `navigator.sendBeacon` to `/api/client-log?nonce=…` with a JSON Blob; a missing or refusing
+    `sendBeacon` drops it (no fetch fallback). A beacon the server rejects still logs a console
+    error, so a `token` failure (the server refused the page's token request: its nonce or origin) is not sent and `disable()`s the log for
+    the rest of the page; a page whose nonce expired or outlived a server restart loses its
+    reports until then. Per page: a repeated error once, at most 10 errors and 20 reports. The
+    report builders are pure.
+    `web-vitals` is the agent-client's one runtime dependency beyond React, Radix and the
+    Gemini SDK, pinned to 5.3.0: 6.x adds ~0.9 kB gzip of soft-navigation support this page
+    never uses, which the 180 kB budget couldn't take.
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`, `transcript.js`.
   - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by
@@ -96,13 +113,21 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
     they drift, so edit both together.
 - `server/` (npm) — Node/Express, split in two:
-  - `app.js` — `createApp({ mintToken, now, logger, production, limits })`, no `listen`, so
+  - `app.js` — `createApp({ mintToken, now, logger, production, trustProxyHops, limits })`, no `listen`, so
     tests drive it with supertest. Mints short-lived Gemini Live tokens (`/api/live-token`,
     gated on same-origin, a per-IP rate limit and a page nonce parsed with Zod), serves the
     nonce-templated sandbox page at `/` and `/sandbox/` (rate-limited per IP too, since each
     load issues a nonce; past the limit a browser gets a "Too many reloads" page and
     `Retry-After`), the other static directories gzipped (`compression`), and
-    `GET /health`. pino-http logs every request with a request id (`x-request-id`); helmet
+    `GET /health`, and `POST /api/client-log` (the agent-client's beacons: the same gates as
+    the token route through one `passesPageGate`, its own per-IP limit of 60 a minute, a
+    4 kB `express.json` cap answered 413 `payload_too_large`, a Zod discriminated union
+    `error` / `vital` / `connection` answered 400 `invalid_request`, then 204 and one pino
+    line — `client vital` at info, `client error` and `client connection failed` at warn —
+    with the parsed fields only, strings cut and passed through `redact`, which strips URL
+    queries and fragments and masks token-shaped values; body-parser errors — 415
+    `unsupported_media_type` for a charset or encoding it can't decode — are logged by
+    type, never with the body). pino-http logs every request but `/health` (Render polls it) with a request id (`x-request-id`); helmet
     sends the CSP (see below) and the other security headers. Every JSON error is
     `{ error: { code, message } }`. A failed mint is `not_configured` (500) when Google rejects
     the key and `upstream_error` (502) otherwise, both logged at error. The central error
@@ -113,17 +138,32 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `geminiMint.js` — the real Gemini mint: a single-use token, 60 s to start a session,
     locked to the model in `agent-client/src/liveModel.json` with `lockAdditionalFields: []`
     ([ADR 0004](docs/adr/0004-live-token-constraints.md)).
-  - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the
-    v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
+  - `config.js` — `loadConfig(env)`: the env parsed once with Zod (`PORT` or 3000,
+    `GEMINI_API_KEY` (trimmed), `NODE_ENV`, `LOG_LEVEL` or `info`, `TRUST_PROXY_HOPS` or 1 in production
+    and 0 otherwise). A bad variable throws a `ConfigError` naming it, never its value, and
+    every bad variable is listed at once; a
+    missing or whitespace-only key is fatal only with `NODE_ENV=production` (locally and in the e2e the token
+    route answers `not_configured` and the card offers Try again).
+  - `index.js` — `loadConfig(process.env)` (on a `ConfigError`: the message to stderr, exit 1),
+    the v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
     (once, whichever signal comes first).
+  **Trust proxy:** `createApp`'s `trustProxyHops` sets Express's `trust proxy` (1 in production
+  for Render's TLS proxy, ADR 0003): `req.protocol` follows `X-Forwarded-Proto`, so the
+  same-origin check matches the https page, and `req.ip` is the viewer, so each gets their own
+  bucket in both rate limiters. Off locally, so `X-Forwarded-For` can't be spoofed there.
   `npm start`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run check` (all three).
   Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
   **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any
   page), `style-src 'self' 'unsafe-inline'` (runtime `<style>` from the shadow root and Radix),
-  `connect-src` adds the Gemini `wss:`/`https:` origins, `frame-src 'self'`, `img-src 'self'
+  `connect-src` adds the Gemini `wss:`/`https:` origins (its `'self'` covers the client-log
+  beacons), `frame-src 'self'`, `img-src 'self'
   data:`; `script-src 'self'` also covers the same-origin capture worklet (no `blob:`); the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
   never runs; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
   adds a resource type updates the CSP in the same commit.
+- `render.yaml` — the Render Blueprint (ADR 0003): one free Node web service built from the
+  root (agent-client `ci --include=dev` + build, server `ci --omit=dev`), `npm --prefix server
+  start`, `/health`, `NODE_ENV=production`, `GEMINI_API_KEY` set in the dashboard
+  (`sync: false`), a preview per PR (`previews.generation: automatic`); Node from `.nvmrc`.
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots; reads the routes from the page's `#ds-routes` block, which the server
   templates in). No build step.
@@ -188,12 +228,19 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
   checking, 0003 hosting on Render, 0004 Live token locked to the model only.
-- `docs/superpowers/` — the `/build` cycle: `specs/assessment.md`, `specs/design.md` (the spec)
-  and `plans/plan.md` (milestones M4–M7 and their tasks).
+- `docs/superpowers/` — the `/build` cycle: `specs/assessment.md` (every item done or filed as
+  an issue, M8 T4), `specs/design.md` (the spec and its R1–R24 checklist) and `plans/plan.md`
+  (milestones M4–M8 and their tasks, the time log and the kit calibration proposal).
+- `docs/metrics/` — the observer's report per milestone (`m04.md`–`m07.md`), `history.csv`
+  (Lighthouse per route per milestone) and `README.md` (how the live e2e records the app
+  metrics, and the current baseline).
 
 ## Active work area
 
-Recent work concentrates in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
+Cycle 1 (M4–M8) closes with M8: the Render deploy (`render.yaml`, `server/config.js`, trust
+proxy) and production observability (`/api/client-log`, `clientLog.js`). Follow-up work is
+filed as GitHub issues (see `docs/superpowers/specs/assessment.md` §8). Before that the work
+concentrated in `agent-client/src/liveSession.js` and `sandbox/bridge.js`: DOM-state
 grounding (keyframe vs. delta snapshots, a debounced `MutationObserver`, a snapshot that arrives
 during a tool batch sent inside its tool response), the private bridge
 channel, and Live session robustness (one reconnect per drop, `reconnecting`/`failed` status,
@@ -217,10 +264,12 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 19 vitest files (358 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 20 vitest files (381 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
-  both `getLevel()`s against a stubbed analyser), `bridge` (runs
+  both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
+  the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
+  `sendBeacon` dropped, nothing sent once disabled or from a `token` failure on), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore` (incl.
@@ -230,14 +279,24 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
-  boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing), `useLiveAgent.test.jsx` (Testing
+  boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
-  card's reason after it closes, one announcement, the keyboard walk and focus return) and
+  card's reason after it closes, one announcement, the keyboard walk and focus return; each
+  failure reported to `onFailure` once) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
+  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (117 tests), sharing `harness.js` (`setup`, the
+  capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health` (and no request log line for it), the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
+  behind a trusted proxy: `X-Forwarded-Proto: https` passes the origin check, `X-Forwarded-For`
+  clients get their own bucket in both limiters, and with no trusted proxy it is ignored),
+  `clientLog` (`POST /api/client-log`: each report type's 204 and log line with the request
+  id and level, unknown keys dropped, truncation and redaction, no nonce logged, 400 for bad
+  bodies and malformed or non-JSON ones, 413 over 4 kB, 415 for a charset or encoding it can't decode, 403 cross-origin and for a bad or
+  expired nonce, 429 on its own limit, separate from the token route's),
+  `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
+  in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
   config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (33
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
@@ -252,7 +311,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on
   `page.clock` → Connection lost with one toast → Retry → Live; the two fatal paths from the
   keyboard — `not_configured` offers Try again, no Reload page, with its toast once per failure and
-  F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page, which reloads; the
+  F8 / Tab / Escape inside the shadow root, and one `connection` beacon per failure answered
+  204 by the real server; a rejected nonce offers Reload page, which reloads; the
   blocked-mic guidance; at 360, 768 and 1440 px the card's placement, a keyboard walk of the
   whole card, the dialog making the card inert (Chromium's accessibility tree, over CDP) and axe in
   light and dark; and at 390 px the layout-shift check — worst CLS session window ≤ 0.05 while

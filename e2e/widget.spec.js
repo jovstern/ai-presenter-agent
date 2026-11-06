@@ -150,6 +150,18 @@ test.describe('when the server has no API key', () => {
     const { panel, status, alert, button, toasts } = card(page);
     const reason =
       "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).";
+    // The client log's connection beacons (clientLog.js, M8 T2), as the real
+    // server answered them: one per failure.
+    const connectionBeacons = [];
+    page.on('response', (response) => {
+      if (!response.url().includes('/api/client-log')) return;
+      const body = response.request().postDataJSON();
+      if (body.type === 'connection') connectionBeacons.push({ body, status: response.status() });
+    });
+    const connectionBeacon = {
+      status: 204,
+      body: expect.objectContaining({ type: 'connection', kind: 'config', reason }),
+    };
 
     await page.goto('/');
     await button('Talk to the presenter').focus();
@@ -173,6 +185,7 @@ test.describe('when the server has no API key', () => {
     await page.waitForTimeout(1500);
     expect(token.count).toBe(1);
     expect(live.sockets).toHaveLength(0);
+    await expect.poll(() => connectionBeacons).toEqual([connectionBeacon]);
 
     // The keyboard path into the toast, inside the shadow root: F8 (Radix's
     // hotkey) focuses the viewport, Tab walks the toast and Dismiss, then
@@ -210,6 +223,7 @@ test.describe('when the server has no API key', () => {
     await expect(toasts).toHaveCount(1);
     await expect(button('Try again')).toBeFocused();
     expect(live.sockets).toHaveLength(0);
+    await expect.poll(() => connectionBeacons).toEqual([connectionBeacon, connectionBeacon]);
   });
 });
 

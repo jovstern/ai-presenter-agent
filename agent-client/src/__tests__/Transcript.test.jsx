@@ -166,21 +166,28 @@ describe('Transcript: following the newest line', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   /**
-   * A box `clientHeight` tall whose content is `content` tall; scrollTop
-   * clamps the way a browser's does.
+   * A box `clientHeight` tall whose content is `content` tall, possibly a
+   * fractional height, as a browser lays it out: `offsetHeight` rounds it,
+   * `getBoundingClientRect()` doesn't, the content's translate counts toward
+   * the scrollable overflow, and `scrollHeight` and scrollTop are whole
+   * pixels, scrollTop clamped the way a browser's is.
    * @param {HTMLElement} box
    * @param {number} clientHeight
    */
   function fakeLayout(box, clientHeight) {
+    const inner = /** @type {HTMLElement} */ (box.firstElementChild);
     let content = 0;
     let top = 0;
+    const shift = () => Number(/^0 (\d+)px$/.exec(inner.style.translate)?.[1] ?? 0);
+    const scrollHeight = () => Math.ceil(Math.max(content + shift(), clientHeight));
     Object.defineProperty(box, 'clientHeight', { get: () => clientHeight });
-    Object.defineProperty(box.firstElementChild, 'offsetHeight', { get: () => content });
-    Object.defineProperty(box, 'scrollHeight', { get: () => Math.max(content, clientHeight) });
+    Object.defineProperty(inner, 'offsetHeight', { get: () => Math.round(content) });
+    inner.getBoundingClientRect = () => DOMRect.fromRect({ width: 300, height: content });
+    Object.defineProperty(box, 'scrollHeight', { get: scrollHeight });
     Object.defineProperty(box, 'scrollTop', {
       get: () => top,
       set: (value) => {
-        top = Math.max(0, Math.min(value, Math.max(content, clientHeight) - clientHeight));
+        top = Math.max(0, Math.min(Math.round(value), scrollHeight() - clientHeight));
       },
     });
     return {
@@ -214,6 +221,21 @@ describe('Transcript: following the newest line', () => {
     expect(content.style.translate).toBe('0 42px');
     grow(400);
     expect(content.style.translate).toBe('');
+  });
+
+  // A fractional height rounded down by offsetHeight left a 1 px gap whose
+  // translate pushed the content past the box by under a pixel: the box
+  // overflowed, became a Tab stop and faded its top edge with nothing cut off.
+  it('measures a fractional content height without overflowing by a fraction of a pixel', () => {
+    const { box, grow } = setup();
+    const content = /** @type {HTMLElement} */ (box.firstElementChild);
+    grow(191.4);
+    expect(content.style.translate).toBe('');
+    expect(box.hasAttribute('tabindex')).toBe(false);
+    expect(box.hasAttribute('data-fade-top')).toBe(false);
+    grow(150.6);
+    expect(content.style.translate).toBe('0 41px');
+    expect(box.hasAttribute('tabindex')).toBe(false);
   });
 
   it('is no Tab stop while everything fits, and one once it overflows', () => {

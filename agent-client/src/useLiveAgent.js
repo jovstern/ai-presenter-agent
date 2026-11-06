@@ -44,9 +44,11 @@ import { appendFragment, endTurn } from './transcript.js';
  * @param {LiveSessionOptions['bridge']} bridge
  * @param {LiveSessionOptions['nonce']} nonce The page nonce, read once by main.jsx.
  * @param {string} workletUrl The capture worklet's URL, resolved once by main.jsx.
+ * @param {(details: StatusDetails) => void} [onFailure] Told once per `failed` report, the
+ *   failures `failureCount` counts: main.jsx's client log (clientLog.js).
  * @returns {LiveAgent}
  */
-export function useLiveAgent(bridge, nonce, workletUrl) {
+export function useLiveAgent(bridge, nonce, workletUrl, onFailure) {
   // details come with `reconnecting` and `failed`; kept with the status so
   // the two can never disagree. `failures` counts the `failed` reports: the
   // session makes one per failure, so the count tells a new failure from a
@@ -81,7 +83,12 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
           // `failed` means no more retries are coming: release the mic now
           // rather than leave it live behind a dead session. `reconnecting`
           // keeps it, since the resumed session picks the frames back up.
-          if (status === 'failed') stopAudio();
+          if (status === 'failed') {
+            stopAudio();
+            // Here, not in an effect on failureCount: the session reports
+            // each failure once, and StrictMode never repeats this callback.
+            if (details) onFailure?.(details);
+          }
           setConnection((prev) => ({
             status,
             details: details ?? null,

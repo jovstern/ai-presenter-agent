@@ -221,6 +221,34 @@ describe('AgentApp + useLiveAgent', () => {
     expect(session.connect).toHaveBeenCalledTimes(2);
   });
 
+  it('reports each failure once to onFailure (the client log), and nothing else', async () => {
+    const onFailure = vi.fn();
+    render(
+      <StrictMode>
+        <AgentApp
+          bridge={fakeBridge()}
+          nonce="page-nonce"
+          workletUrl="/agent-client/capture-worklet.js"
+          onFailure={onFailure}
+        />
+      </StrictMode>,
+    );
+    await click(TALK);
+    const exhausted = { attempt: 6, maxAttempts: 6, reason: 'Could not reconnect.' };
+
+    emitStatus('open');
+    emitStatus('reconnecting', { attempt: 1, maxAttempts: 6 });
+    expect(onFailure).not.toHaveBeenCalled();
+    emitStatus('failed', exhausted);
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith(exhausted);
+
+    await click('Retry');
+    emitStatus('connecting');
+    emitStatus('failed', exhausted);
+    expect(onFailure).toHaveBeenCalledTimes(2);
+  });
+
   it('on failed without a reason, shows no reason and no toast', async () => {
     renderApp();
     await click(TALK);
