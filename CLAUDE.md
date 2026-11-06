@@ -56,7 +56,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     <file name>" buttons, an empty state, a rules field with a used / limit counter
     (`aria-describedby`; a polite note near the limit, a `role="alert"` over it, the text kept
     but not saved) and `role="alert"` add errors (full storage and an unreadable file
-    included, cleared on reopen); top-anchored, with Close in a sticky footer. It reads `knowledgeStore.js` through
+    included, and blocked storage on add, Remove and the rules; cleared on reopen); top-anchored, with Close in a sticky footer. It reads `knowledgeStore.js` through
     `useSyncExternalStore` (no mirrored state). Its Tab wrap and open focus are its own, read
     from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
     its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` (shared with
@@ -223,9 +223,10 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore` (incl.
-  full storage, an unreadable file and blocked storage),
+  full storage, an unreadable file, and blocked storage on reads and writes),
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
-  oversize alert, a full-storage alert, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
+  oversize alert, a full-storage alert, blocked-storage alerts for Remove and the rules
+  (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing), `useLiveAgent.test.jsx` (Testing

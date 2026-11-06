@@ -51,6 +51,25 @@ function readItem(key) {
  */
 const isDomError = (error, names) => error instanceof DOMException && names.includes(error.name);
 
+// A write the browser refused, in words the dialog can show: storage blocked
+// outright (a privacy setting, a sandboxed frame: SecurityError) or full (the
+// origin's quota is shared, so it can fill under MAX_TOTAL_BYTES; Firefox
+// names it differently). Anything else is a bug, and is thrown.
+/**
+ * @param {unknown} error
+ * @param {'files' | 'rules'} what
+ * @returns {{ ok: false, reason: string }}
+ */
+function refusedWrite(error, what) {
+  if (isDomError(error, ['SecurityError'])) {
+    return fail(`This browser isn't letting the site save ${what}`);
+  }
+  if (isDomError(error, ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'])) {
+    return fail('Browser storage is full. Remove a file to make room');
+  }
+  throw error;
+}
+
 // A value that fails to parse, or isn't an array, reads as empty: a non-array
 // (written by another script on this origin, or by hand) used to reach
 // totalBytes' reduce and throw inside useSyncExternalStore.
@@ -129,9 +148,8 @@ export function totalBytes() {
 // Resolves ok({ file }) or fail(reason). Refuses outright on a rejected
 // extension or an over-cap size — no silent failure, no truncation — and
 // says so, in words the dialog can show, when the browser refuses: a file it
-// can't read (moved or deleted since it was picked), or storage that is full
-// (the origin's quota is shared, so it can fill under MAX_TOTAL_BYTES).
-// Firefox names a full quota differently.
+// can't read (moved or deleted since it was picked), or a write it won't
+// make (refusedWrite).
 /**
  * @param {File} file
  * @returns {Promise<StoreResult<{ file: KnowledgeFile }>>}
@@ -165,15 +183,22 @@ export async function addFile(file) {
   try {
     writeFiles([...files, entry]);
   } catch (error) {
-    if (!isDomError(error, ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'])) throw error;
-    return fail('Browser storage is full. Remove a file to make room');
+    return refusedWrite(error, 'files');
   }
   return ok({ file: entry });
 }
 
-/** @param {string} id */
+/**
+ * @param {string} id
+ * @returns {StoreResult}
+ */
 export function removeFile(id) {
-  writeFiles(readFiles().filter((f) => f.id !== id));
+  try {
+    writeFiles(readFiles().filter((f) => f.id !== id));
+  } catch (error) {
+    return refusedWrite(error, 'files');
+  }
+  return ok({});
 }
 
 export function getRules() {
@@ -189,7 +214,11 @@ export function setRules(text) {
   if (text.length > MAX_RULES_CHARS) {
     return fail(`Rules must be ${MAX_RULES_CHARS} characters or fewer`);
   }
-  localStorage.setItem(RULES_KEY, text);
+  try {
+    localStorage.setItem(RULES_KEY, text);
+  } catch (error) {
+    return refusedWrite(error, 'rules');
+  }
   window.dispatchEvent(new Event(CHANGE_EVENT));
   return ok({});
 }

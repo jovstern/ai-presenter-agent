@@ -144,6 +144,48 @@ describe('knowledgeStore when the browser refuses', () => {
     expect(knowledgeStore.listFiles()).toHaveLength(0);
   });
 
+  /** Blocks localStorage (its getter throws, as a browser's does) for the run of `fn`. */
+  async function withStorageBlocked(/** @type {() => unknown} */ fn) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    try {
+      return await fn();
+    } finally {
+      Object.defineProperty(
+        globalThis,
+        'localStorage',
+        /** @type {PropertyDescriptor} */ (descriptor),
+      );
+    }
+  }
+
+  it('fails in plain words, not a throw, when localStorage is blocked: add, remove, rules', async () => {
+    const blocked = "This browser isn't letting the site save files";
+    expect(await withStorageBlocked(() => knowledgeStore.addFile(makeFile('a.txt', 'A')))).toEqual({
+      ok: false,
+      reason: blocked,
+    });
+    expect(await withStorageBlocked(() => knowledgeStore.removeFile('some-id'))).toEqual({
+      ok: false,
+      reason: blocked,
+    });
+    expect(await withStorageBlocked(() => knowledgeStore.setRules('Be brief.'))).toEqual({
+      ok: false,
+      reason: "This browser isn't letting the site save rules",
+    });
+  });
+
+  it('reports a removal that went through as ok', async () => {
+    const added = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+    if (!added.ok) throw new Error('not added');
+    expect(knowledgeStore.removeFile(added.file.id)).toEqual({ ok: true });
+  });
+
   it('reads as empty, not a throw, when localStorage is blocked', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
     Object.defineProperty(globalThis, 'localStorage', {

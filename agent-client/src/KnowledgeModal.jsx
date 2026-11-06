@@ -4,6 +4,7 @@ import * as knowledgeStore from './knowledgeStore.js';
 import { focusedIn, tabStops } from './shadowFocus.js';
 
 /** @import { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent } from 'react' */
+/** @import { KnowledgeFile } from './knowledgeStore.js' */
 
 const MAX_RULES = knowledgeStore.MAX_RULES_CHARS;
 // Within this many characters of the limit, the polite region says so, once.
@@ -82,6 +83,8 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
   const hasContent = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.hasContent);
   const [unsavedRules, setUnsavedRules] = useState(/** @type {string | null} */ (null));
   const [fileError, setFileError] = useState(/** @type {string | null} */ (null));
+  // Why the browser refused to save the rules (not the length: that's `over`).
+  const [rulesError, setRulesError] = useState(/** @type {string | null} */ (null));
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef(/** @type {HTMLInputElement | null} */ (null));
   const addButtonRef = useRef(/** @type {HTMLButtonElement | null} */ (null));
@@ -89,20 +92,28 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
   const hintId = `${ids}-hint`;
   const counterId = `${ids}-counter`;
   const rulesErrorId = `${ids}-rules-error`;
+  const rulesSaveErrorId = `${ids}-rules-save-error`;
 
   const rules = unsavedRules ?? storedRules;
   const over = rules.length - MAX_RULES;
 
-  // Stops at the first file the store refuses, and says which and why.
+  // Stops at the first file the store refuses, and says which and why. An
+  // error the store didn't expect is still said, in general words, rather than
+  // left as an unhandled rejection with nothing on screen.
   /** @param {File[]} picked */
   async function addFiles(picked) {
     setFileError(null);
     for (const file of picked) {
-      const result = await knowledgeStore.addFile(file);
-      if (!result.ok) {
-        setFileError(`${file.name} wasn't added. ${result.reason}.`);
-        break;
+      let reason;
+      try {
+        const result = await knowledgeStore.addFile(file);
+        if (result.ok) continue;
+        reason = result.reason;
+      } catch {
+        reason = 'Something went wrong; try again';
       }
+      setFileError(`${file.name} wasn't added. ${reason}.`);
+      break;
     }
   }
 
@@ -123,23 +134,33 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
 
   // The removed button takes focus with it, so focus moves to the next file's
   // Remove button, else the previous one's, else Add files: never out of the
-  // dialog.
+  // dialog. A removal the browser refused leaves the file, and focus, where
+  // they are, and says why.
   /**
    * @param {MouseEvent<HTMLButtonElement>} event
-   * @param {string} id
+   * @param {KnowledgeFile} file
    */
-  function handleRemove(event, id) {
+  function handleRemove(event, file) {
     const item = event.currentTarget.closest('li');
     const neighbour = item?.nextElementSibling ?? item?.previousElementSibling;
     const next = neighbour?.querySelector('button') ?? addButtonRef.current;
-    knowledgeStore.removeFile(id);
+    const result = knowledgeStore.removeFile(file.id);
+    if (!result.ok) {
+      setFileError(`${file.name} wasn't removed. ${result.reason}.`);
+      return;
+    }
+    setFileError(null);
     next?.focus();
   }
 
   /** @param {ChangeEvent<HTMLTextAreaElement>} event */
   function handleRulesChange(event) {
     const text = event.target.value;
-    setUnsavedRules(knowledgeStore.setRules(text).ok ? null : text);
+    const result = knowledgeStore.setRules(text);
+    // Refused, the text stays in the field, unsaved: over the limit (the
+    // alert below says by how much), or because the browser won't save it.
+    setUnsavedRules(result.ok ? null : text);
+    setRulesError(result.ok || text.length > MAX_RULES ? null : result.reason);
   }
 
   // An add's error belongs to that visit: opened again, the dialog starts clean.
@@ -243,7 +264,7 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
                   <button
                     type="button"
                     className="knowledge-modal__remove"
-                    onClick={(event) => handleRemove(event, file.id)}
+                    onClick={(event) => handleRemove(event, file)}
                   >
                     Remove <span className="visually-hidden">{file.name}</span>
                   </button>
@@ -264,7 +285,12 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
             value={rules}
             onChange={handleRulesChange}
             aria-invalid={over > 0 ? true : undefined}
-            aria-describedby={[hintId, counterId, over > 0 && rulesErrorId]
+            aria-describedby={[
+              hintId,
+              counterId,
+              over > 0 && rulesErrorId,
+              rulesError && rulesSaveErrorId,
+            ]
               .filter(Boolean)
               .join(' ')}
           />
@@ -278,6 +304,11 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
           <p className="visually-hidden" role="status">
             {rulesNotice(rules.length)}
           </p>
+          {rulesError && (
+            <p id={rulesSaveErrorId} className="knowledge-modal__error" role="alert">
+              {rulesError}. They stay in the field but won&rsquo;t survive a reload.
+            </p>
+          )}
           {over > 0 && (
             <p id={rulesErrorId} className="knowledge-modal__error" role="alert">
               Rules are {formatCount(over)} characters over the limit and aren&rsquo;t saved.

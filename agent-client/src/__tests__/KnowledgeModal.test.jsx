@@ -141,6 +141,47 @@ describe('KnowledgeModal', () => {
     expect(within(dialog).queryByRole('list', { name: 'Files' })).toBeNull();
   });
 
+  it("shows an alert and keeps the typed rules when the browser won't save them", async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+    const field = within(dialog).getByRole('textbox', { name: 'Rules' });
+    await act(async () => fireEvent.change(field, { target: { value: 'Be brief.' } }));
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      "This browser isn't letting the site save rules. They stay in the field but won’t survive a reload.",
+    );
+    expect(/** @type {HTMLTextAreaElement} */ (field).value).toBe('Be brief.');
+  });
+
+  it("shows an alert when the browser won't let a file be removed, and keeps it listed", async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    await pick([textFile('a.txt', 'A')]);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The operation is insecure.', 'SecurityError');
+    });
+    await act(async () =>
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Remove a.txt' })),
+    );
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      "a.txt wasn't removed. This browser isn't letting the site save files.",
+    );
+    expect(within(dialog).getByRole('button', { name: 'Remove a.txt' })).toBeTruthy();
+  });
+
+  it('shows a generic alert, not an unhandled rejection, when adding fails unexpectedly', async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    const file = textFile('a.txt', 'A');
+    vi.spyOn(file, 'text').mockRejectedValue(new Error('boom'));
+    await pick([file]);
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      "a.txt wasn't added. Something went wrong; try again.",
+    );
+  });
+
   it('clears an add error when the dialog is opened again', async () => {
     const ui = renderModal();
     const { dialog } = await openDialog(ui);

@@ -252,7 +252,10 @@ come from `status`.
     words: "Browser storage is full. Remove a file to make room" (`QuotaExceededError`) and
     "The file couldn't be read. Check that it still exists, then add it again"
     (`NotReadableError`). Storage blocked outright reads as empty (no files, no rules) instead of
-    throwing at mount (M7 fix wave);
+    throwing at mount, and its writes fail in plain words: "This browser isn't letting the site
+    save files" (an add or a Remove, the file staying listed and focus where it was) or "…save
+    rules" (an alert under the field, the text kept in it, unsaved). An add that fails in a way
+    the store didn't expect says "Something went wrong; try again" (M7 fix wave);
   - layout: the dialog is anchored by its top (8 dvh, `vh` fallback; at most 84 dvh tall), so
     an added file or an error grows it downward; Close sits in a sticky footer, reachable at
     360 px however long the content;
