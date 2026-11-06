@@ -176,10 +176,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 17 files,
-  328 tests after M7 T5, with `KnowledgeModal.test.jsx`).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 714.5 kB,
-  175.4 kB gzip after M7 T5 (174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
+  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 19 files,
+  351 tests after the M7 fix wave, with `KnowledgeModal.test.jsx` and `shadowFocus.test.js`).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 718.0 kB,
+  176.3 kB gzip after the M7 fix wave (175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -402,7 +402,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. The current bundle is 165.5 kB gzip (§3.2). **Found in M7
+  demonstrably can't cover the case. The current bundle is 176.3 kB gzip (§3.2). **Found in M7
   T2: the compiler wasn't running** — `@vitejs/plugin-react` 6 ignored the `babel` option
   `vite.config.js` passed it. Fixed in M7 T2b (the user chose the plugin's Babel preset over the
   experimental native `oxc-transform-react`): `@rolldown/plugin-babel` + `reactCompilerPreset()`,

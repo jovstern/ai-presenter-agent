@@ -181,9 +181,8 @@ its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no 
 - `docs/demostack-ai-presenter-agent.md` — build spec.
 - `docs/sandbox-simulation.md` — why the iframe/same-origin simulation approach was chosen over a
   real external site.
-- `docs/code-review-notes.md` — the living, severity-tagged review checklist (B1–B4, H1–H5,
-  M1–M9, L1–L12). Done: B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12. Open: L2, L3, L4, L5, L7 and
-  L8, card items deferred to M7 (issue #11), each marked "Deferred → M7". Its original
+- `docs/code-review-notes.md` — the living, severity-tagged review checklist: B1–B4, H1–H5,
+  M1–M10, L1–L12 — all done (M10 and L2–L8 in M7). Its original
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
@@ -217,46 +216,49 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 18 vitest files (329 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 19 vitest files (351 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
-  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
+  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore` (incl.
+  full storage, an unreadable file and blocked storage),
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
-  oversize alert, drop, the rules counter and over-limit alert, the picker from a button, open
-  focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  oversize alert, a full-storage alert, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
+  focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing), `useLiveAgent.test.jsx` (Testing
-  Library: the card's states and the failure toast — once per failure, one announcement, the
-  keyboard walk and focus return) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
-  under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
+  Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
+  card's reason after it closes, one announcement, the keyboard walk and focus return) and
+  `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
+  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (32
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (33
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
   text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (1: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
-  socket, one token per reconnect, the page nonce), `widget.spec.js` (7, M7 T6: every card state
+  socket, one token per reconnect, the page nonce), `widget.spec.js` (8, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on
   `page.clock` → Connection lost with one toast → Retry → Live; the two fatal paths from the
   keyboard — `not_configured` offers Try again, no Reload page, with its toast once per failure and
   F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page, which reloads; the
-  blocked-mic guidance; and at 360, 768 and 1440 px the card's placement, a keyboard walk of the
+  blocked-mic guidance; at 360, 768 and 1440 px the card's placement, a keyboard walk of the
   whole card, the dialog making the card inert (Chromium's accessibility tree, over CDP) and axe in
-  light and dark),
+  light and dark; and at 390 px the layout-shift check — worst CLS session window ≤ 0.05 while
+  the transcript grows over six turns, the newest line in view),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
   `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its
-  toast and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
+  toast (once its slide-in has finished) and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
   keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
   inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
   `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
