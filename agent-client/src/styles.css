@@ -355,6 +355,12 @@ button:active {
   color: var(--color-danger);
 }
 
+/* Held while the toast says the reason: the space stays, so the card doesn't
+   grow, and Retry doesn't move, when the toast closes. */
+.agent-app__error[data-held] {
+  visibility: hidden;
+}
+
 /*
  * The transcript (Transcript.jsx), the card's first row. While a session runs,
  * or once it has lines, the box has a fixed height, so a new line never moves

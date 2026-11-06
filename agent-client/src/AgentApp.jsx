@@ -158,11 +158,21 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         <span className="agent-app__status" role="status" data-status={status}>
           {statusText(status, details)}
         </span>
-        {/* The failure's reason, once its toast has closed, for as long as the
-            failure lasts; while the toast is open it says it. Plain text: the
-            toast is what announces it, once, so a role="alert" here would
-            make a screen reader say it twice. */}
-        {failureReason && !toastOpen && <p className="agent-app__error">{failureReason}</p>}
+        {/* The failure's reason, for as long as the failure lasts. While the
+            toast is open it says the reason, so the card's copy is held: its
+            space kept (styles.css hides it), so Retry doesn't move when the
+            toast closes, and hidden from assistive technology too. Plain
+            text: the toast is what announces it, once, so a role="alert"
+            here would make a screen reader say it twice. */}
+        {failureReason && (
+          <p
+            className="agent-app__error"
+            data-held={toastOpen ? 'true' : undefined}
+            aria-hidden={toastOpen ? true : undefined}
+          >
+            {failureReason}
+          </p>
+        )}
         {/* role="alert", not "status": the guidance asks the user to act, so
             it is announced at once. There is no toast for these: they aren't
             a connection failing but something on this side to fix first.

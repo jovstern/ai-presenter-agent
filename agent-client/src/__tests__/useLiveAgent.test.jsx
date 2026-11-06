@@ -521,7 +521,11 @@ describe('the failure toast', () => {
         .getAllByRole('button')
         .map((button) => button.textContent),
     ).toEqual(['×Dismiss']);
-    expect(within(card()).queryByText(REASON)).toBeNull();
+    // Its space is kept, so Retry doesn't move when the toast closes, but it
+    // is neither seen nor read.
+    const held = within(card()).getByText(REASON);
+    expect(held.getAttribute('aria-hidden')).toBe('true');
+    expect(held.dataset.held).toBe('true');
     expect(within(card()).getByRole('button', { name: 'Retry' })).toBeTruthy();
     expect(within(card()).queryByRole('alert')).toBeNull();
   });
@@ -533,6 +537,8 @@ describe('the failure toast', () => {
     });
     expect(toasts()).toHaveLength(0);
     const line = within(card()).getByText(REASON);
+    expect(line.hasAttribute('aria-hidden')).toBe(false);
+    expect(line.hasAttribute('data-held')).toBe(false);
     expect(line.closest('[role="alert"], [role="status"], [aria-live]')).toBeNull();
   });
 
@@ -540,12 +546,12 @@ describe('the failure toast', () => {
     vi.useFakeTimers();
     try {
       await failOnce();
-      expect(within(card()).queryByText(REASON)).toBeNull();
+      expect(within(card()).getByText(REASON).getAttribute('aria-hidden')).toBe('true');
       await act(async () => {
         await vi.advanceTimersByTimeAsync(8000);
       });
       expect(toasts()).toHaveLength(0);
-      expect(within(card()).getByText(REASON)).toBeTruthy();
+      expect(within(card()).getByText(REASON).hasAttribute('aria-hidden')).toBe(false);
     } finally {
       vi.useRealTimers();
     }

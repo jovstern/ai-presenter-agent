@@ -64,8 +64,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     only: `checkVisibility()`, else no `hidden` ancestor).
   - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason and Dismiss
     (no action: the card's button is the one Retry), plus a visually hidden line naming the
-    card's button. `AgentApp.jsx` owns its `open` and hides the card's reason line while it is
-    open, showing it once the toast closes. Its viewport sits above the card in the shadow root
+    card's button. `AgentApp.jsx` owns its `open` and holds the card's reason line while it is
+    open (space kept, hidden and `aria-hidden`, so the button never moves), showing it once the
+    toast closes. Its viewport sits above the card in the shadow root
     and its announcer in `main.jsx`'s portal container; it is the one live announcement of the
     reason (so the card has no alert for it). F8 reaches it; its own capture handlers walk Tab
     (Radix compares `document.activeElement`, which in a shadow root is the host) and send
@@ -216,7 +217,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 19 vitest files (351 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 19 vitest files (358 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `bridge` (runs

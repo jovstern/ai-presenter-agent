@@ -113,8 +113,8 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Failure toast** — the Radix toast shown once per `failed` report (`failureCount` in
   `useLiveAgent.js`), above the card: the reason and Dismiss, no action of its own (the
   primary button is the one Retry; `agent-client/src/FailureToast.jsx`). It is the one live
-  announcement of the reason; the card hides its own reason line while the toast is open and
-  shows it, as plain text, once the toast closes. Mic or voice-support problems get the card's
+  announcement of the reason; the card holds its own reason line while the toast is open (space
+  kept, hidden) and shows it, as plain text, once the toast closes. Mic or voice-support problems get the card's
   alert instead of a toast.
 
 ## Knowledge

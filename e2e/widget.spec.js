@@ -106,7 +106,7 @@ test.describe('the card through every connection state', () => {
     await expect(toasts).toHaveCount(1);
     await expect(toasts).toContainText(reason);
     await expect(toasts.getByRole('button')).toHaveText(['×Dismiss']);
-    await expect(panel).not.toContainText(reason);
+    await expect(panel.getByText(reason)).toBeHidden();
     expect(token.count).toBe(1 + MAX_ATTEMPTS);
     expect(live.sockets).toHaveLength(2); // the refused tokens never opened a socket
     await pause();
@@ -162,8 +162,11 @@ test.describe('when the server has no API key', () => {
     await expect(alert).toHaveCount(0);
     await expect(toasts).toHaveCount(1);
     await expect(toasts).toContainText(reason);
-    await expect(panel).not.toContainText(reason);
+    await expect(panel.getByText(reason)).toBeHidden();
     await expect(toasts.getByRole('button', { name: 'Try again' })).toHaveCount(0);
+    // Held, not absent: its space is kept, so the button doesn't move when
+    // the toast closes (below).
+    const buttonBox = await button('Try again').boundingBox();
     await expect(button('Try again')).toBeFocused();
     await expect(button('Reload page')).toHaveCount(0);
     // The backoff's first retry is immediate; give it room to (wrongly) happen.
@@ -193,7 +196,8 @@ test.describe('when the server has no API key', () => {
     await page.keyboard.press('Escape');
     await expect(toasts).toHaveCount(0);
     await expect(button('Try again')).toBeFocused();
-    await expect(panel).toContainText(reason);
+    await expect(panel.getByText(reason)).toBeVisible();
+    expect(await button('Try again').boundingBox()).toEqual(buttonBox);
     await expect(alert).toHaveCount(0);
     // Once per failure: closed, it stays closed while the failure lasts.
     await page.waitForTimeout(500);
@@ -229,8 +233,15 @@ test.describe('when the page nonce is rejected', () => {
 
     await expect(status).toHaveText("Can't connect");
     await expect(toasts).toContainText(reason);
-    await expect(panel).not.toContainText(reason);
+    await expect(panel.getByText(reason)).toBeHidden();
     await expect(button('Reload page')).toBeFocused();
+    // Dismissed, the card shows the reason in the space it kept: Reload page stays put.
+    const buttonBox = await button('Reload page').boundingBox();
+    await toasts.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(toasts).toHaveCount(0);
+    await expect(panel.getByText(reason)).toBeVisible();
+    expect(await button('Reload page').boundingBox()).toEqual(buttonBox);
+    await button('Reload page').focus();
     await page.waitForTimeout(1500);
     expect(token.count).toBe(1);
 
