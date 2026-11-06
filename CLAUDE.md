@@ -96,7 +96,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     holds a verbatim copy of its `#region bridge protocol`; `bridgeProtocol.test.js` fails if
     they drift, so edit both together.
 - `server/` (npm) — Node/Express, split in two:
-  - `app.js` — `createApp({ mintToken, now, logger, production, limits })`, no `listen`, so
+  - `app.js` — `createApp({ mintToken, now, logger, production, trustProxyHops, limits })`, no `listen`, so
     tests drive it with supertest. Mints short-lived Gemini Live tokens (`/api/live-token`,
     gated on same-origin, a per-IP rate limit and a page nonce parsed with Zod), serves the
     nonce-templated sandbox page at `/` and `/sandbox/` (rate-limited per IP too, since each
@@ -113,9 +113,18 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `geminiMint.js` — the real Gemini mint: a single-use token, 60 s to start a session,
     locked to the model in `agent-client/src/liveModel.json` with `lockAdditionalFields: []`
     ([ADR 0004](docs/adr/0004-live-token-constraints.md)).
-  - `index.js` — env (`GEMINI_API_KEY`, `PORT` or 3000, `NODE_ENV`, `LOG_LEVEL`), the
-    v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
+  - `config.js` — `loadConfig(env)`: the env parsed once with Zod (`PORT` or 3000,
+    `GEMINI_API_KEY`, `NODE_ENV`, `LOG_LEVEL` or `info`, `TRUST_PROXY_HOPS` or 1 in production
+    and 0 otherwise). A bad variable throws a `ConfigError` naming it, never its value; a
+    missing key is fatal only with `NODE_ENV=production` (locally and in the e2e the token
+    route answers `not_configured` and the card offers Try again).
+  - `index.js` — `loadConfig(process.env)` (on a `ConfigError`: the message to stderr, exit 1),
+    the v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
     (once, whichever signal comes first).
+  **Trust proxy:** `createApp`'s `trustProxyHops` sets Express's `trust proxy` (1 in production
+  for Render's TLS proxy, ADR 0003): `req.protocol` follows `X-Forwarded-Proto`, so the
+  same-origin check matches the https page, and `req.ip` is the viewer, so each gets their own
+  bucket in both rate limiters. Off locally, so `X-Forwarded-For` can't be spoofed there.
   `npm start`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run check` (all three).
   Static serving could be split off (`docs/project-knowledge-handoff.md` §5.3).
   **CSP** (`server/app.js`): `default-src 'self'`, `script-src 'self'` (no inline script on any
@@ -124,6 +133,10 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   data:`; `script-src 'self'` also covers the same-origin capture worklet (no `blob:`); the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
   never runs; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
   adds a resource type updates the CSP in the same commit.
+- `render.yaml` — the Render Blueprint (ADR 0003): one free Node web service built from the
+  root (agent-client `ci --include=dev` + build, server `ci --omit=dev`), `npm --prefix server
+  start`, `/health`, `NODE_ENV=production`, `GEMINI_API_KEY` set in the dashboard
+  (`sync: false`), a preview per PR (`previews.generation: automatic`); Node from `.nvmrc`.
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots; reads the routes from the page's `#ds-routes` block, which the server
   templates in). No build step.
@@ -234,10 +247,14 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
   card's reason after it closes, one announcement, the keyboard walk and focus return) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
+  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 4 vitest files (76 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
+  behind a trusted proxy: `X-Forwarded-Proto: https` passes the origin check, `X-Forwarded-For`
+  clients get their own bucket in both limiters, and with no trusted proxy it is ignored),
+  `config` (`loadConfig`: defaults, blank means unset, a missing key fatal in production only,
+  bad variables named without their values),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
   config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (33
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP

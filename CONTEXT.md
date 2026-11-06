@@ -123,3 +123,12 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   adds in the knowledge dialog, kept in `localStorage` and stuffed into the session as context.
   No chunking, embeddings or retrieval (`agent-client/src/knowledgeStore.js`,
   `agent-client/src/KnowledgeModal.jsx`).
+
+## Hosting
+
+- **Blueprint** — `render.yaml`, the file Render creates and updates the service from
+  ([ADR 0003](docs/adr/0003-hosting-on-render.md)).
+- **Proxy hop** — a proxy between the viewer and the server; on Render, the load balancer that
+  ends TLS. The server trusts that many hops (`trustProxyHops`, from `TRUST_PROXY_HOPS` or 1 in
+  production, `server/config.js`), which makes `req.protocol` and `req.ip` the viewer's rather
+  than the proxy's.

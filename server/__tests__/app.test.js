@@ -350,6 +350,95 @@ describe('the sandbox page', () => {
   );
 });
 
+describe('behind a proxy (trustProxyHops, M8 T1)', () => {
+  const HTTPS_ORIGIN = `https://${HOST}`;
+
+  /** Render's load balancer: TLS ends there and it forwards plain http with these headers. */
+  function viaProxy(req, clientIp) {
+    return req.set('X-Forwarded-Proto', 'https').set('X-Forwarded-For', clientIp);
+  }
+
+  /** A page load and its token request, both from `clientIp`, through the proxy. */
+  async function proxiedNonce(app, clientIp) {
+    const res = await viaProxy(request(app).get('/').set('Host', HOST), clientIp);
+    const match = NONCE_ATTR.exec(res.text);
+    if (!match) throw new Error('no nonce');
+    return match[1];
+  }
+
+  function proxiedToken(app, nonce, clientIp, header = 'Origin') {
+    const req = request(app).get('/api/live-token').set('Host', HOST).query({ nonce });
+    return viaProxy(
+      req.set(header, header === 'Origin' ? HTTPS_ORIGIN : `${HTTPS_ORIGIN}/`),
+      clientIp,
+    );
+  }
+
+  it.each(['Origin', 'Referer'])(
+    'passes the same-origin check for an https %s when the proxy says https',
+    async (header) => {
+      const { app } = setup({ production: true, trustProxyHops: 1 });
+      const nonce = await proxiedNonce(app, '203.0.113.1');
+
+      expect((await proxiedToken(app, nonce, '203.0.113.1', header)).status).toBe(200);
+    },
+  );
+
+  it('rejects an https Origin when the proxy is not trusted (req.protocol stays http)', async () => {
+    const { app } = setup();
+    const nonce = await proxiedNonce(app, '203.0.113.1');
+
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(403);
+  });
+
+  it('gives two client IPs separate token-route buckets', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { rateLimitMax: 1 } });
+    const nonce = await proxiedNonce(app, '203.0.113.1');
+
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(200);
+    expect((await proxiedToken(app, nonce, '203.0.113.1')).status).toBe(429);
+    expect((await proxiedToken(app, nonce, '198.51.100.2')).status).toBe(200);
+  });
+
+  it('gives two client IPs separate page-load buckets', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { pageRateLimitMax: 1 } });
+    const load = (ip) => viaProxy(request(app).get('/').set('Host', HOST), ip);
+
+    expect((await load('203.0.113.1')).status).toBe(200);
+    expect((await load('203.0.113.1')).status).toBe(429);
+    expect((await load('198.51.100.2')).status).toBe(200);
+  });
+
+  it('trusts only the last hop: a client-forged X-Forwarded-For entry does not pick the bucket', async () => {
+    const { app } = setup({ trustProxyHops: 1, limits: { pageRateLimitMax: 1 } });
+    // The proxy appends the address it saw, so a forged first entry rides in front of it.
+    const load = (forged) =>
+      viaProxy(request(app).get('/').set('Host', HOST), `${forged}, 203.0.113.1`);
+
+    expect((await load('10.0.0.1')).status).toBe(200);
+    expect((await load('10.0.0.2')).status).toBe(429);
+  });
+
+  it.each([
+    ['token route', { rateLimitMax: 1 }],
+    ['page loads', { pageRateLimitMax: 1 }],
+  ])(
+    'ignores X-Forwarded-For without a trusted proxy (%s: no spoofing locally)',
+    async (_, limits) => {
+      const { app } = setup({ limits });
+      const nonce = await pageNonce(app);
+      const hit = (ip) =>
+        'rateLimitMax' in limits
+          ? tokenRequest(app, nonce).set('X-Forwarded-For', ip)
+          : request(app).get('/').set('Host', HOST).set('X-Forwarded-For', ip);
+      // The page limit already spent one load on pageNonce.
+      if ('rateLimitMax' in limits) expect((await hit('203.0.113.1')).status).toBe(200);
+
+      expect((await hit('198.51.100.2')).status).toBe(429);
+    },
+  );
+});
+
 describe('jsonForScriptBlock', () => {
   it('escapes every < so a value cannot close the script tag or open a comment', () => {
     const value = { evil: '</script><script>alert(1)</script><!--' };

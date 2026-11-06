@@ -1,0 +1,26 @@
+# Render Blueprint (ADR 0003): one Node web service that builds the
+# agent-client bundle and runs the Express server, which serves everything.
+# Spec: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: ai-presenter-agent
+    runtime: node
+    plan: free
+    region: oregon
+    # Node comes from .nvmrc at the repo root (Render's order: NODE_VERSION,
+    # .node-version, .nvmrc, engines), so it matches local and CI.
+    # --include=dev: NODE_ENV=production would otherwise skip Vite, a devDependency.
+    buildCommand: npm --prefix agent-client ci --include=dev && npm --prefix agent-client run build && npm --prefix server ci --omit=dev
+    startCommand: npm --prefix server start
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    # A preview instance per pull request; it copies the base service's env.
+    previews:
+      generation: automatic
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Set in the dashboard when the Blueprint is created; never in the repo.
+      # server/config.js refuses to start in production without it.
+      - key: GEMINI_API_KEY
+        sync: false

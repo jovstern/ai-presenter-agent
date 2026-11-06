@@ -330,8 +330,9 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   (`MAX_SNAPSHOT_NODES` in `bridge.js`) comes to roughly 3–3.5 kB, inside the 4 kB budget. The cap
   and the 0.6 full-refresh ratio were kept, but these pages never reach the cap or a large delta,
   so neither is stressed. A real, larger page is the test that's still missing.
-- **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
-  and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and AudioWorklet need a
+- **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
+  `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
+  T1, and the service itself goes live in M8 T3. `getUserMedia` and AudioWorklet need a
   secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Talk now stops
   before opening a session and the card says "Voice needs a secure connection (https)…"
   (`voiceSupportError()` in `audioIO.js`; code-review-notes L6). Of the two `crypto.randomUUID`

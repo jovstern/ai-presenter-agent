@@ -2,17 +2,30 @@ import 'dotenv/config';
 import { GoogleGenAI } from '@google/genai';
 import pino from 'pino';
 import { createApp } from './app.js';
+import { ConfigError, loadConfig } from './config.js';
 import { createGeminiMint } from './geminiMint.js';
 
 // The process half of the server: env, listen and a graceful shutdown.
 // Everything testable lives in app.js and geminiMint.js.
 
-// JSON lines on stdout, which is what Render's log viewer reads.
-const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
-const PORT = Number(process.env.PORT) || 3000;
 const SHUTDOWN_GRACE_MS = 10_000;
 
-const apiKey = process.env.GEMINI_API_KEY;
+/** @type {import('./config.js').Config} */
+let config;
+try {
+  config = loadConfig(process.env);
+} catch (err) {
+  if (!(err instanceof ConfigError)) throw err;
+  // Before the logger exists (LOG_LEVEL is part of what failed to parse), and
+  // the message names variables only, never a value.
+  process.stderr.write(`${err.message}\n`);
+  process.exit(1);
+}
+
+// JSON lines on stdout, which is what Render's log viewer reads.
+const logger = pino({ level: config.logLevel });
+
+const apiKey = config.geminiApiKey;
 if (!apiKey) logger.warn('GEMINI_API_KEY is not set; /api/live-token will answer not_configured');
 
 const app = createApp({
@@ -20,11 +33,12 @@ const app = createApp({
     ? createGeminiMint(new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1alpha' } }))
     : undefined,
   logger,
-  production: process.env.NODE_ENV === 'production',
+  production: config.production,
+  trustProxyHops: config.trustProxyHops,
 });
 
-const server = app.listen(PORT, () => {
-  logger.info({ url: `http://localhost:${PORT}` }, 'server listening');
+const server = app.listen(config.port, () => {
+  logger.info({ url: `http://localhost:${config.port}` }, 'server listening');
 });
 
 // Render sends SIGTERM on every deploy and restart: stop accepting new

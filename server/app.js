@@ -33,6 +33,8 @@ import { createExpiringMap } from './expiringMap.js';
  * @property {() => number} [now] Epoch ms; injected so tests control expiry.
  * @property {Logger} logger
  * @property {boolean} [production] Adds HSTS and upgrade-insecure-requests.
+ * @property {number} [trustProxyHops] Express `trust proxy` hop count; 0 (the
+ *   default) ignores X-Forwarded-* entirely.
  * @property {Partial<typeof DEFAULT_LIMITS>} [limits]
  */
 
@@ -267,7 +269,14 @@ function createRateLimiter({ max, windowMs, maxClients, now }) {
 }
 
 /** @param {AppOptions} options */
-export function createApp({ mintToken, now = Date.now, logger, production = false, limits }) {
+export function createApp({
+  mintToken,
+  now = Date.now,
+  logger,
+  production = false,
+  trustProxyHops = 0,
+  limits,
+}) {
   const { rateLimitMax, pageRateLimitMax, rateLimitWindowMs, nonceTtlMs, maxNonces, maxClients } = {
     ...DEFAULT_LIMITS,
     ...limits,
@@ -320,6 +329,14 @@ export function createApp({ mintToken, now = Date.now, logger, production = fals
 
   const app = express();
   app.disable('x-powered-by');
+  // Behind Render's TLS-terminating proxy (ADR 0003) the socket is plain http
+  // from the proxy's address. Trusting its hop makes req.protocol https (from
+  // X-Forwarded-Proto), so isSameOrigin matches the page's https Origin or
+  // Referer, and makes req.ip the client (the last X-Forwarded-For entry),
+  // so each viewer gets their own bucket in both rate limiters instead of
+  // all sharing the proxy's. Off locally: there a client could otherwise
+  // pick its own bucket with a forged X-Forwarded-For.
+  app.set('trust proxy', trustProxyHops);
 
   app.use(
     pinoHttp({

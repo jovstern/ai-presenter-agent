@@ -29,6 +29,7 @@ sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + 
 agent-client/    npm package: the React app built into a single script, mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
                  with a CSP and security headers (helmet), JSON request logs (pino), /health
+render.yaml      the Render Blueprint (see Deploy)
 ```
 
 Two npm packages (`agent-client`, `server`), two static directories (`sandbox`, `target-app`),
@@ -69,6 +70,33 @@ in advance; they stay in your browser's `localStorage`.
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
 and starts the server in one step.
 
+The server reads its env once at startup (`server/config.js`, Zod): `PORT` (default 3000),
+`GEMINI_API_KEY`, `NODE_ENV` (`development`, `production` or `test`), `LOG_LEVEL` (a pino
+level, default `info`) and `TRUST_PROXY_HOPS` (default 1 in production, 0 otherwise). A bad
+value stops it with a message naming the variable (never its value). Without a key it still
+starts locally and the card offers Try again; with `NODE_ENV=production` a missing key stops
+it, so a deploy without one fails instead of going live broken.
+
+## Deploy (Render)
+
+`render.yaml` is a Render Blueprint ([ADR 0003](docs/adr/0003-hosting-on-render.md)): one free
+Node web service that builds agent-client, installs the server's production dependencies and
+runs `npm --prefix server start`, with `NODE_ENV=production`, a `/health` check and a preview
+instance per pull request. Node comes from `.nvmrc`.
+
+1. In the Render dashboard: **New → Blueprint**, pick this repository; Render reads
+   `render.yaml`.
+2. When it asks for `GEMINI_API_KEY` (`sync: false`, so it never lives in the repo), paste the
+   key, then create. Render says a pull request preview copies its base service's env vars,
+   so previews get the key too (to confirm on the first preview).
+3. Open the service's `onrender.com` URL. The free plan sleeps when idle, so the first visit
+   after a while takes about 30 s.
+
+Behind Render's TLS proxy the server trusts one proxy hop (`trust proxy`), so the token
+route's same-origin check sees `https` and both rate limiters see each viewer's own IP. If the
+deployed `X-Forwarded-For` turns out to carry more hops, set `TRUST_PROXY_HOPS` instead of
+changing code.
+
 ## Test
 
 ```bash
@@ -88,7 +116,7 @@ npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capt
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 3 files, 54 tests
+npm test        # vitest + supertest: 4 files, 76 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -217,6 +245,8 @@ How to run it, what each number means and the current baseline: `docs/metrics/RE
 
 The suite in `server/__tests__/`:
 
+- `config.test.js` — `loadConfig`: the defaults, every variable, blank means unset, a missing
+  key fatal in production only, each bad variable named, none of the values echoed.
 - `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
   gate (403 cross-origin or with no Origin/Referer, 400 malformed nonce, 403 unknown or expired
   nonce, 429 past the limit, a JSON `not_configured` 500 with no key or when Google rejects
@@ -226,7 +256,10 @@ The suite in `server/__tests__/`:
   with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
   otherwise), no inline script on any page, `errorPage` escaping its arguments, the CSP and other headers
   (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
-  nonce cap, and no nonce or token in the logs.
+  nonce cap, no nonce or token in the logs, and behind a proxy (`trustProxyHops: 1`): an https
+  Origin or Referer passes with `X-Forwarded-Proto: https`, two `X-Forwarded-For` clients get
+  separate buckets in both limiters, a forged first entry doesn't pick the bucket, and without
+  a trusted proxy `X-Forwarded-For` is ignored.
 - `expiringMap.test.js` — the TTL'd, size-capped map behind the nonce and rate-limit state.
 - `geminiMint.test.js` — the token config sent to `authTokens.create`: single use, the 60 s
   session window, locked to `liveModel.json`'s model only (`lockAdditionalFields: []`, ADR 0004).
