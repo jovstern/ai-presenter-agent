@@ -584,8 +584,19 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
   harness and `/api/live-token` stubs (4xx → failed, a close → reconnecting). There is no
   test hook in the production bundle.
 - Keyboard walk; axe in light and dark; 360, 768 and 1440 px.
-- Check the bundle against the 165 kB budget. A miss is fixed (for example with Radix
-  per-package imports) or brought to the user.
+- Check the bundle against the 180 kB budget (raised by the user on 2026-11-05, option A of
+  the M6 bundle breakdown in `docs/metrics/m06.md`). Radix Dialog is upgraded together with
+  Toast so the shared primitives are installed once. A miss is brought to the user.
+- Done: `e2e/widget.spec.js`, 7 tests. The demo is "widget demo: Talk, Live with the orb and
+  transcript, a lost connection, Retry" (the backoff's 56 s skipped with `page.clock`); the
+  card-state tests moved here from `loop.spec.js` (the pending Cancel, `not_configured` → Try
+  again, 403 → Reload page, now also pressed), plus the blocked mic and a 360 / 768 / 1440 px
+  loop (placement, keyboard walk, axe light and dark). `fakeLive.js` gained `sendAgentAudio`,
+  `TOKEN_OK` and `respondWith`.
+- The gap T5 found: the card and its toast region are `inert` while the knowledge dialog is
+  open (`AgentApp.jsx` owns the dialog's `open`), since Radix's `hideOthers` stops at the shadow
+  host; `AgentApp.test.jsx` and Chromium's accessibility tree in `widget.spec.js` cover it.
+- Bundle: 175.41 kB gzip, 4.59 kB under the 180 kB budget. Suite: 32 tests in ~14 s.
 
 *(medium, 12 min)*
 
@@ -648,6 +659,12 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - Every assessment item is done or filed as an issue.
 - The requirements checklist ✅/❌ and the time log are completed.
 - Propose kit calibration edits for `~/Mnt/portfolio/.claude`.
+- Accepted from the M7 re-review (round 2), fixed here, test first: `Transcript.jsx` `sync`
+  measures the content with `Math.ceil(getBoundingClientRect().height)` instead of the
+  rounded `offsetHeight`, so fractional heights can't overflow by under 1 px (a stray Tab
+  stop and top fade).
+- Bundle margin: M8's `web-vitals` import names only the metrics it reports (M7 left
+  3.3 kB under the 180 kB budget; `docs/metrics/m07.md`).
 
 *(small, 6 min)*
 
@@ -680,6 +697,6 @@ What pushes it to the worst case:
 |---|---|---|---|
 | M4 | ~110 min | ~127 min (1.15×) | Real-browser checks in every task; a larger fix wave (6 Important, 2 Must fix, the LCP miss); two re-review rounds. Remaining milestones re-scaled by 1.15×: M5 ~175, M6 ~150, M7 ~115, M8 ~80 (~8.7 h). |
 | M5 | ~150 min (~175 re-scaled) | ~130 min (0.87×) | T1–T4 ran under estimate; T5's live runs took the planned ~45 min; two fix-wave rounds. A ~3 h usage-limit pause isn't counted. M4+M5 together: 257 vs 260 min, so the remaining estimates stay as written (M6 ~130, M7 ~100, M8 ~70). |
-| M6 | ~130 min | | |
+| M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min | | |
 | M8 | ~70 min | | |

@@ -23,15 +23,74 @@ const MAX_TOTAL_BYTES = 4 * 1024 * 1024;
 // Rules are meant to be short standing instructions, not a document.
 const MAX_RULES_CHARS = 2000;
 
+// The last parse, by the stored string it came from: while that string is
+// unchanged, every read returns the same array. KnowledgeModal reads the list
+// through useSyncExternalStore, which needs a stable snapshot (a fresh array
+// on each read would re-render forever). Callers never mutate it.
+let cachedRaw = /** @type {string | null | undefined} */ (undefined);
+let cachedFiles = /** @type {KnowledgeFile[]} */ ([]);
+
+// Storage the browser blocks (a privacy setting, a sandboxed frame) throws on
+// the first touch of `localStorage`, which inside useSyncExternalStore would
+// take the card down at mount: blocked reads as nothing stored.
+/**
+ * @param {string} key
+ * @returns {string | null}
+ */
+function readItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @param {string[]} names
+ */
+const isDomError = (error, names) => error instanceof DOMException && names.includes(error.name);
+
+// A write the browser refused, in words the dialog can show: storage blocked
+// outright (a privacy setting, a sandboxed frame: SecurityError) or full (the
+// origin's quota is shared, so it can fill under MAX_TOTAL_BYTES; Firefox
+// names it differently). Anything else is a bug, and is thrown.
+/**
+ * @param {unknown} error
+ * @param {'files' | 'rules'} what
+ * @returns {{ ok: false, reason: string }}
+ */
+function refusedWrite(error, what) {
+  if (isDomError(error, ['SecurityError'])) {
+    return fail(`This browser isn't letting the site save ${what}`);
+  }
+  if (isDomError(error, ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'])) {
+    return fail('Browser storage is full. Remove a file to make room');
+  }
+  throw error;
+}
+
 // A value that fails to parse, or isn't an array, reads as empty: a non-array
 // (written by another script on this origin, or by hand) used to reach
 // totalBytes' reduce and throw inside useSyncExternalStore.
 /** @returns {KnowledgeFile[]} */
 function readFiles() {
+  const raw = readItem(FILES_KEY);
+  if (raw === cachedRaw) return cachedFiles;
+  cachedRaw = raw;
+  cachedFiles = parseFiles(raw);
+  return cachedFiles;
+}
+
+/**
+ * @param {string | null} raw
+ * @returns {KnowledgeFile[]}
+ */
+function parseFiles(raw) {
   /** @type {unknown} */
   let parsed;
   try {
-    parsed = JSON.parse(localStorage.getItem(FILES_KEY) ?? '[]');
+    parsed = JSON.parse(raw ?? '[]');
   } catch {
     return [];
   }
@@ -86,12 +145,11 @@ export function totalBytes() {
   return readFiles().reduce((sum, f) => sum + f.size, 0);
 }
 
-export function fileCount() {
-  return readFiles().length;
-}
-
 // Resolves ok({ file }) or fail(reason). Refuses outright on a rejected
-// extension or an over-cap size — no silent failure, no truncation.
+// extension or an over-cap size — no silent failure, no truncation — and
+// says so, in words the dialog can show, when the browser refuses: a file it
+// can't read (moved or deleted since it was picked), or a write it won't
+// make (refusedWrite).
 /**
  * @param {File} file
  * @returns {Promise<StoreResult<{ file: KnowledgeFile }>>}
@@ -108,7 +166,13 @@ export async function addFile(file) {
     );
   }
 
-  const text = await file.text();
+  let text;
+  try {
+    text = await file.text();
+  } catch (error) {
+    if (!isDomError(error, ['NotReadableError'])) throw error;
+    return fail("The file couldn't be read. Check that it still exists, then add it again");
+  }
   const entry = {
     id: newId(),
     name: file.name,
@@ -116,17 +180,29 @@ export async function addFile(file) {
     addedAt: Date.now(),
     text,
   };
-  writeFiles([...files, entry]);
+  try {
+    writeFiles([...files, entry]);
+  } catch (error) {
+    return refusedWrite(error, 'files');
+  }
   return ok({ file: entry });
 }
 
-/** @param {string} id */
+/**
+ * @param {string} id
+ * @returns {StoreResult}
+ */
 export function removeFile(id) {
-  writeFiles(readFiles().filter((f) => f.id !== id));
+  try {
+    writeFiles(readFiles().filter((f) => f.id !== id));
+  } catch (error) {
+    return refusedWrite(error, 'files');
+  }
+  return ok({});
 }
 
 export function getRules() {
-  return localStorage.getItem(RULES_KEY) ?? '';
+  return readItem(RULES_KEY) ?? '';
 }
 
 // Returns ok({}) or fail(reason).
@@ -138,7 +214,11 @@ export function setRules(text) {
   if (text.length > MAX_RULES_CHARS) {
     return fail(`Rules must be ${MAX_RULES_CHARS} characters or fewer`);
   }
-  localStorage.setItem(RULES_KEY, text);
+  try {
+    localStorage.setItem(RULES_KEY, text);
+  } catch (error) {
+    return refusedWrite(error, 'rules');
+  }
   window.dispatchEvent(new Event(CHANGE_EVENT));
   return ok({});
 }

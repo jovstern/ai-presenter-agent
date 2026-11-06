@@ -1,0 +1,716 @@
+/*
+ * The agent card's one stylesheet ("quiet floating card", spec Design tokens).
+ * main.jsx imports it with Vite's `?inline` and puts it in the shadow root as a
+ * single <style>, so the IIFE build stays one file (docs/code-review-notes.md L7)
+ * and the CSP's `style-src 'unsafe-inline'` covers it (server/app.js).
+ *
+ * Tokens live on :host and are redefined for the dark theme; components use
+ * tokens only, never raw values. Every text/background pair is WCAG AA in both
+ * themes (contrast ratios beside each colour, against the surface).
+ */
+
+/*
+ * The host element is positioned here, not with an inline style: the card's
+ * width changes at the 400 px breakpoint, which only a media query can say,
+ * and keeping it beside the tokens leaves one place to read the layout. The
+ * only stylesheet that could override a :host rule is the embedding page's own
+ * (the target app is in an iframe, another document), and that page is ours.
+ *
+ * `all: initial` keeps the host page's inherited styles out; the declarations
+ * after it win over it. `display: block` makes the host a real box rather than
+ * relying on the card's own positioning (L4), and `position`/`z-index` sit on
+ * the host, the element that takes part in the page's stacking (L3). The
+ * z-index is just under the 32-bit maximum, so the card stays above a page's
+ * own overlays while leaving browser-extension UI room above it.
+ */
+:host {
+  all: initial;
+  display: block;
+  position: fixed;
+  right: var(--gutter);
+  bottom: var(--gutter);
+  z-index: 2147483000;
+  width: var(--card-width);
+  color-scheme: light dark;
+
+  /* Type: system-ui; scale 12 / 14 / 16 / 20. */
+  --font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --text-xs: 12px;
+  --text-sm: 14px;
+  --text-md: 16px;
+  --text-lg: 20px;
+  --leading-body: 1.5;
+  --leading-tight: 1.2;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Spacing: 4 / 8 / 12 / 16 / 24. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* Layout. The breakpoint (400px) is repeated in the media query below:
+     custom properties can't be used in a media condition. */
+  --gutter: var(--space-4);
+  --card-width: 344px; /* "Talk to the presenter" on one line, with room for wider system fonts */
+  --dialog-width: 360px;
+  --control-height: 44px;
+  --transcript-height: 192px; /* 8 lines of transcript text */
+
+  /* Shape. */
+  --radius-card: 12px;
+  --radius-control: 8px;
+  --border-width: 1px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* Motion: state changes only, plus the pending spinner's turn (which
+     reduced motion stops, below, rather than zeroing). */
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-spin: 900ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Colour, light theme (contrast on --color-surface). */
+  --color-surface: #ffffff;
+  --color-surface-raised: #f4f4f5; /* hover fill; text on it 16.1:1 */
+  --color-text: #18181b; /* 17.7:1 */
+  --color-text-muted: #52525b; /* 7.7:1 */
+  --color-border: #e4e4e7; /* hairline around the card, decorative */
+  --color-border-strong: #71717a; /* control boundaries, 4.8:1 (non-text ≥ 3:1) */
+  --color-accent: #4f46e5; /* 6.3:1, also the focus ring */
+  --color-accent-hover: #4338ca;
+  --color-on-accent: #ffffff; /* on accent 6.3:1, on hover 7.9:1 */
+  --color-danger: #b3261e; /* 6.5:1 */
+  --color-focus: var(--color-accent);
+  --color-overlay: rgb(24 24 27 / 0.5);
+  --shadow-card: 0 1px 2px rgb(24 24 27 / 0.06), 0 8px 24px rgb(24 24 27 / 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :host {
+    /* Colour, dark theme (contrast on --color-surface). */
+    --color-surface: #18181b;
+    --color-surface-raised: #27272a; /* text on it 13.6:1, muted 5.8:1 */
+    --color-text: #f4f4f5; /* 16.1:1 */
+    --color-text-muted: #a1a1aa; /* 6.9:1 */
+    --color-border: #3f3f46;
+    --color-border-strong: #a1a1aa; /* 6.9:1 */
+    --color-accent: #818cf8; /* 5.9:1 */
+    --color-accent-hover: #a5b4fc;
+    --color-on-accent: #18181b; /* on accent 5.9:1, on hover 8.9:1 */
+    /* The light theme's #b3261e is 2.7:1 here, so dark gets its own red. */
+    --color-danger: #f87171; /* 6.4:1 */
+    --color-overlay: rgb(0 0 0 / 0.6);
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
+  }
+}
+
+/* Phones: the card spans the width, a gutter each side (spec Screens). */
+@media (max-width: 400px) {
+  :host {
+    left: var(--gutter);
+    width: auto;
+  }
+}
+
+/* No motion at all under reduced motion: the durations collapse to zero, and
+   anything not written with the tokens is stopped too. */
+@media (prefers-reduced-motion: reduce) {
+  :host {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- Base ---------------------------------------------------------------- */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+button,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  min-width: var(--control-height);
+  padding: 0 var(--space-4);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+button:hover {
+  background: var(--color-surface-raised);
+}
+
+button:active {
+  border-color: var(--color-text);
+}
+
+:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* Read by screen readers, not shown (the knowledge button's name). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---- The card ------------------------------------------------------------ */
+
+/*
+ * Three columns: the orb, the primary button, the knowledge button. The
+ * transcript spans them above; the status line and the error lines under the
+ * buttons are a caption aligned with the primary button, not the orb.
+ */
+.agent-app {
+  position: relative; /* holds the empty transcript region */
+  display: grid;
+  grid-template-columns: var(--control-height) minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+/*
+ * The volume orb (VolumeOrb.jsx): a core dot, a filled halo that follows the
+ * agent's voice (--level) and an outline ring that follows the mic
+ * (--mic-level), the user's colour as in the transcript. VolumeOrb writes the
+ * two variables on every animation frame while the session is open; only
+ * transform and opacity change, so a frame repaints no layout. At rest (idle,
+ * connecting, failed) the core is grey and the rings are hidden. Open under
+ * reduced motion, no loop runs and the variables are unset: the fallbacks
+ * below draw the halo at a static level.
+ */
+.volume-orb {
+  --orb-core: var(--color-border-strong);
+  position: relative;
+  flex: none;
+  width: var(--control-height);
+  height: var(--control-height);
+  /* The core: a 40%-radius dot (about 18 px), drawn without another layer. */
+  background: radial-gradient(circle closest-side, var(--orb-core) 40%, transparent 42%);
+}
+
+.volume-orb::before,
+.volume-orb::after {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+}
+
+.volume-orb::before {
+  inset: 0;
+  background: var(--color-accent);
+}
+
+.volume-orb::after {
+  inset: var(--space-1);
+  border: var(--focus-ring-width) solid var(--color-text-muted);
+}
+
+.volume-orb[data-active='true'] {
+  --orb-core: var(--color-accent);
+}
+
+.volume-orb[data-active='true']::before {
+  opacity: calc(0.12 + var(--level, 0.4) * 0.3);
+  transform: scale(calc(0.55 + var(--level, 0.4) * 0.45));
+}
+
+.volume-orb[data-active='true']::after {
+  opacity: var(--mic-level, 0);
+  transform: scale(calc(0.6 + var(--mic-level, 0) * 0.4));
+}
+
+/* The one primary action takes the row; the knowledge button sits beside it.
+   Its label never wraps ("Talk to the presenter" fits at 320 px, below). */
+.agent-app__primary {
+  margin-bottom: var(--space-1);
+  white-space: nowrap;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.agent-app__primary:hover {
+  border-color: var(--color-accent-hover);
+  background: var(--color-accent-hover);
+}
+
+/* Connecting: a ring spins before the label (Cancel). Under reduced motion it
+   stays as a still, open ring, which still reads as "in progress". */
+.agent-app__primary[data-pending]::before {
+  content: '';
+  flex: none;
+  width: var(--text-md);
+  height: var(--text-md);
+  border: var(--focus-ring-width) solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin var(--duration-spin) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.agent-app__knowledge-btn {
+  margin-bottom: var(--space-1);
+  padding: 0 var(--space-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.agent-app__knowledge-icon {
+  flex: none;
+}
+
+/* No knowledge yet: a dashed outline hints there is something to add, without
+   using a status colour for it. */
+.agent-app__knowledge-btn--empty {
+  border-style: dashed;
+}
+
+/* The narrowest phones (320 px): a tighter card, so the primary button keeps
+   "Talk to the presenter" on one line beside the orb and the knowledge button. */
+@media (max-width: 340px) {
+  .agent-app {
+    padding: var(--space-3);
+  }
+
+  .agent-app__primary,
+  .agent-app__knowledge-btn {
+    padding: 0 var(--space-2);
+  }
+}
+
+/* The caption under the buttons: a line each, aligned with the primary button. */
+.agent-app__status,
+.agent-app__error,
+.agent-app__mic-error {
+  grid-column: 2 / -1;
+}
+
+.agent-app__status {
+  color: var(--color-text-muted);
+}
+
+/* Failed is the state to act on: its headline in the text colour, medium
+   weight, above the reason in the danger colour. */
+.agent-app__status[data-status='failed'] {
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.agent-app__error,
+.agent-app__mic-error {
+  margin: 0;
+  color: var(--color-danger);
+}
+
+/* Held while the toast says the reason: the space stays, so the card doesn't
+   grow, and Retry doesn't move, when the toast closes. */
+.agent-app__error[data-held] {
+  visibility: hidden;
+}
+
+/*
+ * The transcript (Transcript.jsx), the card's first row. While a session runs,
+ * or once it has lines, the box has a fixed height, so a new line never moves
+ * the card's top edge (a layout shift, docs/metrics/m07.md); the list flows
+ * top-down inside it, and Transcript.jsx scrolls it to the newest line. An
+ * edge a line is cut at fades out (data-fade-top / -bottom, set while
+ * scrolled), so no line looks sliced. The mask would fade a focus ring on the
+ * box too, so the ring is drawn on the unmasked wrapper around it.
+ */
+.transcript {
+  grid-column: 1 / -1;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-control);
+}
+
+/* Idle and empty, it stays in the page as a live region but out of the card's
+   flow, so it adds no row and no gap. */
+.transcript:not([data-reserved]) {
+  position: absolute;
+}
+
+.transcript:has(> .transcript__box:focus-visible) {
+  outline: var(--focus-ring-width) solid var(--color-focus);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.transcript__box {
+  --fade-top: 0px;
+  --fade-bottom: 0px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-bottom)),
+    transparent
+  );
+}
+
+.transcript__box:focus-visible {
+  outline: none;
+}
+
+.transcript[data-reserved] .transcript__box {
+  height: var(--transcript-height);
+}
+.transcript__box[data-fade-top] {
+  --fade-top: var(--space-5);
+}
+
+.transcript__box[data-fade-bottom] {
+  --fade-bottom: var(--space-5);
+}
+
+.transcript__placeholder {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.transcript__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+  /* Greedy wrapping, not `pretty`: the text streams in a word at a time, and
+     pretty rebalances the last lines on each word, moving words already shown
+     between lines (layout shifts, e2e/widget.spec.js). */
+}
+
+.transcript__entry + .transcript__entry {
+  margin-top: var(--space-2);
+}
+
+/* User turns are distinct by colour and style both, not colour alone; the
+   speaker is named for assistive tech by a hidden prefix. */
+.transcript__entry[data-role='user'] {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---- The knowledge dialog ------------------------------------------------ */
+
+.knowledge-modal__overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-overlay);
+}
+
+/*
+ * Anchored by its top edge, not centred: adding a file or an error grows it
+ * downward instead of moving the title and the field being used. dvh follows
+ * a phone's collapsing browser bars; the vh line before it is the fallback.
+ * No bottom padding: the sticky footer brings its own.
+ */
+.knowledge-modal__content {
+  position: fixed;
+  top: 8vh;
+  top: 8dvh;
+  left: 50%;
+  width: min(var(--dialog-width), calc(100vw - 2 * var(--gutter)));
+  max-height: 84vh;
+  max-height: 84dvh;
+  padding: var(--space-5) var(--space-5) 0;
+  overflow-y: auto;
+  transform: translateX(-50%);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.knowledge-modal__content h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
+}
+
+.knowledge-modal__content p {
+  margin: 0;
+  color: var(--color-text-muted);
+  text-wrap: pretty;
+}
+
+/* Add files: a real button (keyboard and pointer), and the drop target. */
+.knowledge-modal__dropzone {
+  flex-direction: column;
+  gap: 0;
+  width: 100%;
+  margin: var(--space-4) 0;
+  padding: var(--space-4);
+  border-style: dashed;
+  text-align: center;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+/* Its two lines are text only, so dragging over them isn't a dragleave. */
+.knowledge-modal__dropzone > span {
+  pointer-events: none;
+}
+
+.knowledge-modal__dropzone-hint {
+  color: var(--color-text-muted);
+  font-weight: var(--weight-regular);
+}
+
+.knowledge-modal__dropzone[data-dragging] {
+  border-color: var(--color-accent);
+  background: var(--color-surface-raised);
+}
+
+.knowledge-modal__content .knowledge-modal__error {
+  margin: 0 0 var(--space-3);
+  color: var(--color-danger);
+}
+
+.knowledge-modal__content .knowledge-modal__empty {
+  margin-bottom: var(--space-4);
+}
+
+.knowledge-modal__files {
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+/* Name, size, then Remove at the row's end. */
+.knowledge-modal__files li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.knowledge-modal__files li + li {
+  margin-top: var(--space-1);
+}
+
+.knowledge-modal__file-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.knowledge-modal__file-size {
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Quiet: no border or fill until hovered, so a long list isn't a column of
+   buttons. The hit area stays 44 × 44 px (the base button rule). */
+.knowledge-modal__remove {
+  padding: 0 var(--space-3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.knowledge-modal__remove:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
+.knowledge-modal__rules-label {
+  display: block;
+  color: var(--color-text);
+  font-weight: var(--weight-medium);
+}
+
+.knowledge-modal__rules {
+  display: block;
+  width: 100%;
+  min-height: 72px;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  font-weight: var(--weight-regular);
+  resize: vertical;
+}
+
+.knowledge-modal__rules[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+/* Used / limit, under the field's end edge. */
+.knowledge-modal__content .knowledge-modal__counter {
+  margin: var(--space-1) 0 var(--space-2);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+/* Over the limit: the danger colour, and the alert below says it in words. */
+.knowledge-modal__content .knowledge-modal__counter[data-over] {
+  color: var(--color-danger);
+}
+
+/* Stuck to the bottom of the scrolling dialog, full width across its padding,
+   on the surface colour so the content scrolls under it. */
+.knowledge-modal__footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin: var(--space-2) calc(-1 * var(--space-5)) 0;
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
+}
+
+/* ---- The failure toast --------------------------------------------------- */
+
+/*
+ * Radix's toast viewport (AgentApp.jsx), in the shadow root beside the card.
+ * The host is position: fixed, so it is the containing block: the viewport
+ * sits just above the card, as wide as it, and a toast never covers the
+ * primary button. Empty, it has no height (Radix also turns its pointer
+ * events off), so it blocks nothing on the page.
+ */
+.toast-viewport {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+}
+
+/* The reason and Dismiss, on one row. A danger edge marks it as a failure,
+   and the words say so too. */
+.toast {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-left: var(--space-1) solid var(--color-danger);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+/* It slides in, and goes at once: when Retry leaves `failed`, the reason it
+   shows is already gone, so a fade-out would show an empty toast. */
+.toast[data-state='open'] {
+  animation: toast-in var(--duration-base) var(--ease-out);
+}
+
+/* Swipe right to dismiss (Radix's default direction). */
+.toast[data-swipe='move'] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+
+.toast[data-swipe='cancel'] {
+  transform: translateX(0);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.toast[data-swipe='end'] {
+  animation: toast-swipe-out var(--duration-fast) var(--ease-out) forwards;
+}
+
+.toast__title {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.toast__close {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+
+@keyframes toast-swipe-out {
+  from {
+    transform: translateX(var(--radix-toast-swipe-end-x));
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}

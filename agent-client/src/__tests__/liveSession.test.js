@@ -1480,6 +1480,30 @@ describe('createLiveSession: loop guard', () => {
       ).toBeGreaterThan(order);
     });
 
+    it('drops a held corrective when the user speaks before the batch is answered', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      let finishClick;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finishClick = resolve)),
+      );
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [{ id: 'c', name: 'click', args: { selector: 'b' } }] },
+      });
+      await flush();
+      for (let i = 0; i < 3; i += 1) say(call, LINE);
+
+      // A new request ends the loop episode, so the nudge is no longer due.
+      call.params.callbacks.onmessage({
+        serverContent: { inputTranscription: { text: 'Open settings instead.' } },
+      });
+      finishClick({ success: true });
+      await flush();
+
+      expect(call.session.sendToolResponse).toHaveBeenCalledTimes(1);
+      expect(correctives(call)).toHaveLength(0);
+    });
+
     it('never sends a held corrective to the replacement session after a drop', async () => {
       const { liveSession, bridge } = setup();
       const first = await connectAndEstablish(liveSession);
@@ -1593,6 +1617,173 @@ describe('createLiveSession: the SDK order (messages before connect() resolves)'
     });
   });
 
+  // M6 re-review: a client turn between a function call and its response
+  // breaks the model's turn (the M5 navigate stall). The early batch starts
+  // first, and the knowledge and the greeting wait until it is answered.
+  describe('client turns around an early tool batch', () => {
+    const EARLY_CALL = {
+      toolCall: { functionCalls: [{ id: 'early', name: 'click', args: { selector: 'b' } }] },
+    };
+
+    /** A dispatch that waits for the returned function to be called. */
+    function holdDispatch(bridge) {
+      let finish;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finish = () => resolve({ success: true }))),
+      );
+      return () => finish();
+    }
+
+    const callOrder = (fn, i = 0) => fn.mock.invocationCallOrder[i];
+    const knowledgeTurns = (session) =>
+      session.sendClientContent.mock.calls
+        .map(([arg]) => String(arg.turns))
+        .filter((turns) => turns.startsWith('STRICT RULES'));
+
+    it('on a resume with changed knowledge, sends the knowledge only after the early call is answered', async () => {
+      setRules('Be brief.');
+      const { liveSession, bridge } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      setRules('Be very brief.');
+      await flush();
+      const resumed = live.calls.at(-1);
+      const finish = holdDispatch(bridge);
+
+      await establishInRealOrder(resumed, [EARLY_CALL]);
+      expect(bridge.dispatchAction).toHaveBeenCalledWith('click', ['b']);
+      expect(resumed.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      const { sendToolResponse, sendClientContent } = resumed.session;
+      expect(sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+      expect(callOrder(sendToolResponse)).toBeLessThan(callOrder(sendClientContent));
+    });
+
+    it('on a fresh session, sends the knowledge and then the greeting after the early call is answered', async () => {
+      setRules('Be brief.');
+      const { liveSession, bridge } = setup();
+      liveSession.connect();
+      await flush();
+      const call = live.calls[0];
+      const finish = holdDispatch(bridge);
+
+      await establishInRealOrder(call, [EARLY_CALL]);
+      expect(call.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      const { sendToolResponse, sendClientContent } = call.session;
+      expect(sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe brief.',
+        'Greet the user with a brief hello.',
+      ]);
+      expect(callOrder(sendToolResponse)).toBeLessThan(callOrder(sendClientContent));
+    });
+
+    it('holds a knowledge change made while a batch runs until the batch is answered, once', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      call.session.sendClientContent.mockClear();
+      const finish = holdDispatch(bridge);
+      call.params.callbacks.onmessage(EARLY_CALL);
+      await flush();
+
+      setRules('Be brief.');
+      setRules('Be very brief.');
+      expect(call.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      expect(call.session.sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+    });
+
+    // A handle restores the session as of when it was issued: one issued
+    // while a knowledge change waited behind a batch doesn't hold it, so a
+    // resume with that handle sends the knowledge again.
+    it('resends the knowledge on a resume whose handle was issued while the change was held', async () => {
+      setRules('Be brief.');
+      const { liveSession, bridge } = setup();
+      const first = await connectAndEstablish(liveSession);
+      const finish = holdDispatch(bridge);
+      first.params.callbacks.onmessage(EARLY_CALL);
+      await flush();
+      setRules('Be very brief.'); // held behind the batch
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      finish();
+      await flush();
+      expect(knowledgeTurns(first.session).at(-1)).toBe(
+        'STRICT RULES (must always follow):\nBe very brief.',
+      );
+
+      drop(first);
+      await vi.advanceTimersByTimeAsync(1_000);
+      const resumed = live.calls.at(-1);
+      await establish(resumed);
+      expect(resumed.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+      expect(knowledgeTurns(resumed.session)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+    });
+
+    it('sends turns of different kinds held by one batch in the order first held', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      call.session.sendClientContent.mockClear();
+      const finish = holdDispatch(bridge);
+      call.params.callbacks.onmessage(EARLY_CALL);
+      await flush();
+
+      // The same sentence three turns running: a corrective, held first.
+      for (let i = 0; i < 3; i += 1) {
+        call.params.callbacks.onmessage({
+          serverContent: { outputTranscription: { text: 'Let me show you the settings page.' } },
+        });
+        call.params.callbacks.onmessage({ serverContent: { turnComplete: true } });
+      }
+      setRules('Be brief.'); // then the knowledge,
+      setRules('Be very brief.'); // replaced in its place
+      expect(call.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      const sent = call.session.sendClientContent.mock.calls.map(([arg]) => String(arg.turns));
+      expect(sent).toHaveLength(2);
+      expect(sent[0]).toMatch(/repeating yourself/i);
+      expect(sent[1]).toBe('STRICT RULES (must always follow):\nBe very brief.');
+    });
+
+    it('never sends a held greeting into the replacement session after a drop', async () => {
+      const { liveSession, bridge } = setup();
+      liveSession.connect();
+      await flush();
+      const call = live.calls[0];
+      const finish = holdDispatch(bridge);
+      await establishInRealOrder(call, [EARLY_CALL]);
+
+      drop(call);
+      await flush();
+      const replacement = live.calls.at(-1);
+      await establish(replacement);
+      finish();
+      await flush();
+
+      expect(greetings(call.session)).toHaveLength(0);
+      // The replacement is a fresh session (no handle) and greets for itself, once.
+      expect(greetings(replacement.session)).toHaveLength(1);
+    });
+  });
+
   it('drops a queued tool call whose connect() was superseded', async () => {
     const { liveSession, bridge } = setup();
     liveSession.connect();
@@ -1674,5 +1865,38 @@ describe('createLiveSession: the loop guard across requests', () => {
       /repeating yourself/i.test(String(arg.turns)),
     );
     expect(correctives).toHaveLength(0);
+  });
+});
+
+describe('createLiveSession: transcription', () => {
+  it('forwards each fragment with its role, then a turn end on turnComplete and on interrupted', async () => {
+    const events = [];
+    const liveSession = createLiveSession({
+      bridge: fakeBridge(),
+      nonce: 'page-nonce',
+      onTranscript: (fragment) => events.push(fragment),
+      onTurnEnd: () => events.push('end'),
+    });
+    created.push(liveSession);
+    const call = await connectAndEstablish(liveSession);
+    const send = (serverContent) => call.params.callbacks.onmessage({ serverContent });
+
+    send({ inputTranscription: { text: 'Go to settings.' } });
+    send({ outputTranscription: { text: 'Navigating' } });
+    // A fragment and the turn's end in one message: the fragment comes first.
+    send({ outputTranscription: { text: ' now.' }, turnComplete: true });
+    send({ outputTranscription: { text: 'Next I' } });
+    send({ interrupted: true });
+    // No turn end for content that ends nothing.
+    send({ modelTurn: { parts: [] } });
+
+    expect(events).toEqual([
+      { role: 'user', text: 'Go to settings.' },
+      { role: 'agent', text: 'Navigating' },
+      { role: 'agent', text: ' now.' },
+      'end',
+      { role: 'agent', text: 'Next I' },
+      'end',
+    ]);
   });
 });

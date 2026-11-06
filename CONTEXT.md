@@ -76,6 +76,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`).
+- **Client turn** — anything the agent-client tells the model as content rather than as a tool
+  response: the knowledge context, the greeting, the loop's corrective turn. None is sent while
+  a tool batch runs: each is **held** (one per kind) until the batch's last response, since the
+  model takes a turn between a function call and its response as the user talking over it
+  (`sendTurn` in `liveSession.js`).
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
   **action signature** (tool name + normalised arguments) that is the 4th identical one in a
   row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
@@ -90,6 +95,27 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   `/agent-client/capture-worklet.js`. It low-passes, resamples to 16 kHz, converts to Int16 and
   posts one **frame** (80 ms, 1280 samples) at a time; `audioIO.js` base64-encodes each frame
   for the session (`pcm.js`).
+- **Level** — how loud the agent's voice (the **output level**, from an `AnalyserNode` on
+  playback) or the mic (the **mic level**, from the last frame) is right now, 0..1 on a 60 dB
+  scale (`pcm.js` `levelOf`). Pulled with `getLevel()` (`audioIO.js`), never pushed as events.
+- **Volume orb** — the card's decorative orb (`agent-client/src/VolumeOrb.jsx`): while the
+  session is open, a `requestAnimationFrame` loop writes the two levels to CSS variables
+  (`--level`, `--mic-level`) on its node, and its rings follow them — with no React render per
+  frame (**render isolation**, `renderIsolation.test.jsx`).
+- **Transcript entry** — one speaker's consecutive speech on the card: the **transcription
+  fragments** Live streams (a few words each, `onTranscript`) merged until the other speaker
+  talks (`agent-client/src/transcript.js`). Within a turn fragments join verbatim; a turn end
+  (`turnComplete` or `interrupted`, `onTurnEnd`) followed by the same speaker continues the entry
+  after one space. The list keeps 20 entries, all in the card's scrolling transcript box (`Transcript.jsx`).
+- **Primary button** — the card's one action, never disabled so focus stays on it: Talk to the
+  presenter, a **pending** Cancel while connecting, End while live or reconnecting, then Retry,
+  Try again or Reload page on `failed` (`AgentApp.jsx`).
+- **Failure toast** — the Radix toast shown once per `failed` report (`failureCount` in
+  `useLiveAgent.js`), above the card: the reason and Dismiss, no action of its own (the
+  primary button is the one Retry; `agent-client/src/FailureToast.jsx`). It is the one live
+  announcement of the reason; the card holds its own reason line while the toast is open (space
+  kept, hidden) and shows it, as plain text, once the toast closes. Mic or voice-support problems get the card's
+  alert instead of a toast.
 
 ## Knowledge
 

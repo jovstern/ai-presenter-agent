@@ -3,12 +3,11 @@
 > **Read this first (M4 T5):** the `file:line` references in the original items below
 > (`useLiveAgent.js:248`, `bridge.js:108`, `main.jsx:129`, …) predate the from-scratch rebuild and
 > point at deleted code. Each ticked item's "Fixed" note names where the fix lives on the current
-> code instead. Status at a glance (M6 fix wave): B1–B4, H1–H5, M1–M9, L1, L6 and L9–L12 are
-> done (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and
-> L10 in M6 T4; M9 in M6 T5; M6 and M9 refined in the fix wave). **Six items are still open:**
-> L2, L3, L4, L5, L7 and L8, unticked and marked "Deferred → M7 (issue #11, Tn)": each is a card
-> item the designed card replaces. The M4 and M5 re-review items accepted for M6 are fixed in M6
-> T6 (see B2, H1 and H5).
+> code instead. Status at a glance (M7 T3): every item is done — B1–B4, H1–H5, M1–M10, L1–L12
+> (H1 with the M5 T3 CSP; M1 and M5 in M6 T1; M6 in M6 T2; L1 and L6 in M6 T3; M7, M8 and L10
+> in M6 T4; M9 in M6 T5; M6 and M9 refined in the M6 fix wave; L3, L4 and L7 in M7 T1; L8 in M7
+> T2; M10, found in M7 T2, in M7 T2b; L2 (orb half in M7 T2) and L5 in M7 T3). The M4 and M5
+> re-review items accepted for M6 are fixed in M6 T6 (see B2, H1 and H5).
 
 > Reviewer's framing: this is a strong portfolio-grade rebuild with unusually honest docs. The
 > notes below are what a senior FE would raise in review **on top of** the gaps
@@ -489,7 +488,7 @@ list.
 > — clears it, so at most one retry is ever scheduled. There is no separate "retry now" path: the
 > hook's `retry` *is* `connect()`, which resets the attempts and supersedes any in-flight attempt
 > by generation, and the UI shows Retry only once the backoff has given up (`failed`); while
-> `reconnecting` the button is Disconnect, which cancels the pending retry.
+> `reconnecting` the button is End (Disconnect until M7 T4), which cancels the pending retry.
 
 `retryNow` (`useLiveAgent.js:279-282`) and `scheduleReconnect` both schedule `connect` via
 `setTimeout` without storing the handle. Tapping "Reconnect" while a backoff retry is already
@@ -582,6 +581,12 @@ a framework's controlled input needs it.
 > A tool call ends an utterance episode (`agentActed()`): narration before each step of one
 > request ("Clicking the increment button now." ×3) is no talk loop, and an action that really
 > repeats is the action rules' to catch. Only turns with no tool call between them count.
+>
+> M7 T4 (M6 re-review): the corrective now goes through `sendTurn`, which holds every client
+> turn while a batch runs. Known gap, noted in `loopGuard.js`'s header: the agent's voice
+> picked up by the mic is transcribed as the user and clears the action window. Gating
+> `userSpoke()` on length was not done: the 14 live-e2e transcripts show no echo and one real
+> 3-word request fragment a gate would have dropped.
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says
@@ -679,6 +684,47 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 > one the live session holds (`sentRevision`) and which one the newest handle captured
 > (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
 > while no session was up, or one sent into the session after its newest handle.
+>
+> M7 T4 (M6 re-review): a resume's knowledge (and a fresh session's greeting) no longer lands
+> between a tool call the server queued before `live.connect()` resolved and its response:
+> that early batch starts first, and every client turn waits for the batch's end (`sendTurn`,
+> `heldTurns`), a knowledge change mid-batch included. The revision is taken when the
+> knowledge is really sent. Tests: "client turns around an early tool batch".
+
+### [x] M10 — The React Compiler isn't running
+
+Found in M7 T2. `vite.config.js` passes the compiler as `react({ babel: { plugins:
+['babel-plugin-react-compiler'] } })`, but `@vitejs/plugin-react` 6 (in use since before M5)
+has no `babel` option and ignores it: the build and vitest compile JSX with oxc only, and
+`dist/agent-client.js` has no `react/compiler-runtime` cache. So nothing is memoized, while
+CLAUDE.md, the lint rule banning `useMemo`/`useCallback`/`memo` and the handoff's decisions log
+all assume it is. Correctness is unaffected (the compiler only memoizes); every card render
+re-renders the whole card. Two fixes, both a build-config change plus a dependency, so they
+wait for the user: plugin-react 6's own `reactCompilerPreset` through `@rolldown/plugin-babel`
+(+ `@babel/core`, the same Babel compiler as before), or its experimental native
+`compiler: true` (`oxc-transform-react`). Once it runs, `renderIsolation.test.jsx` can also
+assert the orb is skipped on a transcript line.
+
+Also found: the compiler (run by hand on the source) skipped `useLiveAgent.js` entirely
+because `connect()` called `disconnect()` before its declaration ("[PruneHoistedContexts]
+Rewrite hoisted function references", a Todo bailout). M7 T2 moved `disconnect()` above
+`connect()`; all five components and hooks now compile without a diagnostic.
+
+The volume orb doesn't depend on either: it reads its level sources through `useEffectEvent`,
+so a card render that hands it new getter functions never restarts its animation loop
+(`renderIsolation.test.jsx`).
+
+> Fixed in M7 T2b, the user's choice of the documented stable path: `agent-client/vite.config.js`
+> is `plugins: [react(), babel({ presets: [reactCompilerPreset()] })]` with
+> `@rolldown/plugin-babel` `0.2.4` (the newest in plugin-react 6.1.1's peer range) and
+> `@babel/core` `7.29.13`; the dead `babel` option is gone. The preset applies to client code,
+> vitest included. Proof: the bundle's memo caches now wrap our components (`VolumeOrb`'s JSX and
+> `AgentApp`'s `<VolumeOrb>` element sit behind `t[n]` cache checks; 19 cache-sentinel checks,
+> against react-dom's one before). A one-off build with `panicThreshold: 'all_errors'` passed:
+> no bail-out in any component or hook. `renderIsolation.test.jsx` now asserts that a transcript
+> line re-renders the card while the orb and the knowledge dialog are skipped, plus a canary (a
+> parent's state change leaves an unchanged child unrendered); with the plugin removed both
+> tests fail. Cost: 163.81 → 165.46 kB gzip (budget 180) and about 0.45 → 0.75 s per build.
 
 ---
 
@@ -694,29 +740,57 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   copies a view at an odd byte offset into a fresh aligned buffer and drops a trailing half
   sample instead of throwing. The per-frame Float32 → Int16 and resampling moved off the main
   thread into `public/capture-worklet.js`.*
-- [ ] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
+- [x] **L2** — `VolumeMeter` calls `Math.random()` every frame for the side bars, with no
   `prefers-reduced-motion` branch. It's also `aria-hidden`, so a screen-reader user gets no signal
   the agent is speaking — pair with B1's transcript to give one (`aria-live` on the transcript).
   *Deferred → M7 (issue #11, T2, T3): `VolumeMeter` didn't survive the rebuild; its
   successor, the volume orb (rAF, a `prefers-reduced-motion` branch), and the `aria-live`
   transcript are the designed card's work, not hardening → M7 (issue #11, T2 and T3).*
-- [ ] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
+  *Orb half fixed in M7 T2: `agent-client/src/VolumeOrb.jsx` draws real levels (the player's
+  `AnalyserNode` and the mic's last frame, `audioIO.js` `getLevel()`), no randomness; under
+  `prefers-reduced-motion` it runs no animation loop at all (followed live through
+  `matchMedia`) and `styles.css` holds the rings at a static level. It stays `aria-hidden`: the
+  card's `role="status"` line says "Live". The `aria-live` transcript is T3, which ticks this.*
+  *Transcript half fixed in M7 T3: `agent-client/src/Transcript.jsx` renders the last 3 turns in
+  an `aria-live="polite"` list with `aria-relevant="additions"` and `aria-atomic="false"`; each
+  transcription fragment is its own appended node, so a screen reader hears each turn once, as it
+  arrives, prefixed "Presenter:" or "You:" (visually hidden), never the growing sentence re-read
+  per fragment (`Transcript.test.jsx`; axe-clean connected, `e2e/a11y.spec.js`).*
+- [x] **L3** — z-index escalation `999999 → 1000002` (`main.jsx`) inside a shadow root whose host
   has no `z-index` or positioning isn't robust against a target-app that creates its own stacking
   context. Set `z-index` (and `position`) on the host element, not just inside.
   *Deferred → M7 (issue #11, T1): today's card has no z-index at all; host positioning and
   `z-index` on the host element come with the card's styles, so they are set once, on the
   final layout → M7 (issue #11, T1).*
-- [ ] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
+  *Fixed in M7 T1: `agent-client/src/styles.css`'s `:host` rule gives the host element itself
+  `position: fixed`, the 16 px gutter, `z-index: 2147483000` and the card width; nothing inside
+  the shadow root carries a z-index. Set through `:host` rather than an inline style because the
+  width changes at the 400 px breakpoint; the target app is in an iframe, so only the sandbox
+  page's own styles could outrank it. Checked in Chromium at 360, 768 and 1440 px (host computed
+  `position: fixed`, `z-index: 2147483000`).*
+- [x] **L4** — `:host { all: initial }` (`main.jsx:10`) resets the host to `display:inline`; the
   widget only survives because `.ds-card` is `position:fixed`. Add an explicit
   `:host { display: block; }` (or `contents`) so it doesn't depend on that coincidence.
   *Deferred → M7 (issue #11, T1): still true of `main.jsx`'s `:host { all: initial; }`; the
   card's styles move to `styles.css` with tokens on `:host`, where the explicit `display`
   belongs → M7 (issue #11, T1).*
-- [ ] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
+  *Fixed in M7 T1: `agent-client/src/styles.css`'s `:host` keeps `all: initial` (the page's
+  inherited styles stay out) and then sets `display: block` explicitly; the host, not the card,
+  is the fixed box, so the card no longer survives by coincidence.*
+- [x] **L5** — Transcript is bounded twice and inconsistently: `appendTranscript` keeps 20
   (`useLiveAgent.js:35`), `TranscriptLog` renders 4 (`TranscriptLog.jsx:6`). Pick one bound.
   *Deferred → M7 (issue #11, T3): today's card keeps and renders every line (no bound at all,
   the M1 rebuild dropped both); the coalesced transcript bounds the list to 20 and renders the
   last 3 → M7 (issue #11, T3).*
+  *Fixed in M7 T3: one bound — `agent-client/src/transcript.js` keeps 20 coalesced entries
+  (`MAX_ENTRIES`; consecutive fragments of one speaker merged, a same-speaker turn after
+  `turnComplete`/`interrupted` joined with one space), and `Transcript.jsx` renders the last 3 of
+  them (`transcript.test.js`, `Transcript.test.jsx`).*
+  *M7 fix wave: one bound in the strictest sense — `Transcript.jsx` now renders all 20 kept
+  entries in a fixed-height box that scrolls to the newest line. Slicing to 3 inside a fixed box
+  moved every line when the oldest dropped out (a layout shift); scrolled out of view, a dropped
+  20th-oldest entry moves nothing on screen (`Transcript.test.jsx`, `e2e/widget.spec.js`'s
+  390 px layout-shift test).*
 - [x] **L6** — `crypto.randomUUID()` and `getUserMedia` both require a secure context — silent
   breakage the moment this is served over plain HTTP anywhere but localhost. Handoff doc notes the
   mic half; note the UUID half too, or add a fallback.
@@ -729,16 +803,24 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
   no longer throws (`knowledgeStore.test.js`); `bridgeChannel.js`'s action ids keep
   `crypto.randomUUID()`, since actions only run in a session, which now can't start outside a
   secure context. Handoff §3.3 notes both halves.*
-- [ ] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
+- [x] **L7** — ~130 lines of CSS in a JS template literal (`main.jsx:9-141`), no autoprefixer or
   linting. `import styles from './styles.css?inline'` keeps the single-file IIFE build and
   restores tooling / syntax highlighting.
   *Deferred → M7 (issue #11, T1): the CSS is still a template literal in `main.jsx`; it moves
   to `src/styles.css?inline` with the card's tokens → M7 (issue #11, T1).*
-- [ ] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
+  *Fixed in M7 T1: the CSS is `agent-client/src/styles.css`, formatted by Prettier and minified
+  by Vite's CSS pipeline; `main.jsx` imports it as `./styles.css?inline` (typed by
+  `vite/client`, no config change) and puts it in the shadow root as one `<style>`. The bundle
+  stays one IIFE file (163.1 kB gzip), and the CSP needs no change: `style-src 'unsafe-inline'`
+  already covers a runtime `<style>` (0 violations across `npm run e2e`).*
+- [x] **L8** — `barRefs = [useRef(null), useRef(null), useRef(null)]` (`VolumeMeter.jsx:11`) works
   only because the count is a literal constant. One `useRef([])` + callback refs is the idiom and
   won't trip the rules-of-hooks lint if the count ever becomes dynamic.
   *Deferred → M7 (issue #11, T2): `VolumeMeter` and its refs didn't survive the rebuild; the
   orb that replaces it holds its node in a ref and is checked by a Profiler render-count test → M7 (issue #11, T2).*
+  *Fixed in M7 T2: `VolumeOrb.jsx` is one element in one `useRef`; its two rings are CSS
+  pseudo-elements driven by `--level` and `--mic-level`, so there is no per-bar ref to keep in
+  step with a count. `renderIsolation.test.jsx` checks that 50 frames commit nothing.*
 - [x] **L9** — `snapshot.role` (`bridge.js:70`) is actually `el.tagName.toLowerCase()` — "a",
   "button", "input" — not an ARIA role. Misleading name for the model, which may reason about it as
   a role. Rename to `tag`, or compute a real role.

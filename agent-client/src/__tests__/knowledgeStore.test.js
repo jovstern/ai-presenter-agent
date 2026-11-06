@@ -51,6 +51,22 @@ describe('knowledgeStore', () => {
     }
   });
 
+  // useSyncExternalStore re-renders, and warns of an infinite loop, when two
+  // reads with no change in between return different values.
+  it('lists the same array until the files change, then a new one', async () => {
+    const empty = knowledgeStore.listFiles();
+    expect(knowledgeStore.listFiles()).toBe(empty);
+
+    await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+    const one = knowledgeStore.listFiles();
+    expect(one).not.toBe(empty);
+    expect(one.map((f) => f.name)).toEqual(['a.txt']);
+    expect(knowledgeStore.listFiles()).toBe(one);
+    // A rules write leaves the file list as it was.
+    knowledgeStore.setRules('be brief');
+    expect(knowledgeStore.listFiles()).toBe(one);
+  });
+
   it('reports total bytes across stored files', async () => {
     await knowledgeStore.addFile(makeFile('a.txt', 'AAAA'));
     await knowledgeStore.addFile(makeFile('b.txt', 'BB'));
@@ -95,5 +111,101 @@ describe('knowledgeStore', () => {
     const message = knowledgeStore.buildContextMessage();
     expect(message).not.toContain('STRICT RULES');
     expect(message).toContain('just files');
+  });
+});
+
+// What the browser itself can refuse: storage that is full, a file that can't
+// be read, storage that is blocked outright (a privacy setting, a sandboxed
+// frame). Each is a failure the dialog can show, never a throw.
+describe('knowledgeStore when the browser refuses', () => {
+  it('fails in plain words when browser storage is full, and stores nothing', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    const result = await knowledgeStore.addFile(makeFile('notes.txt', 'hello'));
+    vi.restoreAllMocks();
+    expect(result).toEqual({
+      ok: false,
+      reason: 'Browser storage is full. Remove a file to make room',
+    });
+    expect(knowledgeStore.listFiles()).toHaveLength(0);
+  });
+
+  it("fails in plain words when the file can't be read", async () => {
+    const file = makeFile('notes.txt', 'hello');
+    vi.spyOn(file, 'text').mockRejectedValue(
+      new DOMException('The file could not be read.', 'NotReadableError'),
+    );
+    const result = await knowledgeStore.addFile(file);
+    expect(result).toEqual({
+      ok: false,
+      reason: "The file couldn't be read. Check that it still exists, then add it again",
+    });
+    expect(knowledgeStore.listFiles()).toHaveLength(0);
+  });
+
+  /** Blocks localStorage (its getter throws, as a browser's does) for the run of `fn`. */
+  async function withStorageBlocked(/** @type {() => unknown} */ fn) {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    try {
+      return await fn();
+    } finally {
+      Object.defineProperty(
+        globalThis,
+        'localStorage',
+        /** @type {PropertyDescriptor} */ (descriptor),
+      );
+    }
+  }
+
+  it('fails in plain words, not a throw, when localStorage is blocked: add, remove, rules', async () => {
+    const blocked = "This browser isn't letting the site save files";
+    expect(await withStorageBlocked(() => knowledgeStore.addFile(makeFile('a.txt', 'A')))).toEqual({
+      ok: false,
+      reason: blocked,
+    });
+    expect(await withStorageBlocked(() => knowledgeStore.removeFile('some-id'))).toEqual({
+      ok: false,
+      reason: blocked,
+    });
+    expect(await withStorageBlocked(() => knowledgeStore.setRules('Be brief.'))).toEqual({
+      ok: false,
+      reason: "This browser isn't letting the site save rules",
+    });
+  });
+
+  it('reports a removal that went through as ok', async () => {
+    const added = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+    if (!added.ok) throw new Error('not added');
+    expect(knowledgeStore.removeFile(added.file.id)).toEqual({ ok: true });
+  });
+
+  it('reads as empty, not a throw, when localStorage is blocked', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    try {
+      expect(knowledgeStore.listFiles()).toEqual([]);
+      expect(knowledgeStore.getRules()).toBe('');
+      expect(knowledgeStore.hasContent()).toBe(false);
+      expect(knowledgeStore.totalBytes()).toBe(0);
+      expect(knowledgeStore.buildContextMessage()).toBe('');
+    } finally {
+      Object.defineProperty(
+        globalThis,
+        'localStorage',
+        /** @type {PropertyDescriptor} */ (descriptor),
+      );
+    }
   });
 });

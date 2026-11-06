@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { createLiveSession } from './liveSession.js';
 import { startCapture, createPlayer, voiceSupportError } from './audioIO.js';
 import { decodeOutputChunk } from './pcm.js';
+import { appendFragment, endTurn } from './transcript.js';
 
-/** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails, TranscriptEntry } from './liveSession.js' */
+/** @import { LiveSession, LiveSessionOptions, SessionStatus, StatusDetails } from './liveSession.js' */
+/** @import { TranscriptEntry } from './transcript.js' */
 
 /**
  * `idle` until the first connect; then whatever the session last reported.
@@ -13,14 +15,19 @@ import { decodeOutputChunk } from './pcm.js';
  * @typedef {object} LiveAgent
  * @property {AgentStatus} status
  * @property {StatusDetails | null} details Set with `reconnecting` and `failed` only.
- * @property {TranscriptEntry[]} transcript Every line so far, in order.
+ * @property {TranscriptEntry[]} transcript The coalesced turns so far, oldest first, bounded
+ *   (transcript.js).
  * @property {Error | null} micError Why the mic couldn't start (or can't on this page), until
  *   the next connect.
  * @property {number} connectCount How many times connect() has run: a key for the alerts, so
  *   an identical alert after a new attempt is a new node, which screen readers announce.
+ * @property {number} failureCount How many times the session has gone `failed`: names the
+ *   failure, so the card shows each one's toast once (AgentApp.jsx).
  * @property {() => Promise<void>} connect Starts mic, playback and the session.
  * @property {() => void} disconnect
  * @property {() => Promise<void>} retry The same as connect.
+ * @property {() => number} outputLevel The agent's voice right now, 0..1; 0 with no player.
+ * @property {() => number} micLevel The mic's last frame, 0..1; 0 with no capture.
  */
 
 // Glue: wires liveSession + audioIO into React state. `bridge` is the page-
@@ -41,11 +48,14 @@ import { decodeOutputChunk } from './pcm.js';
  */
 export function useLiveAgent(bridge, nonce, workletUrl) {
   // details come with `reconnecting` and `failed`; kept with the status so
-  // the two can never disagree.
+  // the two can never disagree. `failures` counts the `failed` reports: the
+  // session makes one per failure, so the count tells a new failure from a
+  // re-render of the same one.
   const [connection, setConnection] = useState(
-    /** @type {{ status: AgentStatus, details: StatusDetails | null }} */ ({
+    /** @type {{ status: AgentStatus, details: StatusDetails | null, failures: number }} */ ({
       status: 'idle',
       details: null,
+      failures: 0,
     }),
   );
   const [transcript, setTranscript] = useState(/** @type {TranscriptEntry[]} */ ([]));
@@ -72,13 +82,20 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
           // rather than leave it live behind a dead session. `reconnecting`
           // keeps it, since the resumed session picks the frames back up.
           if (status === 'failed') stopAudio();
-          setConnection({ status, details: details ?? null });
+          setConnection((prev) => ({
+            status,
+            details: details ?? null,
+            failures: prev.failures + (status === 'failed' ? 1 : 0),
+          }));
         },
         onAudioChunk: (base64) => {
           playerRef.current?.enqueue(decodeOutputChunk(base64));
         },
-        onTranscript: (entry) => {
-          setTranscript((prev) => [...prev, entry]);
+        onTranscript: (fragment) => {
+          setTranscript((prev) => appendFragment(prev, fragment));
+        },
+        onTurnEnd: () => {
+          setTranscript(endTurn);
         },
         onInterrupted: () => {
           playerRef.current?.interrupt();
@@ -88,13 +105,20 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     return sessionRef.current;
   }
 
+  // Declared before connect(), which calls it: the React Compiler skips a
+  // hook that uses a function before its declaration (docs/code-review-notes.md M10).
+  function disconnect() {
+    sessionRef.current?.disconnect();
+    stopAudio();
+  }
+
   // Idempotent: whatever pipeline a previous connect() left is stopped before
   // a new one starts, so a double press or a Retry never stacks a second mic.
   async function connect() {
     setConnectCount((count) => count + 1);
     stopAudio();
     // Over plain http (or without AudioWorklet) the mic can never start, so
-    // no session is opened and no token minted: the card stays on Connect
+    // no session is opened and no token minted: the card stays on Talk
     // with the reason (docs/code-review-notes.md L6).
     const unsupported = voiceSupportError();
     setMicError(unsupported);
@@ -109,16 +133,25 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
         // Any capture failure (a blocked or missing mic, a worklet that
         // didn't load) means the agent can never hear the user: end the
         // session instead of showing "Live" while deaf, so the card offers
-        // Connect — the action the guidance names.
+        // Talk — the action the guidance names.
         disconnect();
       },
     });
     await session.connect();
   }
 
-  function disconnect() {
-    sessionRef.current?.disconnect();
-    stopAudio();
+  // Pull, not push: VolumeOrb reads these once per animation frame and
+  // writes a CSS variable, so the levels never enter React state and a frame
+  // renders nothing (spec goals #8 and #9, handoff §4). They read the refs at
+  // call time, so they keep working across the player and capture that every
+  // connect() replaces. Their identity doesn't matter: the orb reads them
+  // through useEffectEvent.
+  function outputLevel() {
+    return playerRef.current?.getLevel() ?? 0;
+  }
+
+  function micLevel() {
+    return captureRef.current?.getLevel() ?? 0;
   }
 
   // Syncs with external resources (socket, mic, AudioContexts): release them
@@ -140,8 +173,11 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     transcript,
     micError,
     connectCount,
+    failureCount: connection.failures,
     connect,
     disconnect,
     retry: connect,
+    outputLevel,
+    micLevel,
   };
 }

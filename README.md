@@ -2,8 +2,8 @@
 
 A rebuild of the runtime half of a Presenter Agent — an AI avatar embedded in a demo that talks
 *and* acts (click/scroll/navigate/fill) on the app behind it, hardened against the gaps found in
-the v1 build. It also has a small RAG-lite knowledge feature: drop `.txt`/`.md` files into a modal
-and the agent gets them as context, stored only in your browser's `localStorage`.
+the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`/`.md` files, and
+standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
 Start with [`docs/project-knowledge-handoff.md`](./docs/project-knowledge-handoff.md) — the full
 origin story, what's actually verified vs. just written, every caveat, and what's planned next.
@@ -54,14 +54,16 @@ npm start
 ```
 
 Then open **http://localhost:3000/** (or `/sandbox/`, which serves the same page; the port is
-`PORT` if you set one, 3000 otherwise). Press **Connect** on the agent card in the bottom-right
+`PORT` if you set one, 3000 otherwise). Press **Talk to the presenter** on the agent card in the bottom-right
 corner and allow microphone access: the agent greets you once the session is open (it does not
 speak on page load). Try asking it to increment the counter, search for something, or go to
-Settings, turn on notifications and save. The card's one button follows the connection: Connect,
-Cancel while connecting, Disconnect while live or reconnecting, and Retry if the connection is
-lost for good. When retrying can't help, it says what can: Reload page when the page's token
-is rejected, or Try again (asks the server once more) when the server isn't configured, which a
-reload can't fix (the reason shows under the status line). Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
+Settings, turn on notifications and save. The card's one button follows the connection: Talk
+to the presenter, a pending Cancel while connecting, End while live or reconnecting, and Retry if
+the connection is lost for good. When retrying can't help, it says what can: Reload page when
+the page's token is rejected, or Try again (asks the server once more) when the server isn't
+configured, which a reload can't fix. A failure also shows a toast above the card, once, with
+the reason and the same action (F8 reaches it from the keyboard); the reason stays under the
+status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client
@@ -74,12 +76,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 4 specs, 21 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 5 specs, 33 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 12 files, 259 tests
+npm test        # vitest: 19 files, 358 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -98,7 +100,8 @@ The suite in `agent-client/src/__tests__/`:
   per repeated-sentence episode, never sent to a replacement session; the user speaking clears
   the action window, and narration between tool calls is no loop), the SDK's real order
   (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
-  the greeting by whether the attempt resumed),
+  and before any client turn — the knowledge and the greeting wait for its response, as does a
+  knowledge change during any batch; the greeting by whether the attempt resumed),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
   during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
   retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
@@ -106,8 +109,11 @@ The suite in `agent-client/src/__tests__/`:
   on a server close; the backoff reset only after 5 s open or the first content; the two fatal
   kinds (`config`, `token`).
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
-  Connect, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (Cancel, Disconnect while reconnecting, Retry,
-  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark.
+  Talk, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (a pending Cancel, End while reconnecting, Retry,
+  Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and the mic alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark, the session's fragments coalesced into turns; the failure toast shown once per failure (not again after it closes, a new one for a new failure), the reason announced exactly once (by the toast, not a card alert), its action and Escape leaving focus on the card's button, and the Tab walk from F8.
+- `transcript.test.js` / `Transcript.test.jsx` — fragments merged per speaker (verbatim within a
+  turn, one space across a turn boundary), bounded to 20; the last 3 rendered in a polite live
+  region that announces additions only, a node per fragment, the speaker named for assistive tech.
 - `bridge.test.js` — `sandbox/bridge.js` run against a stubbed iframe: `navigate` waits for its
   own page and reports a page that never loads as a failure; the routes come from the page's
   `#ds-routes` block (a missing or bad one throws at load); `fill` refuses an element that
@@ -125,8 +131,17 @@ The suite in `agent-client/src/__tests__/`:
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
 - `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
-- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list, file
-  ids without `crypto.randomUUID` (plain http), the context blob it builds.
+- `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list (the
+  same array until the files change, for `useSyncExternalStore`), file ids without
+  `crypto.randomUUID` (plain http), the context blob it builds.
+- `AgentApp.test.jsx` — the card in a real shadow root: it and its toast region are `inert`
+  while the knowledge dialog is open (Radix's `aria-hidden` on the page never reaches into the
+  shadow root), the dialog itself isn't, and closing restores them and returns focus.
+- `KnowledgeModal.test.jsx` — the knowledge dialog in a real shadow root: a file added, listed
+  and removed (focus moves to the next Remove, or Add files), an oversize file as an alert, a
+  drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
+  and not saved, the file picker from a real button, open focus, Tab wrapping both ways,
+  Escape returning focus to the knowledge button.
 - `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
   sentences, realistic sequences that must pass, the window cleared by the user speaking and the
   utterance episode by a tool call.
@@ -139,7 +154,7 @@ The suite in `agent-client/src/__tests__/`:
 - `audioIO.test.js` — the secure-context / AudioWorklet check, the context resumed after the
   worklet loads (Safari), and that capture releases the port, nodes, mic track and context once,
   including on a stop mid-setup, a worklet that fails to load (reported as a `WorkletLoadError`)
-  or a context that won't resume.
+  or a context that won't resume or never settles (a 3 s timeout, an `AudioResumeTimeoutError`).
 
 `npm run e2e` builds agent-client and starts its own server on port 3971 (`playwright.config.js`)
 with a dummy `GEMINI_API_KEY` and dotenv pointed at an empty file, so it never reads
@@ -161,18 +176,36 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
-  one token request (carrying the page nonce) per (re)connect; Disconnect returns to "Not
-  connected". A `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no automatic
-  retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload page", both
-  driven from the keyboard with focus kept on the button.
+  one token request (carrying the page nonce) per (re)connect; End returns to "Not
+  connected". The card's own states are `widget.spec.js`'s.
+- `widget.spec.js` — every card state on the real `/` page through the same fake-Live harness
+  (`e2e/fakeLive.js`), with no test hook in the bundle. The demo test, "widget demo: Talk, Live
+  with the orb and transcript, a lost connection, Retry", walks idle → the pending Cancel (setup
+  held back) → Live, the orb's `--level` rising with fake agent audio and settling after it → a
+  coalesced transcript (two speakers, a turn boundary) → a forced close → "Reconnecting (attempt
+  1 of 6)…" with End enabled → every retry refused, the backoff's 56 s skipped with
+  `page.clock` → "Connection lost", the reason, Retry focused, one toast → Retry → Live. A
+  `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no
+  automatic retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload
+  page", which reloads, both driven from the keyboard with focus kept on the button; the
+  `not_configured` path also checks the toast inside the shadow root — once per failure, F8 then
+  Tab through it and back to the card, Escape closing it with focus back on the button. A
+  blocked mic shows its guidance and leaves the card on Talk, with no toast. At 360, 768 and
+  1440 px: the card's placement (bottom-right, full width between the gutters at 400 px and
+  below), a keyboard walk from the top of the page through the transcript, the primary button
+  and the knowledge button (focus ring visible), the dialog inside the viewport with the card
+  inert behind it (absent from Chromium's accessibility tree, read over CDP) and back on
+  Escape, and axe on the connected card in light and dark.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
-  none after Disconnect.
-- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule) on `/` with the card idle,
-  with the knowledge dialog open, and connected (the fake-Live harness, `e2e/fakeLive.js`, shared
-  with `loop.spec.js`) with a transcript line on screen, and on both target-app pages: zero
-  violations. axe walks the
+  none after End.
+- `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule), in light and dark, on `/`
+  with the card idle, failed with its toast, and with the knowledge dialog open; connected (the fake-Live harness, `e2e/fakeLive.js`, shared
+  with `loop.spec.js` and `widget.spec.js`) with a transcript line on screen, and on both target-app pages: zero
+  violations. In each theme it also walks the knowledge dialog from the keyboard only: Enter on
+  Add files opens the file picker, Tab and Shift+Tab wrap inside the dialog, Escape returns
+  focus to the knowledge button. axe walks the
   card's open shadow root and the iframe; the test asserts it actually checked nodes in both.
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the
@@ -205,10 +238,6 @@ workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no 
 
 ## What's deliberately not here yet
 
-- A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the
-  underlying store is tested, the UI isn't yet (M7, issue #11).
-- The designed widget — volume orb, coalesced transcript, connection toast, render-isolation
-  test — is M7 (issue #11); today's card is deliberately minimal.
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.
 - Anything from the agent-creation side of the real product (see the docs' scope note).

@@ -32,7 +32,9 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * @typedef {{ attempt: number, maxAttempts: number, reason?: string, fatal?: FatalKind }} StatusDetails
  */
 /**
- * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptEntry
+ * One transcription fragment as Live streams it: a few words of one speaker,
+ * with its own leading space (transcript.js coalesces them into entries).
+ * @typedef {{ role: 'agent' | 'user', text: string }} TranscriptFragment
  */
 /**
  * @typedef {object} LiveSessionOptions
@@ -42,7 +44,9 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  *   echoed on every token request (docs/code-review-notes.md H1).
  * @property {(status: SessionStatus, details?: StatusDetails) => void} [onStatusChange]
  * @property {(base64Pcm: string) => void} [onAudioChunk] 24 kHz 16-bit PCM from the model.
- * @property {(entry: TranscriptEntry) => void} [onTranscript]
+ * @property {(fragment: TranscriptFragment) => void} [onTranscript]
+ * @property {() => void} [onTurnEnd] The model's turn ended (turnComplete) or was
+ *   cut off (interrupted); after that message's fragment, if it had one.
  * @property {() => void} [onInterrupted] The user barged in: stop playback now.
  */
 /**
@@ -189,6 +193,7 @@ export function createLiveSession({
   onStatusChange,
   onAudioChunk,
   onTranscript,
+  onTurnEnd,
   onInterrupted,
 }) {
   /** @type {Set<string>} */
@@ -261,13 +266,19 @@ export function createLiveSession({
     sendKnowledgeContext();
   }
 
+  // A client turn, so it waits for a running tool batch (sendTurn). The
+  // revision is taken when it is really sent: a handle issued while it was
+  // held doesn't hold it.
   function sendKnowledgeContext() {
     if (!session) return;
-    sentRevision = knowledgeRevision;
-    const message = buildContextMessage();
-    if (!message) return;
-    mark('ds:knowledge', { bytes: byteLength(message) });
-    session.sendClientContent({ turns: message, turnComplete: false });
+    sendTurn('knowledge', () => {
+      if (!session) return;
+      sentRevision = knowledgeRevision;
+      const message = buildContextMessage();
+      if (!message) return;
+      mark('ds:knowledge', { bytes: byteLength(message) });
+      session.sendClientContent({ turns: message, turnComplete: false });
+    });
   }
 
   window.addEventListener(CHANGE_EVENT, onKnowledgeChange);
@@ -282,22 +293,20 @@ export function createLiveSession({
   // once complete; an interrupted turn is dropped unchecked, and the user's
   // own transcription or a tool call ends any loop episode (the user speaking
   // also clears the action window: a new request). A loop gets one corrective turn,
-  // which prompts a reply (turnComplete true): like a snapshot, it can't sit
-  // between a function call and its response, so while a tool batch runs it
-  // waits for the batch's end. A drop discards both: they belong to the dead
-  // session.
+  // which prompts a reply (turnComplete true), sent through sendTurn like
+  // every client turn. A drop discards the partial turn: it belongs to the
+  // dead session.
   let agentTurn = '';
-  let correctivePending = false;
-
-  function sendCorrective() {
-    correctivePending = false;
-    session?.sendClientContent({ turns: CORRECTIVE_TURN, turnComplete: true });
-  }
 
   /** @param {LiveServerMessage['serverContent']} content */
   function trackUtterances(content) {
     if (!content) return;
-    if (content.inputTranscription?.text) loopGuard.userSpoke();
+    if (content.inputTranscription?.text) {
+      loopGuard.userSpoke();
+      // A new request ends the loop episode, so a corrective still held
+      // behind a tool batch is no longer due.
+      heldTurns.delete('corrective');
+    }
     if (content.interrupted) agentTurn = '';
     agentTurn += content.outputTranscription?.text ?? '';
     if (!content.turnComplete) return;
@@ -305,8 +314,9 @@ export function createLiveSession({
     agentTurn = '';
     if (!loopGuard.checkUtterance(turn)) return;
     mark('ds:loop-trip', { kind: 'utterance' });
-    if (runningBatches.size > 0) correctivePending = true;
-    else sendCorrective();
+    sendTurn('corrective', () =>
+      session?.sendClientContent({ turns: CORRECTIVE_TURN, turnComplete: true }),
+    );
   }
 
   // Traffic with sandbox/bridge.js goes over the private channel main.jsx owns
@@ -336,6 +346,25 @@ export function createLiveSession({
   /** @type {Snapshot | null} */
   let heldSnapshot = null;
   let heldCount = 0;
+
+  // Client turns (the knowledge context, the greeting, the loop corrective)
+  // can't land between a function call and its response either: the model
+  // takes one as the user talking over its call, as the M5 navigate stall
+  // showed. While a batch runs they are held, at most one of each kind (a
+  // later one replaces it, keeping its place), and sent in the order first
+  // held once the last batch is answered. A drop discards them with the dead
+  // session's batches (openSession); the new session sends its own.
+  /** @type {Map<'knowledge' | 'greeting' | 'corrective', () => void>} */
+  const heldTurns = new Map();
+
+  /**
+   * @param {'knowledge' | 'greeting' | 'corrective'} kind
+   * @param {() => void} send
+   */
+  function sendTurn(kind, send) {
+    if (runningBatches.size > 0) heldTurns.set(kind, send);
+    else send();
+  }
 
   /** @param {Snapshot} snapshot */
   function snapshotMessage(snapshot) {
@@ -433,9 +462,12 @@ export function createLiveSession({
       .catch((error) => handleFailure(gen, error))
       .finally(() => {
         runningBatches.delete(batch);
-        // openSession clears the pending corrective on a drop, so one still
-        // pending here is the live session's.
-        if (correctivePending && runningBatches.size === 0 && gen === generation) sendCorrective();
+        // openSession clears the held turns on a drop, so any still held
+        // here are the live session's.
+        if (runningBatches.size > 0 || gen !== generation) return;
+        const sends = [...heldTurns.values()];
+        heldTurns.clear();
+        sends.forEach((send) => send());
       });
   }
 
@@ -531,6 +563,7 @@ export function createLiveSession({
     if (outText) onTranscript?.({ role: 'agent', text: outText });
     const inText = message.serverContent?.inputTranscription?.text;
     if (inText) onTranscript?.({ role: 'user', text: inText });
+    if (message.serverContent?.turnComplete || message.serverContent?.interrupted) onTurnEnd?.();
     trackUtterances(message.serverContent);
 
     const resumption = message.sessionResumptionUpdate;
@@ -632,7 +665,7 @@ export function createLiveSession({
     heldCount = 0;
     earlyToolCalls = [];
     agentTurn = '';
-    correctivePending = false;
+    heldTurns.clear();
     serverAnswered = false;
     attemptResumed = false;
 
@@ -702,6 +735,14 @@ export function createLiveSession({
       session = newSession;
       pendingFrames.forEach(sendFrame);
       pendingFrames = [];
+      // Calls the server sent before live.connect() resolved are answered
+      // first: started before any client turn, so the knowledge and the
+      // greeting below wait for their responses (sendTurn, M6 re-review).
+      if (earlyToolCalls.length > 0) {
+        const calls = earlyToolCalls;
+        earlyToolCalls = [];
+        runToolCallBatch(calls, gen);
+      }
       if (!attemptResumed || knowledgeRevision !== handleRevision) sendKnowledgeContext();
       // The page, unlike the knowledge, may have changed during the drop, and
       // a keyframe is small (≤ 855 B in the live e2e) — force a fresh one
@@ -715,15 +756,12 @@ export function createLiveSession({
       // By this attempt, not by resumeHandle: a handle can arrive before
       // live.connect() resolves (the SDK's queue), on a fresh session too.
       if (!attemptResumed) {
-        session.sendClientContent({
-          turns: 'Greet the user with a brief hello.',
-          turnComplete: true,
-        });
-      }
-      if (earlyToolCalls.length > 0) {
-        const calls = earlyToolCalls;
-        earlyToolCalls = [];
-        runToolCallBatch(calls, gen);
+        sendTurn('greeting', () =>
+          session?.sendClientContent({
+            turns: 'Greet the user with a brief hello.',
+            turnComplete: true,
+          }),
+        );
       }
     } catch (error) {
       handleFailure(gen, error);

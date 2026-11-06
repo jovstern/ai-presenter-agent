@@ -158,10 +158,13 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
-- `AgentApp.jsx` — the minimal card (one Connect / Cancel / Disconnect / Retry / Try again / Reload page button, status line, alert
-  on `failed`, transcript, `📄` knowledge button); `KnowledgeModal.jsx` — the Radix dialog.
+- `AgentApp.jsx` — the card (the volume orb, one Talk to the presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
+  failure's reason, mic alerts, transcript, the knowledge button with its document icon); `FailureToast.jsx` — the Radix
+  toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
+  `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
+  `KnowledgeModal.jsx` — the knowledge button and its Radix dialog (§5.1).
 - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
-  `knowledgeStore.js`.
+  `knowledgeStore.js`, `transcript.js` (fragments → bounded turns).
 
 ### 3.2 What's built and actually verified (not just written)
 
@@ -173,9 +176,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   Testing Library), `domSnapshotContext.test.js` (7 — the keyframe-vs-delta decision, see the
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
-  returns in M7 (#11).
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 622.5 kB,
-  149.7 kB gzip, served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog), with no
+  returned in M7 T2, with `VolumeOrb.test.jsx` (CLAUDE.md has the current counts: 19 files,
+  358 tests after the M7 fix wave, with `KnowledgeModal.test.jsx` and `shadowFocus.test.js`).
+- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 718.9 kB,
+  176.7 kB gzip after the M7 fix wave (175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -259,8 +263,11 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   1001/1012–1014, `live.connect` rejecting, the setup timeout) keeps it. So does a close of code
   1008 with "already connected": Gemini still holds the dropped client, the handle is fine, and
   the next attempt resumes with it (seen in the live e2e, M5 T5). A manual
-  Connect/Retry starts a fresh budget and resets the loop guard. Unit-tested; not yet exercised
-  against a real network drop in this form.
+  Talk/Retry starts a fresh budget and resets the loop guard. No client turn (the knowledge, the
+  greeting, the loop corrective) is sent while a tool batch runs: each waits for the batch's last
+  response, and a tool call the server queued before `live.connect()` resolved is answered
+  before the session's knowledge and greeting (M7 T4, from the M6 re-review). Unit-tested; not
+  yet exercised against a real network drop in this form.
 - **Model: `gemini-3.8-live`** (`MODEL` in `liveSession.js`), the GA Live model since
   2026-09-15. The earlier `gemini-3.1-flash-live-preview` is now legacy and shuts down on
   2026-11-17; nothing in the code uses it. Input is 16 kHz PCM mono, output 24 kHz PCM mono
@@ -325,7 +332,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   so neither is stressed. A real, larger page is the test that's still missing.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md))
   and the deploy is M8; there is no `render.yaml` yet. `getUserMedia` and AudioWorklet need a
-  secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Connect now stops
+  secure context — fine on `localhost`, HTTPS anywhere else. On plain http, Talk now stops
   before opening a session and the card says "Voice needs a secure connection (https)…"
   (`voiceSupportError()` in `audioIO.js`; code-review-notes L6). Of the two `crypto.randomUUID`
   callers, the knowledge store's file ids no longer use it (they use `getRandomValues`), and the
@@ -360,7 +367,16 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - **Volume meter bypasses React state entirely** (ref + `requestAnimationFrame`) — the "go
   further" version of the original's isolate-and-memoize fix, backed by a test proving the
   isolation actually holds. Built in the first v2 implementation, lost in the from-scratch
-  rebuild; the volume orb and `renderIsolation.test.jsx` return in M7 (#11).
+  rebuild, back in M7 T2 as the volume orb. **Levels are pulled, not pushed:** the player and
+  the capture each expose `getLevel()` (0..1, `audioIO.js`), and `VolumeOrb.jsx` calls both once
+  per animation frame and writes `--level` / `--mic-level` on its own node; `styles.css` turns
+  them into ring scale and opacity. No event per audio frame reaches React, so there is no
+  state to throttle. The output level comes from an `AnalyserNode` between the scheduled chunks
+  and the speakers; the mic level is computed on the Int16 frame the worklet already posts
+  (cheaper than a second node on the mic, and the orb's fall-off hides the 80 ms steps). The loop
+  runs only while the session is open, never under `prefers-reduced-motion` (followed live with
+  `matchMedia`), and reads its sources through `useEffectEvent`, so a card render never restarts
+  it. `renderIsolation.test.jsx` proves it: 50 frames, no commit, `--level` changed 50 times.
 - **`AudioWorklet` over `ScriptProcessorNode` — reversed in M6 T3** (2026-11-02). The first
   build chose `ScriptProcessorNode` for simplicity: deprecated but functional, one file, no
   module to serve. Reversed because the deprecated node runs its callback on the main thread
@@ -386,10 +402,15 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   bug fix; `createRoot` was already in use so the upgrade itself was a no-op for `main.jsx`. The
   compiler is now the default answer to "does this need `useMemo`/`useCallback`" — let it infer
   memoization rather than hand-adding it, only reach for a manual hook where the compiler
-  demonstrably can't cover the case. The current bundle is 149.5 kB gzip (§3.2).
+  demonstrably can't cover the case. The current bundle is 176.7 kB gzip (§3.2). **Found in M7
+  T2: the compiler wasn't running** — `@vitejs/plugin-react` 6 ignored the `babel` option
+  `vite.config.js` passed it. Fixed in M7 T2b (the user chose the plugin's Babel preset over the
+  experimental native `oxc-transform-react`): `@rolldown/plugin-babel` + `reactCompilerPreset()`,
+  +1.65 kB gzip for the memo caches; see `code-review-notes.md` M10.
 - **Radix UI as the default for new interactive UI elements** (2026-09-15) — today that is
-  `Dialog` for the knowledge modal. The first build's Radix `Toast` and hand-rolled
-  `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their successors return in M7 (#11).
+  `Dialog` for the knowledge modal and `Toast` for the failure notice (M7 T4). The first build's
+  Radix `Toast` and hand-rolled `VolumeMeter` / `TranscriptLog` were lost in the rebuild; their
+  successors returned in M7 (#11): the orb (T2), the coalesced transcript (T3), the toast (T4).
 - **Hono → Express for `server/`** (2026-09-15) — a direct stack preference. Same responsibilities
   kept (token endpoint + static file serving for all three other packages, not split apart) — see
   §5.3 for the deferred option of shrinking it to token-only. All routes re-verified by hand after
@@ -419,8 +440,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 
 ### 5.1 RAG-lite knowledge modal (client-side, no backend) — IMPLEMENTED
 
-Built: a button on the agent card (`📄 <count>`) opens a **Radix `Dialog`** (`KnowledgeModal.jsx`)
-with a drag-and-drop zone plus a click-to-browse fallback. Dropped files are read via
+Built: a button on the agent card (a document icon and the count, the dialog's `Dialog.Trigger`) opens a **Radix
+`Dialog`** (`KnowledgeModal.jsx`) with an Add files button — a real `<button>`, so the keyboard
+reaches the file picker — that is also the drop target for dragged files (M7 T5; it was a
+mouse-only `<div>` before). Dropped files are read via
 `FileReader` and stored, as `{id, name, size, addedAt, text}`, in `localStorage` under
 `ds-agent-knowledge-files` (`knowledgeStore.js`) — no server-side storage, no backend indexing
 pipeline, unlike the original system's Cusmo-owned RAG pipeline.
@@ -444,31 +467,73 @@ Decisions actually made (the open questions from the plan, resolved):
   retrieve top-k per turn) is a legitimate future step and a materially bigger project than this.
 - **The gotcha that cost the most time to get right: Radix's `Dialog.Portal` defaults to
   rendering into `document.body`**, which would silently escape this widget's shadow root — the
-  dialog would render, but unstyled (none of the injected `<style>` in the shadow root would
+  dialog would render, but unstyled (none of the shadow root's `<style>`, `styles.css`, would
   reach it) and outside the isolation the shadow root exists to provide. Fix: `main.jsx` creates a
   second plain `<div>` inside the shadow root purely as a portal target, passes it down through
   `AgentApp` as `portalContainer`, and `KnowledgeModal` passes it to `Dialog.Portal container={...}`.
   Anything else built with Radix inside this shadow root needs the same treatment if it uses
-  `Portal`. (Radix Toast's `Viewport` renders in place, not via a portal, so the M7 toast
-  shouldn't need it.)
-- Tested: `knowledgeStore.test.js` (10 tests) covers accept/reject-by-extension, the size cap, add/
-  remove/list, the concatenated context blob, byte totals, and that the change event fires exactly
-  once per write. Not tested: the modal component itself (drag/drop interaction, Radix wiring) —
-  reasonable next addition if this UI gets more complex.
+  `Portal`. Radix Toast's `Viewport` renders in place, but its screen-reader announcer is a
+  portal: `FailureToast.jsx` passes the same container as the provider's `announcerContainer`
+  (M7 T4). Radix also tracks focus with `document.activeElement`, which inside a shadow root is
+  the host; see §5.2 for what that broke in the toast. In the dialog it broke the focus trap
+  (found by the M4 UI review, fixed in M7 T5): FocusScope's Tab wrap compares
+  `document.activeElement` to the first and last controls, so it never matched and Tab from
+  Close walked out of the dialog (to Radix's focus guards on the page, then the browser), and
+  Shift+Tab from the first control onto the card; its trapping `focusin` listener on `document`
+  sees the host as every event's target, so it never pulled focus back; and its open autofocus
+  never saw focus move and fell back to focusing the dialog itself. `KnowledgeModal`'s Content
+  `onKeyDown` now wraps Tab at the two edges using the shadow root's own `activeElement`
+  (`shadowFocus.js`, shared with the toast), and `onOpenAutoFocus` focuses Add files. Escape
+  left focus nowhere for another reason: the knowledge button wasn't a `Dialog.Trigger`, so
+  Radix's modal close (which focuses the trigger) had none; it is one now.
+- **The dialog's states (M7 T5, R21):** it reads the store through `useSyncExternalStore`
+  (`listFiles()` returns the same array until the files change), with no mirrored state. An
+  empty state says what files are for; each file has a "Remove <file name>" button, and removing
+  one moves focus to the next file's Remove, else the previous, else Add files; an add the store
+  refuses is a `role="alert"` naming the file and the reason. The rules field (GitHub issue #5's
+  "rules polish") has a used / limit counter it is described by, a polite note once within 200
+  characters and again at the limit (not per keystroke), and over the limit keeps the text on
+  screen, unsaved, with `aria-invalid` and a `role="alert"` saying by how much — the store's
+  "no silent truncation" carried into the UI (the old `maxLength` cut a paste silently).
+- Tested: `knowledgeStore.test.js` covers accept/reject-by-extension, the size cap, add/
+  remove/list, the stable list snapshot, the concatenated context blob, byte totals, and that
+  the change event fires exactly once per write. `KnowledgeModal.test.jsx` (M7 T5) renders the
+  dialog in a real shadow root and covers every state above, the picker from a button, a drop,
+  open focus, the Tab wrap both ways and Escape returning focus; `e2e/a11y.spec.js` walks it from
+  the keyboard only in Chromium (Enter → the real file chooser, Tab wraps, Escape), axe 0 in
+  both themes.
 
-### 5.2 Radix UI for generic components — PARTLY IMPLEMENTED
+### 5.2 Radix UI for generic components — IMPLEMENTED
 
-`@radix-ui/react-dialog` powers the knowledge modal (§5.1); it is the only Radix package in
-`agent-client/package.json`. There is no toast on this branch. Connection status (v1 gap #6) is
-shown without one, since M4 T4: `AgentApp.jsx` has a status line (`role="status"`: Not connected
-/ Connecting… / Live / Reconnecting (attempt n of 6)… / Connection lost, or Can't connect for a
-fatal failure), one primary button whose
-job follows the status and is never disabled (Connect; Cancel while connecting; Disconnect while
-live or reconnecting, so the viewer can hang up during the backoff; Retry on `failed`, Reload
-page when the page's token is rejected, or Try again when the server isn't configured — a reload
-can't fix that, M6 T6), and, on `failed`, the reason in a `role="alert"` (e.g. "Reload
-the page to reconnect" after a rejected token). A blocked microphone is a `role="alert"` too. The Radix toast for the failed state arrives with the designed card in M7
-(#11).
+Two Radix packages, both `1.3.1` so each shared primitive (`primitive`, `react-portal`,
+`react-presence`, `react-dismissable-layer`, …) is installed and bundled once:
+`@radix-ui/react-dialog` for the knowledge modal (§5.1) and `@radix-ui/react-toast` for the
+failure notice (M7 T4, R20).
+
+Connection status (v1 gap #6) lives in the card (`AgentApp.jsx`): a status line
+(`role="status"`: Not connected / Connecting… / Live / Reconnecting (attempt n of 6)… /
+Connection lost, or Can't connect for a fatal failure) and one primary button whose job follows
+the status and is never disabled, so focus stays on it (Talk to the presenter; a pending Cancel
+while connecting; End while live or reconnecting, so the viewer can hang up during the backoff;
+Retry on `failed`, Reload page when the page's token is rejected, or Try again when the server
+isn't configured — a reload can't fix that, M6 T6). On `failed` the reason shows under the status
+line as plain text once the toast has closed (while it is open, the toast says it).
+
+The toast (`FailureToast.jsx`) appears once per failure: above the card (never over its
+button), with the reason and Dismiss — no action of its own since the M7 fix wave, so the screen
+holds one Retry, the card's — and the card holds its reason line (space kept, hidden) until the toast closes; it
+closes on its 8 s timer (paused on hover and focus), Escape, a swipe or Dismiss, and a re-render
+never reopens it — the next failure (`useLiveAgent`'s `failureCount`) gets a new one. Who
+announces what: the toast is the one live announcement of the reason (Radix's announcer,
+assertive, with a visually hidden line "Use the Retry button on the presenter card."), so the
+card's copy of it is not an alert, and a screen reader hears it once; a blocked mic and the
+other capture or voice-support problems are not connection failures and get no toast, only the
+card's `role="alert"` with what to do. F8 (Radix's hotkey) takes focus into the toast. Radix
+moves Tab inside the toast, and from its focus proxies, by comparing `document.activeElement`,
+which inside the shadow root is the host, so Tab skipped straight out of the toast;
+`FailureToast.jsx` handles those moves itself in capture phase (the toast, Dismiss, then back to
+the card's button) and returns focus to the button when a focused toast closes.
+`e2e/loop.spec.js` walks it in the real shadow root.
 
 ### 5.3 The `server/` scope question
 

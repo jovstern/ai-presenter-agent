@@ -18,13 +18,17 @@ const LIVE_SOCKET = /^wss:\/\/generativelanguage\.googleapis\.com\//;
 
 /** @param {import('@playwright/test').Page} page */
 function card(page) {
-  const host = page.locator('#ai-presenter-agent-host');
+  // The card's landmark, not the whole host: the toast and Radix's
+  // announcer live in the shadow root too.
+  const panel = page.locator('#ai-presenter-agent-host').getByRole('complementary', {
+    name: 'AI presenter',
+  });
   return {
-    status: host.getByRole('status'),
+    status: panel.getByRole('status'),
     /** @param {string} name */
-    button: (name) => host.getByRole('button', { name, exact: true }),
-    userLines: host.locator('li.agent-app__line--user'),
-    agentLines: host.locator('li.agent-app__line--agent'),
+    button: (name) => panel.getByRole('button', { name, exact: true }),
+    userLines: panel.locator('li.transcript__entry[data-role="user"]'),
+    agentLines: panel.locator('li.transcript__entry[data-role="agent"]'),
   };
 }
 
@@ -124,28 +128,19 @@ test.beforeEach(() => {
 });
 
 /**
- * The card's transcript with consecutive chunks of one speaker joined, so a
- * failed run says what the agent heard and answered.
+ * The card's transcript, one line per turn as the card coalesces them
+ * (transcript.js), so a failed run says what the agent heard and answered.
+ * The card keeps the last 20 turns, so that is what a failure records.
  * @param {import('@playwright/test').Page} page
  */
 async function readTranscript(page) {
-  const lines = await page
-    .locator('#ai-presenter-agent-host li.agent-app__line')
-    .evaluateAll((items) =>
-      items.map((item) => ({
-        role: item.classList.contains('agent-app__line--user') ? 'user' : 'agent',
-        text: item.textContent ?? '',
-      })),
-    );
-  /** @type {string[]} */
-  const turns = [];
-  let lastRole = '';
-  for (const { role, text } of lines) {
-    if (role === lastRole) turns[turns.length - 1] += text;
-    else turns.push(`${role}: ${text}`);
-    lastRole = role;
-  }
-  return turns.map((turn) => turn.replace(/\s+/g, ' ').trim());
+  return page.locator('#ai-presenter-agent-host li.transcript__entry').evaluateAll((items) =>
+    items.map((item) => {
+      const role = item instanceof HTMLElement ? item.dataset.role : '';
+      const text = item.querySelector('.transcript__text')?.textContent ?? '';
+      return `${role}: ${text.replace(/\s+/g, ' ').trim()}`;
+    }),
+  );
 }
 
 // After every test, passed or not: a failed run's partial numbers still count,
@@ -164,7 +159,7 @@ test.afterEach(async ({ page }, testInfo) => {
 async function connectLive(page) {
   const { status, button } = card(page);
   await page.goto('/');
-  await button('Connect').click();
+  await button('Talk to the presenter').click();
   await expect(status).toHaveText('Live', { timeout: 15_000 });
 }
 
@@ -284,7 +279,7 @@ test('reconnect: a dropped socket recovers and the conversation carries on', asy
   extra.reconnectAttempts = sockets.length - 1;
   extra.resumed = resumedPerSocket.at(-1);
 
-  // The follow-up question is spoken ~12 s after Connect, after the drop: the
+  // The follow-up question is spoken ~12 s after Talk, after the drop: the
   // recovered session hears it and answers.
   const agentLinesBefore = await agentLines.count();
   await expect(userLines.first()).toBeVisible({ timeout: 45_000 });

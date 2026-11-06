@@ -21,6 +21,18 @@
 // The window covers one request: the user speaking clears it, since a loop is
 // the model acting with no new input. Four separate "click increment"
 // requests, or home → settings asked for twice, are no loop.
+// A known gap: the agent's own voice picked up by the mic (speakers, no
+// headset) comes back as user transcription, so its echo clears the window
+// too, and a loop narrated aloud could reset itself. Gating userSpoke() on
+// the fragment's length was weighed and not done (M7 T4), on the live e2e's
+// transcripts (.metrics/live.json, the 14 scenario runs that recorded one):
+// no user line in them echoes the agent, and the one short user turn
+// ("notifications and save", 3 words) was a real request the voice detection
+// had split off, which a gate would have taken for an echo. userSpoke() also
+// runs per fragment, a word or two at a time, so a length gate would need the
+// whole turn first. The evidence is thin: the e2e's mic is a file, which can't
+// hear the speakers. The browser's echo cancellation (on by default in
+// getUserMedia) is the mitigation; an echo seen in a real session reopens it.
 // Kept as they are in M6 T5: in 14 live runs with the `ds:loop-trip` mark
 // (and 5 more where a refused action would show as a failed tool) nothing
 // tripped, and the six-step task's longest repeat is the counter's two
