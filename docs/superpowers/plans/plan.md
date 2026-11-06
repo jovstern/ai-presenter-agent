@@ -649,6 +649,10 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - The user creates the Render service from the blueprint and sets `GEMINI_API_KEY`.
 - The agent runs the e2e against the URL and the observer against production, and records
   `docs/metrics/m08.md`.
+- Hop count (`TRUST_PROXY_HOPS`): from one machine, load `/` 61 times, each with a different
+  forged first `X-Forwarded-For` entry. Hops right → the 61st gets 429 (Render's proxy
+  appends the real IP, so every load shares one bucket). Never a 429 → the hop count is
+  wrong; compare with `TRUST_PROXY_HOPS=2`.
 
 *(medium, 15 min)*
 

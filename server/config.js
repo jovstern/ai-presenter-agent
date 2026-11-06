@@ -27,7 +27,12 @@ const optional = (schema) =>
 const Env = z
   .object({
     PORT: optional(z.coerce.number().int().min(1).max(65535)),
-    GEMINI_API_KEY: optional(z.string()),
+    // Trimmed, so a whitespace-only key (a stray space in the dashboard)
+    // counts as unset and fails the production check below.
+    GEMINI_API_KEY: z.preprocess(
+      (value) => (typeof value === 'string' ? value.trim() : value),
+      optional(z.string().min(1)),
+    ),
     NODE_ENV: optional(z.enum(['development', 'production', 'test'])),
     LOG_LEVEL: optional(z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'])),
     // Render puts one TLS-terminating load balancer in front of the service
@@ -38,10 +43,13 @@ const Env = z
   // Production without a key would deploy a page whose Talk can never work;
   // failing here fails the deploy, and Render keeps the previous one. Local
   // dev (`npm run dev`) and the e2e (a dummy key) keep the M6 not_configured
-  // path, which the card shows as Try again.
+  // path, which the card shows as Try again. `when`: Zod 4 skips an object
+  // refinement once any field has an issue, and a bad PORT must not hide a
+  // missing key (every bad variable is listed at once).
   .refine((env) => env.NODE_ENV !== 'production' || env.GEMINI_API_KEY !== undefined, {
     path: ['GEMINI_API_KEY'],
     message: 'is required when NODE_ENV=production',
+    when: () => true,
   });
 
 /**

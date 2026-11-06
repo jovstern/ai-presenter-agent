@@ -489,6 +489,17 @@ describe('other routes', () => {
     expect(res.body).toEqual({ ok: true });
   });
 
+  it('logs no request line for /health (Render polls it), but still one for other routes', async () => {
+    const { app, lines } = setup();
+    await request(app).get('/health');
+    await request(app).get('/nope');
+
+    const urls = lines
+      .filter((line) => line.msg === 'request completed')
+      .map((line) => /** @type {{ url: string }} */ (line.req).url);
+    expect(urls).toEqual(['/nope']);
+  });
+
   it('an unknown path is a JSON 404 in the one error shape', async () => {
     const { app } = setup();
     const res = await request(app).get('/nope');

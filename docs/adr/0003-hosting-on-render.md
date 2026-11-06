@@ -36,6 +36,12 @@ Render, chosen by the user, deployed from a `render.yaml` blueprint. The build s
 - The blueprint is `render.yaml` (M8 T1): a free web service, Node from `.nvmrc`, `/health`
   as the health check, and a preview instance per pull request (`previews.generation:
   automatic`; Render's preview *environments* need a paid workspace and aren't used).
+  `autoDeployTrigger: checksPass`: a push to `master` deploys only after its CI checks pass,
+  so a red commit never goes live.
+- A pull request preview copies the base service's env vars, so previews run on the
+  production `GEMINI_API_KEY`: each is a public `onrender.com` URL minting tokens on the same
+  key and quota. Accepted for a solo repo, where every PR is the owner's; revisit (a separate
+  preview key, or previews off) if the repo gets collaborators.
 - A production start without `GEMINI_API_KEY` fails (`server/config.js`), so a deploy with no
   key fails its start and Render keeps the previous version, instead of going live with a
   card that can only say Try again.

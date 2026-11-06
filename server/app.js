@@ -457,6 +457,9 @@ export function createApp({
       },
       // Manual req.log lines carry just `reqId`, not the whole request.
       quietReqLogger: true,
+      // Render's health check polls /health (ADR 0003); a line per poll
+      // would bury the real traffic.
+      autoLogging: { ignore: (req) => req.url?.split('?')[0] === '/health' },
       serializers: {
         // The path only: the token route's query carries the page nonce,
         // which is a credential for an hour and never belongs in a log.
@@ -547,8 +550,8 @@ export function createApp({
   );
 
   /**
-   * The client log's body-parser errors: 413 past the cap, 400 for anything
-   * else it refuses. Logged by type only: a parse error carries the raw body.
+   * The client log's body-parser errors: 413 past the cap, 415 for a charset
+   * or Content-Encoding it can't decode, 400 for anything else it refuses. Logged by type only: a parse error carries the raw body.
    * @param {unknown} err
    * @param {Request} req
    * @param {Response} res
@@ -565,6 +568,8 @@ export function createApp({
     req.log.warn({ status, type }, 'client log rejected');
     if (status === 413) {
       sendError(res, 413, 'payload_too_large', 'The report is larger than 4 kB');
+    } else if (status === 415) {
+      sendError(res, 415, 'unsupported_media_type', 'The report must be UTF-8 JSON');
     } else {
       sendError(res, 400, 'invalid_request', 'The report is not valid JSON');
     }

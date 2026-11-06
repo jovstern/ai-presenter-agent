@@ -131,13 +131,15 @@ it, so a deploy without one fails instead of going live broken.
 `render.yaml` is a Render Blueprint ([ADR 0003](docs/adr/0003-hosting-on-render.md)): one free
 Node web service that builds agent-client, installs the server's production dependencies and
 runs `npm --prefix server start`, with `NODE_ENV=production`, a `/health` check and a preview
-instance per pull request. Node comes from `.nvmrc`.
+instance per pull request. Node comes from `.nvmrc`. A push to `master` deploys only once
+its CI checks pass (`autoDeployTrigger: checksPass`).
 
 1. In the Render dashboard: **New → Blueprint**, pick this repository; Render reads
    `render.yaml`.
 2. When it asks for `GEMINI_API_KEY` (`sync: false`, so it never lives in the repo), paste the
-   key, then create. Render says a pull request preview copies its base service's env vars,
-   so previews get the key too (to confirm on the first preview).
+   key, then create. A pull request preview copies its base service's env vars, so previews
+   run on the production key: each is a public URL minting on the same quota (accepted for a
+   solo repo; ADR 0003).
 3. Open the service's `onrender.com` URL. The free plan sleeps when idle, so the first visit
    after a while takes about 30 s.
 
@@ -151,7 +153,7 @@ changing code.
 Everything lands in the server's stdout as pino JSON lines, which is what Render's **Logs**
 tab shows (one JSON object per line; its search box matches any text in it).
 
-- **Requests** — every request is one `"msg":"request completed"` line with the request id
+- **Requests** — every request but `/health` (Render polls it) is one `"msg":"request completed"` line with the request id
   (`reqId`, also sent back as `x-request-id`), method, path (never the query, which carries the
   page nonce), status and `responseTime` in ms. A failed token mint is an error line, `live token
   mint failed`; a minted one is `live token minted` (never the token).
@@ -207,7 +209,7 @@ npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capt
 npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 5 files, 113 tests
+npm test        # vitest + supertest: 5 files, 117 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -348,8 +350,9 @@ How to run it, what each number means and the current baseline: `docs/metrics/RE
 
 The suite in `server/__tests__/`:
 
-- `config.test.js` — `loadConfig`: the defaults, every variable, blank means unset, a missing
-  key fatal in production only, each bad variable named, none of the values echoed.
+- `config.test.js` — `loadConfig`: the defaults, every variable, blank means unset, the key
+  trimmed, a missing or whitespace-only key fatal in production only, each bad variable named
+  and all at once (a missing production key alongside a bad `PORT`), none of the values echoed.
 - `app.test.js` — supertest against `createApp` with a stubbed Gemini mint and clock: the token
   gate (403 cross-origin or with no Origin/Referer, 400 malformed nonce, 403 unknown or expired
   nonce, 429 past the limit, a JSON `not_configured` 500 with no key or when Google rejects
@@ -358,7 +361,7 @@ The suite in `server/__tests__/`:
   client error keeps its 4xx), `/`, `/sandbox`, `/sandbox/` and `/sandbox/index.html` templated
   with a nonce and rate-limited per IP (an HTML 429 with `Retry-After` for a browser, JSON
   otherwise), no inline script on any page, `errorPage` escaping its arguments, the CSP and other headers
-  (production adds HSTS), `/health`, an HTML 404 for a browser and a JSON one for `/api/*`, the
+  (production adds HSTS), `/health` (with no request log line: Render polls it), an HTML 404 for a browser and a JSON one for `/api/*`, the
   nonce cap, no nonce or token in the logs, and behind a proxy (`trustProxyHops: 1`): an https
   Origin or Referer passes with `X-Forwarded-Proto: https`, two `X-Forwarded-For` clients get
   separate buckets in both limiters, a forged first entry doesn't pick the bucket, and without
@@ -367,7 +370,8 @@ The suite in `server/__tests__/`:
   once with the request id (a vital at info, an error and a connection failure at warn), only
   the schema's fields logged, strings truncated, URL queries, fragments and token-shaped values
   stripped (no nonce in any line), 400 for an unknown type, a vital outside LCP / INP / CLS, a
-  bad rating or value, malformed or non-JSON bodies (the body never logged), 413 over 4 kB,
+  bad rating or value, malformed or non-JSON bodies (the body never logged), 413 over 4 kB, 415
+  for a charset or Content-Encoding it can't decode,
   403 cross-origin or with no Origin/Referer, 403 for an unknown or expired nonce, 400 for a
   missing or malformed one, 429 past its own per-IP limit (60 a minute by default) without
   touching the token route's.

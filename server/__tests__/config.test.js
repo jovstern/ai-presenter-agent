@@ -77,11 +77,22 @@ describe('loadConfig', () => {
     expect(/** @type {Error} */ (err).message).toContain(name);
   });
 
-  it('lists every bad variable at once', () => {
-    const err = /** @type {Error} */ (errorOf(() => loadConfig({ PORT: 'x', LOG_LEVEL: 'y' })));
+  it('lists every bad variable at once, a missing production key included', () => {
+    const err = /** @type {Error} */ (
+      errorOf(() => loadConfig({ NODE_ENV: 'production', PORT: 'x', LOG_LEVEL: 'y' }))
+    );
 
     expect(err.message).toContain('PORT');
     expect(err.message).toContain('LOG_LEVEL');
+    expect(err.message).toMatch(/GEMINI_API_KEY: is required when NODE_ENV=production/);
+  });
+
+  it('trims the key, and fails fast in production on a whitespace-only one', () => {
+    expect(loadConfig({ GEMINI_API_KEY: `  ${SECRET}\n` }).geminiApiKey).toBe(SECRET);
+
+    const err = errorOf(() => loadConfig({ NODE_ENV: 'production', GEMINI_API_KEY: '   ' }));
+    expect(err).toBeInstanceOf(ConfigError);
+    expect(/** @type {Error} */ (err).message).toMatch(/GEMINI_API_KEY/);
   });
 
   it('never echoes a value in its message', () => {

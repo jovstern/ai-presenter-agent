@@ -96,7 +96,7 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       with the token route's gates, its own rate limit, a Zod body and a 4 kB cap, and
       `agent-client/src/clientLog.js`; `server/__tests__/clientLog.test.js`, the
       `connection` beacon in `e2e/widget.spec.js`. Ticked once the lines show in Render's
-      logs, T3.)* *(Open: ticked in T3 when live.)*
+      logs, T3.)*
 - ❌ R24 The observer runs against production; the README is final; leftovers are filed
       as issues. *(Open: ticked in T3 when live. M8 T4 did the rest: the README is final but for
       its Live URL (`<!-- LIVE_URL -->`, T3 fills it), and the leftovers are issues #17–#22

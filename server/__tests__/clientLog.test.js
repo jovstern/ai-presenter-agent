@@ -247,6 +247,26 @@ describe('POST /api/client-log', () => {
     expect(lines.find((line) => line.msg === 'client log rejected')).toMatchObject({ level: 40 });
   });
 
+  it.each([
+    ['an unsupported charset', { 'Content-Type': 'application/json; charset=latin1' }],
+    ['an unsupported encoding', { 'Content-Encoding': 'compress' }],
+  ])('answers %s with 415 unsupported_media_type, not a JSON error', async (_, headers) => {
+    const { app, lines } = setup();
+    const nonce = await pageNonce(app);
+
+    const res = await request(app)
+      .post('/api/client-log')
+      .query({ nonce })
+      .set('Host', HOST)
+      .set('Origin', ORIGIN)
+      .set({ 'Content-Type': 'application/json', ...headers })
+      .send(JSON.stringify(VITAL));
+
+    expect(res.status).toBe(415);
+    expect(res.body.error.code).toBe('unsupported_media_type');
+    expect(clientLines(lines)).toEqual([]);
+  });
+
   it('accepts a body just under 4 kB', async () => {
     const { app } = setup();
     const nonce = await pageNonce(app);

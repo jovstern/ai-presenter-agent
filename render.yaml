@@ -13,7 +13,9 @@ services:
     buildCommand: npm --prefix agent-client ci --include=dev && npm --prefix agent-client run build && npm --prefix server ci --omit=dev
     startCommand: npm --prefix server start
     healthCheckPath: /health
-    autoDeployTrigger: commit
+    # Deploy a master commit only once its GitHub checks pass (ci.yml's
+    # `check`: npm run check and the e2e), never a red one.
+    autoDeployTrigger: checksPass
     # A preview instance per pull request; it copies the base service's env.
     previews:
       generation: automatic

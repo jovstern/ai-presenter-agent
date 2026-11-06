@@ -125,8 +125,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `error` / `vital` / `connection` answered 400 `invalid_request`, then 204 and one pino
     line — `client vital` at info, `client error` and `client connection failed` at warn —
     with the parsed fields only, strings cut and passed through `redact`, which strips URL
-    queries and fragments and masks token-shaped values; body-parser errors are logged by
-    type, never with the body). pino-http logs every request with a request id (`x-request-id`); helmet
+    queries and fragments and masks token-shaped values; body-parser errors — 415
+    `unsupported_media_type` for a charset or encoding it can't decode — are logged by
+    type, never with the body). pino-http logs every request but `/health` (Render polls it) with a request id (`x-request-id`); helmet
     sends the CSP (see below) and the other security headers. Every JSON error is
     `{ error: { code, message } }`. A failed mint is `not_configured` (500) when Google rejects
     the key and `upstream_error` (502) otherwise, both logged at error. The central error
@@ -138,9 +139,10 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     locked to the model in `agent-client/src/liveModel.json` with `lockAdditionalFields: []`
     ([ADR 0004](docs/adr/0004-live-token-constraints.md)).
   - `config.js` — `loadConfig(env)`: the env parsed once with Zod (`PORT` or 3000,
-    `GEMINI_API_KEY`, `NODE_ENV`, `LOG_LEVEL` or `info`, `TRUST_PROXY_HOPS` or 1 in production
-    and 0 otherwise). A bad variable throws a `ConfigError` naming it, never its value; a
-    missing key is fatal only with `NODE_ENV=production` (locally and in the e2e the token
+    `GEMINI_API_KEY` (trimmed), `NODE_ENV`, `LOG_LEVEL` or `info`, `TRUST_PROXY_HOPS` or 1 in production
+    and 0 otherwise). A bad variable throws a `ConfigError` naming it, never its value, and
+    every bad variable is listed at once; a
+    missing or whitespace-only key is fatal only with `NODE_ENV=production` (locally and in the e2e the token
     route answers `not_configured` and the card offers Try again).
   - `index.js` — `loadConfig(process.env)` (on a `ConfigError`: the message to stderr, exit 1),
     the v1alpha `GoogleGenAI` client for the mint, `listen`, graceful SIGTERM/SIGINT shutdown
@@ -282,19 +284,19 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   card's reason after it closes, one announcement, the keyboard walk and focus return; each
   failure reported to `onFailure` once) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (113 tests), sharing `harness.js` (`setup`, the
+  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (117 tests), sharing `harness.js` (`setup`, the
   capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health` (and no request log line for it), the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
   behind a trusted proxy: `X-Forwarded-Proto: https` passes the origin check, `X-Forwarded-For`
   clients get their own bucket in both limiters, and with no trusted proxy it is ignored),
   `clientLog` (`POST /api/client-log`: each report type's 204 and log line with the request
   id and level, unknown keys dropped, truncation and redaction, no nonce logged, 400 for bad
-  bodies and malformed or non-JSON ones, 413 over 4 kB, 403 cross-origin and for a bad or
+  bodies and malformed or non-JSON ones, 413 over 4 kB, 415 for a charset or encoding it can't decode, 403 cross-origin and for a bad or
   expired nonce, 429 on its own limit, separate from the token route's),
-  `config` (`loadConfig`: defaults, blank means unset, a missing key fatal in production only,
-  bad variables named without their values),
+  `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
+  in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
   config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (33
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP

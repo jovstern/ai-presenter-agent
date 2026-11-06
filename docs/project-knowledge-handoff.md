@@ -183,7 +183,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   decisions log below and `demostack-ai-presenter-agent.md` §5.3), `loopGuard.test.js` (5) and
   `pcm.test.js` (3). The first build's `renderIsolation.test.jsx` didn't survive the rebuild; it
   returned in M7 T2, with `VolumeOrb.test.jsx`. At the end of cycle 1 (M8 T4) the counts are
-  20 files and 381 tests in agent-client, 5 files and 113 tests in `server/` (`config` and
+  20 files and 381 tests in agent-client, 5 files and 117 tests in `server/` (`config` and
   `clientLog` added in M8), and 33 deterministic Playwright tests in 5 specs, plus the 3 opt-in
   live ones; CLAUDE.md lists what each file covers.
 - `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 725.7 kB,
