@@ -222,7 +222,7 @@ come from `status`.
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
 | failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) in the text colour at medium weight (`data-status="failed"`), plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once per failure, above the card: the reason and Dismiss only, with a visually hidden line naming the card's button ("Use the Retry button on the presenter card."); it is the one live announcement of the reason (assertive). While it is open the card hides its own reason line; once it closes (dismissed, Escape, swiped or timed out after 8 s) the card shows the reason as plain text under the headline, so the screen holds one reason and one Retry, and the reason is announced once (M7 T4; ruling of the M7 fix wave) |
 | closed | back to idle |
-| mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
+| mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk to the presenter." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
 
 - **Transcript:** the coalesced turns (the last 20, `MAX_ENTRIES`), `aria-live="polite"`, with
@@ -253,6 +253,13 @@ come from `status`.
   - modal for assistive technology too: the card and the toast region behind it are `inert`
     while it is open, since Radix's `aria-hidden` on the page's other children never reaches
     into the shadow root (M7 T6).
+- **Layout of the card:** three columns — the orb, the primary button, the knowledge button —
+  with the transcript spanning them above and the status, reason and mic lines as a caption
+  under the button column, aligned with the primary button (M7 fix wave). The knowledge button
+  is a 16 px inline SVG document icon (`currentColor`, `aria-hidden`) and the count, with
+  `title="Knowledge files"`. The primary label never wraps (`white-space: nowrap`); at 340 px and
+  below the card's padding and the two buttons' padding tighten so "Talk to the presenter" fits
+  at 320 px.
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
 - **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus

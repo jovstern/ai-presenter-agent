@@ -193,12 +193,18 @@ button:active {
 
 /* ---- The card ------------------------------------------------------------ */
 
+/*
+ * Three columns: the orb, the primary button, the knowledge button. The
+ * transcript spans them above; the status line and the error lines under the
+ * buttons are a caption aligned with the primary button, not the orb.
+ */
 .agent-app {
   position: relative; /* holds the empty transcript region */
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: var(--control-height) minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-2);
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
   padding: var(--space-4);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-card);
@@ -262,9 +268,11 @@ button:active {
   transform: scale(calc(0.6 + var(--mic-level, 0) * 0.4));
 }
 
-/* The one primary action takes the row; the knowledge button sits beside it. */
+/* The one primary action takes the row; the knowledge button sits beside it.
+   Its label never wraps ("Talk to the presenter" fits at 320 px, below). */
 .agent-app__primary {
-  flex: 1;
+  margin-bottom: var(--space-1);
+  white-space: nowrap;
   border-color: var(--color-accent);
   background: var(--color-accent);
   color: var(--color-on-accent);
@@ -295,8 +303,13 @@ button:active {
 }
 
 .agent-app__knowledge-btn {
+  margin-bottom: var(--space-1);
   padding: 0 var(--space-3);
   font-variant-numeric: tabular-nums;
+}
+
+.agent-app__knowledge-icon {
+  flex: none;
 }
 
 /* No knowledge yet: a dashed outline hints there is something to add, without
@@ -305,11 +318,24 @@ button:active {
   border-style: dashed;
 }
 
-/* Everything after the button row takes a full line of its own. */
+/* The narrowest phones (320 px): a tighter card, so the primary button keeps
+   "Talk to the presenter" on one line beside the orb and the knowledge button. */
+@media (max-width: 340px) {
+  .agent-app {
+    padding: var(--space-3);
+  }
+
+  .agent-app__primary,
+  .agent-app__knowledge-btn {
+    padding: 0 var(--space-2);
+  }
+}
+
+/* The caption under the buttons: a line each, aligned with the primary button. */
 .agent-app__status,
 .agent-app__error,
 .agent-app__mic-error {
-  flex-basis: 100%;
+  grid-column: 2 / -1;
 }
 
 .agent-app__status {
@@ -339,7 +365,7 @@ button:active {
  * box too, so the ring is drawn on the unmasked wrapper around it.
  */
 .transcript {
-  flex-basis: 100%;
+  grid-column: 1 / -1;
   margin-bottom: var(--space-2);
   border-radius: var(--radius-control);
 }

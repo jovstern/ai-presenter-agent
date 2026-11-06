@@ -44,13 +44,13 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `AgentApp.jsx` — the card (an `<aside aria-label="AI presenter">` landmark): one
     never-disabled primary button, Talk to the presenter / Cancel (pending, while connecting) /
     End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
-    the failure's reason as plain text, a `role="alert"` for mic and voice-support guidance
-    (keyed by the connect attempt, so a repeat is announced), the transcript, the `📄`
+    the failure's reason as plain text once its toast has closed, a `role="alert"` for mic and voice-support guidance
+    (keyed by the connect attempt, so a repeat is announced), the transcript, the document-icon
     knowledge button (rendered by `KnowledgeModal.jsx`) and the volume orb. It owns the
     dialog's `open` and makes the card and the toast region `inert` while the dialog is open:
     Radix's `hideOthers` sets `aria-hidden` on `document.body`'s children only, never inside
     the shadow root (M7 T6).
-  - `KnowledgeModal.jsx` — the `📄 <count>` button (the Radix `Dialog.Trigger`, so closing returns
+  - `KnowledgeModal.jsx` — the knowledge button (a 16 px document icon and the count; the Radix `Dialog.Trigger`, so closing returns
     focus to it; a controlled `Dialog.Root`, `open` from the card) and the knowledge dialog, portalled into the shadow root: Add files (a real
     `<button>` that opens the file picker and takes dropped files), the file list with "Remove
     <file name>" buttons, an empty state, a rules field with a used / limit counter

@@ -26,6 +26,29 @@ function rulesNotice(length) {
   return '';
 }
 
+// A page with a folded corner and two lines of text: 16 px, in the button's
+// text colour, hidden from assistive technology (the button's text names it).
+function DocumentIcon() {
+  return (
+    <svg
+      className="agent-app__knowledge-icon"
+      width="16"
+      height="16"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d="M9.25 1.75h-5a1 1 0 0 0-1 1v10.5a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V5.25z" />
+      <path d="M9.25 1.75v3.5h3.5M5.75 8.5h4.5M5.75 11h4.5" />
+    </svg>
+  );
+}
+
 /**
  * The knowledge button and its dialog (spec Screens, R21): files and standing
  * rules, read from and written to knowledgeStore.js. The store is the one
@@ -141,12 +164,13 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {/* Named by its content, not an aria-label: the visible count has to be
           part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
-          and the emoji is decoration. The name reads "Knowledge files: 0". */}
+          and the icon is decoration. The name reads "Knowledge files: 0"; the
+          title says the same to a pointer. */}
       <Dialog.Trigger
         className={`agent-app__knowledge-btn${hasContent ? '' : ' agent-app__knowledge-btn--empty'}`}
+        title="Knowledge files"
       >
-        <span aria-hidden="true">📄</span> <span className="visually-hidden">Knowledge files:</span>{' '}
-        {files.length}
+        <DocumentIcon /> <span className="visually-hidden">Knowledge files:</span> {files.length}
       </Dialog.Trigger>
       <Dialog.Portal container={portalContainer}>
         <Dialog.Overlay className="knowledge-modal__overlay" />
@@ -160,8 +184,8 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
         >
           <Dialog.Title>Knowledge</Dialog.Title>
           <Dialog.Description>
-            Files and standing rules the presenter is given as context in every session. Not real
-            RAG: no chunking or retrieval, the content is sent to the model whole.
+            The presenter reads these files and rules at the start of every session. They&rsquo;re
+            saved in this browser only.
           </Dialog.Description>
 
           {/* A real button, so the keyboard reaches the file picker; files

@@ -256,7 +256,7 @@ test('a blocked microphone shows the guidance and leaves the card on Talk', asyn
   await page.goto('/');
   await button('Talk to the presenter').click();
   await expect(alert).toHaveText(
-    'Microphone blocked — allow it in the address bar and press Talk.',
+    'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
   );
   await expect(status).toHaveText('Not connected');
   await expect(button('Talk to the presenter')).toBeVisible();

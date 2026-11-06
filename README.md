@@ -63,7 +63,7 @@ the connection is lost for good. When retrying can't help, it says what can: Rel
 the page's token is rejected, or Try again (asks the server once more) when the server isn't
 configured, which a reload can't fix. A failure also shows a toast above the card, once, with
 the reason and the same action (F8 reaches it from the keyboard); the reason stays under the
-status line. Click the `📄` button on the card to drop in `.txt`/`.md` files it should know about
+status line. Click the knowledge button (the document icon and a count) on the card to drop in `.txt`/`.md` files it should know about
 in advance; they stay in your browser's `localStorage`.
 
 After the first install and `.env` setup, `npm run dev` from the repo root builds agent-client

@@ -159,7 +159,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
 - `AgentApp.jsx` — the card (the volume orb, one Talk to the presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
-  failure's reason, mic alerts, transcript, `📄` knowledge button); `FailureToast.jsx` — the Radix
+  failure's reason, mic alerts, transcript, the knowledge button with its document icon); `FailureToast.jsx` — the Radix
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
   `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
   `KnowledgeModal.jsx` — the knowledge button and its Radix dialog (§5.1).
@@ -440,7 +440,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 
 ### 5.1 RAG-lite knowledge modal (client-side, no backend) — IMPLEMENTED
 
-Built: a button on the agent card (`📄 <count>`, the dialog's `Dialog.Trigger`) opens a **Radix
+Built: a button on the agent card (a document icon and the count, the dialog's `Dialog.Trigger`) opens a **Radix
 `Dialog`** (`KnowledgeModal.jsx`) with an Add files button — a real `<button>`, so the keyboard
 reaches the file picker — that is also the drop target for dragged files (M7 T5; it was a
 mouse-only `<div>` before). Dropped files are read via

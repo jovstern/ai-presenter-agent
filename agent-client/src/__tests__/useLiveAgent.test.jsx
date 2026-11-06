@@ -351,7 +351,7 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('closed');
     expect(cardButton(TALK)).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Microphone blocked — allow it in the address bar and press Talk.',
+      'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
     );
   });
 
@@ -362,19 +362,19 @@ describe('AgentApp + useLiveAgent', () => {
     [
       'the worklet failing to load',
       Object.assign(new Error("Unable to load a worklet's module."), { name: 'WorkletLoadError' }),
-      "Voice couldn't start. Reload the page, then press Talk.",
+      "Voice couldn't start. Reload the page, then press Talk to the presenter.",
     ],
     [
       'the browser never starting audio',
       Object.assign(new Error('The browser did not start audio in time.'), {
         name: 'AudioResumeTimeoutError',
       }),
-      "Voice couldn't start: the browser kept audio paused. Press Talk to try again.",
+      "Voice couldn't start: the browser kept audio paused. Press Talk to the presenter to try again.",
     ],
     [
       'no microphone',
       Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
-      'No microphone found. Connect one, then press Talk.',
+      'No microphone found. Connect one, then press Talk to the presenter.',
     ],
     [
       'the microphone busy',
@@ -463,12 +463,15 @@ describe('AgentApp + useLiveAgent', () => {
     );
   });
 
-  it('names the knowledge button with its visible file count, hiding the emoji from assistive tech', () => {
+  it('names the knowledge button with its visible file count, hiding the icon from assistive tech', () => {
     renderApp();
     // Named by its content, so the visible "0" is part of the name (WCAG 2.5.3).
     const button = screen.getByRole('button', { name: 'Knowledge files: 0' });
     expect(button.hasAttribute('aria-label')).toBe(false);
-    expect(button.querySelector('[aria-hidden="true"]').textContent).toBe('📄');
+    expect(button.title).toBe('Knowledge files');
+    const icon = button.querySelector('svg');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(icon?.getAttribute('stroke')).toBe('currentColor');
   });
 
   it('shows End while open, and End tears the audio down', async () => {
