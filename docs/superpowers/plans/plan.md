@@ -659,6 +659,12 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - Every assessment item is done or filed as an issue.
 - The requirements checklist ✅/❌ and the time log are completed.
 - Propose kit calibration edits for `~/Mnt/portfolio/.claude`.
+- Accepted from the M7 re-review (round 2), fixed here, test first: `Transcript.jsx` `sync`
+  measures the content with `Math.ceil(getBoundingClientRect().height)` instead of the
+  rounded `offsetHeight`, so fractional heights can't overflow by under 1 px (a stray Tab
+  stop and top fade).
+- Bundle margin: M8's `web-vitals` import names only the metrics it reports (M7 left
+  3.3 kB under the 180 kB budget; `docs/metrics/m07.md`).
 
 *(small, 6 min)*
 
