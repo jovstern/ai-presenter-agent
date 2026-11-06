@@ -55,6 +55,26 @@ describe('VolumeOrb', () => {
     expect(frames.pendingCount).toBe(1); // the next frame is booked
   });
 
+  // A write restyles the rings, so a frame whose rounded levels match the
+  // last ones written (silence, a steady tone) writes nothing (m07.md).
+  it('writes a level only when its 2-decimal value changes', () => {
+    const { orb } = renderOrb();
+    const setProperty = vi.spyOn(orb.style, 'setProperty');
+    levels = { output: 0.5, mic: 0.25 };
+    frames.tick();
+    expect(setProperty).toHaveBeenCalledTimes(2);
+    expect(cssLevel(orb)).toBe('0.50');
+
+    levels = { output: 0.501, mic: 0.252 }; // the same at 2 decimals
+    frames.tick();
+    expect(setProperty).toHaveBeenCalledTimes(2);
+
+    levels = { output: 0.6, mic: 0.252 };
+    frames.tick();
+    expect(setProperty).toHaveBeenCalledTimes(3);
+    expect(setProperty).toHaveBeenLastCalledWith('--level', '0.60');
+  });
+
   it('rises at once but falls off smoothly, so speech does not flicker', () => {
     const { orb } = renderOrb();
     levels = { output: 0.8, mic: 0 };

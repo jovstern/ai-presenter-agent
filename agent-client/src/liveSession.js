@@ -301,7 +301,12 @@ export function createLiveSession({
   /** @param {LiveServerMessage['serverContent']} content */
   function trackUtterances(content) {
     if (!content) return;
-    if (content.inputTranscription?.text) loopGuard.userSpoke();
+    if (content.inputTranscription?.text) {
+      loopGuard.userSpoke();
+      // A new request ends the loop episode, so a corrective still held
+      // behind a tool batch is no longer due.
+      heldTurns.delete('corrective');
+    }
     if (content.interrupted) agentTurn = '';
     agentTurn += content.outputTranscription?.text ?? '';
     if (!content.turnComplete) return;

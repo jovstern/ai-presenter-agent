@@ -59,8 +59,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     included, cleared on reopen); top-anchored, with Close in a sticky footer. It reads `knowledgeStore.js` through
     `useSyncExternalStore` (no mirrored state). Its Tab wrap and open focus are its own, read
     from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
-    its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` / `tabStops`,
-    shared with `FailureToast.jsx`.
+    its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` (shared with
+    `FailureToast.jsx`, which keeps its own `toastTabStops`) and `tabStops` (rendered controls
+    only: `checkVisibility()`, else no `hidden` ancestor).
   - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason and Dismiss
     (no action: the card's button is the one Retry), plus a visually hidden line naming the
     card's button. `AgentApp.jsx` owns its `open` and hides the card's reason line while it is

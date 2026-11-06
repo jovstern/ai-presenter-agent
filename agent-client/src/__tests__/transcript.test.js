@@ -134,6 +134,20 @@ describe('endTurn', () => {
     expect(lines(list)).toEqual(['agent: Hi.', 'user: Hello.']);
   });
 
+  // Live's turnComplete ends the model's turn, and the user may already be
+  // speaking when it arrives: the user's entry is not the one that ended.
+  it("ends the agent's entry, not a user entry that came after it", () => {
+    const list = play([agent('Let me show you.'), user('Hel'), 'end', user('lo')]);
+    expect(lines(list)).toEqual(['agent: Let me show you.', 'user: Hello']);
+    expect(list[0].ended).toBe(true);
+    expect(list[1].ended).toBe(false);
+  });
+
+  it('is a no-op with no agent entry', () => {
+    const list = play([user('Hello.')]);
+    expect(endTurn(list)).toBe(list);
+  });
+
   it('is a no-op on an empty list or an already ended turn', () => {
     expect(endTurn([])).toEqual([]);
     const once = play([agent('Hi.'), 'end']);

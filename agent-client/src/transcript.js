@@ -52,14 +52,18 @@ export function appendFragment(list, { role, text }) {
 }
 
 /**
- * Marks the last entry's turn as ended (Live's turnComplete or interrupted).
+ * Marks the agent's latest entry as ended (Live's turnComplete or
+ * interrupted). Those end the model's turn, never the user's, and the user
+ * may already be speaking when they arrive, so the last entry isn't
+ * necessarily the one that ended.
  * @param {TranscriptEntry[]} list
  * @returns {TranscriptEntry[]} `list` itself when there is nothing to end.
  */
 export function endTurn(list) {
-  const last = list.at(-1);
-  if (!last || last.ended) return list;
-  return [...list.slice(0, -1), { ...last, ended: true }];
+  const index = list.findLastIndex((entry) => entry.role === 'agent');
+  const entry = list[index];
+  if (!entry || entry.ended) return list;
+  return list.with(index, { ...entry, ended: true });
 }
 
 /** @param {TranscriptEntry} entry */

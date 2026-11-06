@@ -76,6 +76,16 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         await button('Talk to the presenter').click();
         await expect(status).toHaveText("Can't connect");
         await expect(toasts).toHaveCount(1);
+        // The toast slides in from opacity 0: axe sampling mid-fade read its
+        // colours blended with the page (1 flaky contrast failure in 26 runs,
+        // docs/metrics/m07.md miss 2), so it waits for the toast to settle.
+        await toasts
+          .first()
+          .evaluate((toast) =>
+            Promise.all(
+              toast.getAnimations({ subtree: true }).map((animation) => animation.finished),
+            ),
+          );
 
         const { violations, checkedInShadowRoot } = await analyze(page);
         expect(violations).toEqual([]);

@@ -63,12 +63,19 @@ export function VolumeOrb({ active, outputLevel, micLevel }) {
     if (!animate || !orb) return;
     let level = 0;
     let mic = 0;
+    // What was last written, as written: a write restyles the rings, so a
+    // frame whose rounded value is unchanged (silence between turns, the
+    // fall-off's tail) skips it. Two decimals are finer than a ring moves.
+    let levelText = '';
+    let micText = '';
     const tick = () => {
       const [output, input] = readLevels();
       level = Math.max(output, level * FALL_OFF);
       mic = Math.max(input, mic * FALL_OFF);
-      orb.style.setProperty('--level', level.toFixed(3));
-      orb.style.setProperty('--mic-level', mic.toFixed(3));
+      const nextLevel = level.toFixed(2);
+      const nextMic = mic.toFixed(2);
+      if (nextLevel !== levelText) orb.style.setProperty('--level', (levelText = nextLevel));
+      if (nextMic !== micText) orb.style.setProperty('--mic-level', (micText = nextMic));
       frame = requestAnimationFrame(tick);
     };
     let frame = requestAnimationFrame(tick);

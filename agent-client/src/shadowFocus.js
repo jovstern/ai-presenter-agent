@@ -26,14 +26,24 @@ const TABBABLE = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
+// Rendered, so Tab can land on it: the browser's own answer where it has one
+// (checkVisibility: display none, an unrendered ancestor), else no `hidden`
+// on it or an ancestor, which is how this widget's markup hides things.
+/** @param {HTMLElement} node */
+function isRendered(node) {
+  return typeof node.checkVisibility === 'function'
+    ? node.checkVisibility()
+    : !node.closest('[hidden]');
+}
+
 /**
- * The container's Tab stops, in document order.
+ * The container's Tab stops, in document order; none is an empty list.
  * @param {Element} container
  * @returns {HTMLElement[]}
  */
 export function tabStops(container) {
   return [...container.querySelectorAll(TABBABLE)].filter(
     /** @returns {node is HTMLElement} */
-    (node) => node instanceof HTMLElement && node.tabIndex >= 0,
+    (node) => node instanceof HTMLElement && node.tabIndex >= 0 && isRendered(node),
   );
 }
