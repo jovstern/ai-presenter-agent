@@ -76,12 +76,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 4 specs, 27 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 5 specs, 32 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 17 files, 328 tests
+npm test        # vitest: 18 files, 329 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -134,6 +134,9 @@ The suite in `agent-client/src/__tests__/`:
 - `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list (the
   same array until the files change, for `useSyncExternalStore`), file ids without
   `crypto.randomUUID` (plain http), the context blob it builds.
+- `AgentApp.test.jsx` — the card in a real shadow root: it and its toast region are `inert`
+  while the knowledge dialog is open (Radix's `aria-hidden` on the page never reaches into the
+  shadow root), the dialog itself isn't, and closing restores them and returns focus.
 - `KnowledgeModal.test.jsx` — the knowledge dialog in a real shadow root: a file added, listed
   and removed (focus moves to the next Remove, or Add files), an oversize file as an alert, a
   drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
@@ -174,18 +177,32 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; End returns to "Not
-  connected"; the pending Cancel while setup is held back. A `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no automatic
-  retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload page", both
-  driven from the keyboard with focus kept on the button; the `not_configured` path also checks
-  the toast inside the shadow root — once per failure, F8 then Tab through it and back to the
-  card, Escape closing it with focus back on the button.
+  connected". The card's own states are `widget.spec.js`'s.
+- `widget.spec.js` — every card state on the real `/` page through the same fake-Live harness
+  (`e2e/fakeLive.js`), with no test hook in the bundle. The demo test, "widget demo: Talk, Live
+  with the orb and transcript, a lost connection, Retry", walks idle → the pending Cancel (setup
+  held back) → Live, the orb's `--level` rising with fake agent audio and settling after it → a
+  coalesced transcript (two speakers, a turn boundary) → a forced close → "Reconnecting (attempt
+  1 of 6)…" with End enabled → every retry refused, the backoff's 56 s skipped with
+  `page.clock` → "Connection lost", the reason, Retry focused, one toast → Retry → Live. A
+  `not_configured` 500 goes straight to "Can't connect" and "Try again" (no Reload page, no
+  automatic retries; pressing it asks for one more token), and a 403 rejected nonce to "Reload
+  page", which reloads, both driven from the keyboard with focus kept on the button; the
+  `not_configured` path also checks the toast inside the shadow root — once per failure, F8 then
+  Tab through it and back to the card, Escape closing it with focus back on the button. A
+  blocked mic shows its guidance and leaves the card on Talk, with no toast. At 360, 768 and
+  1440 px: the card's placement (bottom-right, full width between the gutters at 400 px and
+  below), a keyboard walk from the top of the page through the transcript, the primary button
+  and the knowledge button (focus ring visible), the dialog inside the viewport with the card
+  inert behind it (absent from Chromium's accessibility tree, read over CDP) and back on
+  Escape, and axe on the connected card in light and dark.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
   none after End.
 - `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule), in light and dark, on `/`
   with the card idle, failed with its toast, and with the knowledge dialog open; connected (the fake-Live harness, `e2e/fakeLive.js`, shared
-  with `loop.spec.js`) with a transcript line on screen, and on both target-app pages: zero
+  with `loop.spec.js` and `widget.spec.js`) with a transcript line on screen, and on both target-app pages: zero
   violations. In each theme it also walks the knowledge dialog from the keyboard only: Enter on
   Add files opens the file picker, Tab and Shift+Tab wrap inside the dialog, Escape returns
   focus to the knowledge button. axe walks the
@@ -221,8 +238,6 @@ workflow, `pr-demo-check.yml` (job `demo`), fails a PR whose description has no 
 
 ## What's deliberately not here yet
 
-- A test for the `KnowledgeModal` component itself (drag/drop interaction, Radix wiring) — the
-  underlying store is tested, the UI isn't yet (M7, issue #11).
 - The "point this at a real external site" path — see `docs/sandbox-simulation.md` §5 for what
   that would actually take.
 - Anything from the agent-creation side of the real product (see the docs' scope note).

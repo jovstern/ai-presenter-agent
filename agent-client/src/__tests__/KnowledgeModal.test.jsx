@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { KnowledgeModal } from '../KnowledgeModal.jsx';
 import * as knowledgeStore from '../knowledgeStore.js';
 
@@ -25,8 +26,15 @@ function renderModal() {
   const portalContainer = document.createElement('div');
   wrapper.append(mountPoint, portalContainer);
   shadowRoot.append(wrapper);
-  render(<KnowledgeModal portalContainer={portalContainer} />, { container: mountPoint });
+  render(<ControlledModal portalContainer={portalContainer} />, { container: mountPoint });
   return within(wrapper);
+}
+
+// The dialog is controlled; the card owns `open` (AgentApp.jsx), as this does.
+/** @param {{ portalContainer: HTMLElement }} props */
+function ControlledModal({ portalContainer }) {
+  const [open, setOpen] = useState(false);
+  return <KnowledgeModal portalContainer={portalContainer} open={open} onOpenChange={setOpen} />;
 }
 
 const focused = () => shadowRoot.activeElement;

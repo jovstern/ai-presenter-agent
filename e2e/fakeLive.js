@@ -1,4 +1,4 @@
-// The fake-Live harness, shared by loop.spec.js and a11y.spec.js: the token
+// The fake-Live harness, shared by loop.spec.js, widget.spec.js and a11y.spec.js: the token
 // endpoint stubbed with page.route and the Gemini Live socket answered with
 // page.routeWebSocket, so the real @google/genai socket code runs with no key.
 
@@ -39,6 +39,25 @@ export async function fakeGeminiLive(page) {
     sendToLatest(message) {
       sockets.at(-1)?.send(JSON.stringify(message));
     },
+    /**
+     * Agent speech, as Live sends it: one chunk of 24 kHz Int16 PCM, a 220 Hz
+     * tone at half scale, `seconds` long.
+     * @param {number} seconds
+     */
+    sendAgentAudio(seconds) {
+      const samples = Math.round(24000 * seconds);
+      const pcm = Buffer.alloc(samples * 2);
+      for (let i = 0; i < samples; i++) {
+        pcm.writeInt16LE(
+          Math.round(0.5 * 0x7fff * Math.sin((2 * Math.PI * 220 * i) / 24000)),
+          i * 2,
+        );
+      }
+      const inlineData = { mimeType: 'audio/pcm;rate=24000', data: pcm.toString('base64') };
+      sockets
+        .at(-1)
+        ?.send(JSON.stringify({ serverContent: { modelTurn: { parts: [{ inlineData }] } } }));
+    },
     /** The `toolResponse` frames the page sent, across every socket, in order. */
     toolResponses() {
       return sent.flat().flatMap((frame) => frame.toolResponse?.functionResponses ?? []);
@@ -46,23 +65,34 @@ export async function fakeGeminiLive(page) {
   };
 }
 
+/** @typedef {{ status: number, body: object }} TokenReply */
+
+/** A minted token. */
+export const TOKEN_OK = { status: 200, body: { token: 'e2e-token' } };
+
 /**
  * Stubs the token endpoint and records the nonce each call carried.
+ * `respondWith` changes the reply for the calls after it (a reconnect's).
  * @param {import('@playwright/test').Page} page
- * @param {{ status: number, body: object }} reply
+ * @param {TokenReply} reply
  */
 export async function stubToken(page, reply) {
   /** @type {(string | null)[]} */
   const nonces = [];
+  let current = reply;
   await page.route(TOKEN_PATH, async (route) => {
     nonces.push(new URL(route.request().url()).searchParams.get('nonce'));
-    await route.fulfill({ status: reply.status, json: reply.body });
+    await route.fulfill({ status: current.status, json: current.body });
   });
   return {
     get count() {
       return nonces.length;
     },
     nonces,
+    /** @param {TokenReply} next */
+    respondWith(next) {
+      current = next;
+    },
   };
 }
 
@@ -86,6 +116,8 @@ export function card(page) {
   return {
     panel,
     status: panel.getByRole('status'),
+    orb: panel.locator('.volume-orb'),
+    transcript: panel.getByRole('region', { name: 'Transcript' }),
     alert: panel.getByRole('alert'),
     /** @param {string} name */
     button: (name) => panel.getByRole('button', { name, exact: true }),

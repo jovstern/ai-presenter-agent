@@ -63,7 +63,9 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       ratio are measured on the 8-node target app only.)*
 
 **M7: presentable widget (new issue)**
-- [ ] R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.
+- [x] R17 A designed card with tokens, light and dark themes, and styles in `styles.css`.
+      *(M7 T1: the tokens on `:host`, both schemes, reduced motion; M7 T6: `e2e/widget.spec.js`
+      checks the placement at 360, 768 and 1440 px and runs axe on the card in both themes.)*
 - [x] R18 A rAF volume meter held in a ref, plus a Profiler render-count test (spec goals
       #8 and #9). *(M7 T2: `VolumeOrb.jsx`, levels from `getLevel()` in `audioIO.js`;
       `renderIsolation.test.jsx`.)*
@@ -71,12 +73,15 @@ say what it is doing while it does it, recovering cleanly if the connection drop
 - [x] R20 Connection states shown in the card, with a Radix Toast and Retry. *(M7 T4:
       `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
       page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
-      one live announcement of the reason; F8 and Tab handled inside the shadow root).)*
+      one live announcement of the reason; F8 and Tab handled inside the shadow root). M7 T6:
+      `e2e/widget.spec.js` drives every state, the backoff run out to the toast included.)*
 - [x] R21 The knowledge modal is polished and has a component test. *(M7 T5:
       `KnowledgeModal.jsx` reads the store through `useSyncExternalStore`, owns the knowledge
       button as its `Dialog.Trigger`, and does its own Tab wrap in the shadow root;
       `KnowledgeModal.test.jsx`, and the keyboard walk in `e2e/a11y.spec.js`. Issue #5's
-      "rules polish" — the character-limit feedback — is this task's counter and alert.)*
+      "rules polish" — the character-limit feedback — is this task's counter and alert. M7 T6:
+      the card and its toast region are `inert` while the dialog is open, `AgentApp.test.jsx`
+      and `e2e/widget.spec.js`.)*
 
 **M8: deploy and close the cycle (new issue)**
 - [ ] R22 Live on Render over HTTPS, with config parsed at startup.
@@ -231,7 +236,10 @@ come from `status`.
     once within 200 characters and again at the limit (not per keystroke); over the limit the
     text stays, unsaved, with `aria-invalid` and a `role="alert"` saying by how much;
   - focus: Add files on open; Tab and Shift+Tab wrap inside the dialog; Escape or Close
-    returns focus to the knowledge button (M7 T5).
+    returns focus to the knowledge button (M7 T5);
+  - modal for assistive technology too: the card and the toast region behind it are `inert`
+    while it is open, since Radix's `aria-hidden` on the page's other children never reaches
+    into the shadow root (M7 T6).
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
 - **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus
@@ -256,7 +264,8 @@ components use the tokens, never raw values.
   - the focus ring is the accent, 2 px with a 2 px offset;
   - AA verified (M7 T1): text 17.7 / 16.1, muted 7.7 / 6.9, danger 6.5 / 6.4, the primary
     button's label 6.3 / 5.9, the focus ring and control borders 6.3 / 6.9 and 4.8 / 6.9 (light
-    / dark, on the surface); axe's colour-contrast passes in both schemes (`e2e/a11y.spec.js`).
+    / dark, on the surface); axe's colour-contrast passes in both schemes (`e2e/a11y.spec.js`, and
+    `e2e/widget.spec.js` at 360, 768 and 1440 px).
 - **Shape:** radius 12 for the card and 8 for controls; one shadow token (deeper in dark); 1 px
   borders. Controls are at least 44 × 44 px.
 - **Spacing:** 4 / 8 / 12 / 16 / 24.

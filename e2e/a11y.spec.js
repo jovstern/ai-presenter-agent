@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { test, expect } from './fixtures.js';
-import { card, fakeGeminiLive, stubToken } from './fakeLive.js';
+import { TOKEN_OK, card, fakeGeminiLive, stubToken } from './fakeLive.js';
 
 // axe on every screen this build has (spec Budgets: 0 violations), with all of
 // axe's default rules, best practices included.
@@ -165,7 +165,7 @@ function isFocused(/** @type {import('@playwright/test').Locator} */ locator) {
 // line on screen: the transcript is what axe's `region` rule flagged before
 // the card became a named landmark (docs/metrics/m06.md, observer miss 1).
 test('the sandbox page with the card connected and a transcript line', async ({ page }) => {
-  await stubToken(page, { status: 200, body: { token: 'e2e-token' } });
+  await stubToken(page, TOKEN_OK);
   const live = await fakeGeminiLive(page);
   const { status, button } = card(page);
 

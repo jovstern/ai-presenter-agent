@@ -587,6 +587,16 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - Check the bundle against the 180 kB budget (raised by the user on 2026-11-05, option A of
   the M6 bundle breakdown in `docs/metrics/m06.md`). Radix Dialog is upgraded together with
   Toast so the shared primitives are installed once. A miss is brought to the user.
+- Done: `e2e/widget.spec.js`, 7 tests. The demo is "widget demo: Talk, Live with the orb and
+  transcript, a lost connection, Retry" (the backoff's 56 s skipped with `page.clock`); the
+  card-state tests moved here from `loop.spec.js` (the pending Cancel, `not_configured` → Try
+  again, 403 → Reload page, now also pressed), plus the blocked mic and a 360 / 768 / 1440 px
+  loop (placement, keyboard walk, axe light and dark). `fakeLive.js` gained `sendAgentAudio`,
+  `TOKEN_OK` and `respondWith`.
+- The gap T5 found: the card and its toast region are `inert` while the knowledge dialog is
+  open (`AgentApp.jsx` owns the dialog's `open`), since Radix's `hideOthers` stops at the shadow
+  host; `AgentApp.test.jsx` and Chromium's accessibility tree in `widget.spec.js` cover it.
+- Bundle: 175.41 kB gzip, 4.59 kB under the 180 kB budget. Suite: 32 tests in ~14 s.
 
 *(medium, 12 min)*
 

@@ -43,10 +43,17 @@ function rulesNotice(length) {
  * returns focus to the knowledge button because it is the Dialog.Trigger:
  * there was no trigger before, so Radix had nowhere to return focus to.
  *
- * @param {{ portalContainer: HTMLElement | undefined }} props
+ * Controlled: the card owns `open`, since it makes itself inert while the
+ * dialog is open (AgentApp.jsx).
+ *
+ * @param {{
+ *   portalContainer: HTMLElement | undefined,
+ *   open: boolean,
+ *   onOpenChange: (open: boolean) => void,
+ * }} props
  *   `portalContainer` keeps the dialog in the shadow root (main.jsx).
  */
-export function KnowledgeModal({ portalContainer }) {
+export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
   const files = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.listFiles);
   const storedRules = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.getRules);
   const hasContent = useSyncExternalStore(knowledgeStore.subscribe, knowledgeStore.hasContent);
@@ -131,7 +138,7 @@ export function KnowledgeModal({ portalContainer }) {
   }
 
   return (
-    <Dialog.Root>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
       {/* Named by its content, not an aria-label: the visible count has to be
           part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
           and the emoji is decoration. The name reads "Knowledge files: 0". */}

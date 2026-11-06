@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useLiveAgent } from './useLiveAgent.js';
 import { KnowledgeModal } from './KnowledgeModal.jsx';
 import { FailureToast } from './FailureToast.jsx';
@@ -108,11 +108,19 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
   const { outputLevel, micLevel } = agent;
   const action = primaryAction(status, details, agent);
   const primaryRef = useRef(/** @type {HTMLButtonElement | null} */ (null));
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
   const failureReason = status === 'failed' ? details?.reason : undefined;
 
   return (
-    <>
+    // Inert while the knowledge dialog is open: the dialog is modal, but
+    // Radix hides the rest of the page with aria-hidden on document.body's
+    // children (hideOthers), which never reaches into this shadow root, so a
+    // screen reader's browse mode could still walk the card and the toast
+    // behind the dialog. The dialog itself is portalled outside this element
+    // (main.jsx), and `inert` is dropped in the same commit that closes it,
+    // before Radix returns focus to the knowledge button inside.
+    <div inert={knowledgeOpen}>
       {/* A named landmark: the transcript and the alerts sit outside the host
           page's <main>, and axe's `region` rule wants all content in one. */}
       <aside className="agent-app" aria-label="AI presenter">
@@ -134,7 +142,11 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         </button>
         {/* The knowledge button, which opens the dialog (portalled into the
             shadow root) and takes focus back when it closes. */}
-        <KnowledgeModal portalContainer={portalContainer} />
+        <KnowledgeModal
+          portalContainer={portalContainer}
+          open={knowledgeOpen}
+          onOpenChange={setKnowledgeOpen}
+        />
         <span className="agent-app__status" role="status">
           {statusText(status, details)}
         </span>
@@ -161,6 +173,6 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer }) {
         returnFocusTo={primaryRef}
         announcerContainer={portalContainer}
       />
-    </>
+    </div>
   );
 }

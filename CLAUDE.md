@@ -46,9 +46,12 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
     the failure's reason as plain text, a `role="alert"` for mic and voice-support guidance
     (keyed by the connect attempt, so a repeat is announced), the transcript, the `📄`
-    knowledge button (rendered by `KnowledgeModal.jsx`) and the volume orb.
+    knowledge button (rendered by `KnowledgeModal.jsx`) and the volume orb. It owns the
+    dialog's `open` and makes the card and the toast region `inert` while the dialog is open:
+    Radix's `hideOthers` sets `aria-hidden` on `document.body`'s children only, never inside
+    the shadow root (M7 T6).
   - `KnowledgeModal.jsx` — the `📄 <count>` button (the Radix `Dialog.Trigger`, so closing returns
-    focus to it) and the knowledge dialog, portalled into the shadow root: Add files (a real
+    focus to it; a controlled `Dialog.Root`, `open` from the card) and the knowledge dialog, portalled into the shadow root: Add files (a real
     `<button>` that opens the file picker and takes dropped files), the file list with "Remove
     <file name>" buttons, an empty state, a rules field with a used / limit counter
     (`aria-describedby`; a polite note near the limit, a `role="alert"` over it, the text kept
@@ -207,7 +210,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 17 vitest files (328 tests): `actionTools`,
+- Tests: `agent-client/src/__tests__/` has 18 vitest files (329 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+  card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
@@ -225,22 +229,30 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (27
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (32
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
-  text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (3: the real
-  `/` page against a fake Gemini Live via `page.routeWebSocket` — the pending Cancel, a tool batch, a dropped
-  socket, one token per reconnect, the page nonce; and the two fatal paths from the keyboard — `not_configured` offers Try again, no
-  Reload page, with its toast once per failure and F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page),
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (1: the real
+  `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
+  socket, one token per reconnect, the page nonce), `widget.spec.js` (7, M7 T6: every card state
+  through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
+  lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
+  agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on
+  `page.clock` → Connection lost with one toast → Retry → Live; the two fatal paths from the
+  keyboard — `not_configured` offers Try again, no Reload page, with its toast once per failure and
+  F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page, which reloads; the
+  blocked-mic guidance; and at 360, 768 and 1440 px the card's placement, a keyboard walk of the
+  whole card, the dialog making the card inert (Chromium's accessibility tree, over CDP) and axe in
+  light and dark),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
   `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its
   toast and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
   keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
   inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
-  `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
+  `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
   Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
