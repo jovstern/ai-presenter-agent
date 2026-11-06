@@ -30,12 +30,33 @@ const MAX_RULES_CHARS = 2000;
 let cachedRaw = /** @type {string | null | undefined} */ (undefined);
 let cachedFiles = /** @type {KnowledgeFile[]} */ ([]);
 
+// Storage the browser blocks (a privacy setting, a sandboxed frame) throws on
+// the first touch of `localStorage`, which inside useSyncExternalStore would
+// take the card down at mount: blocked reads as nothing stored.
+/**
+ * @param {string} key
+ * @returns {string | null}
+ */
+function readItem(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {unknown} error
+ * @param {string[]} names
+ */
+const isDomError = (error, names) => error instanceof DOMException && names.includes(error.name);
+
 // A value that fails to parse, or isn't an array, reads as empty: a non-array
 // (written by another script on this origin, or by hand) used to reach
 // totalBytes' reduce and throw inside useSyncExternalStore.
 /** @returns {KnowledgeFile[]} */
 function readFiles() {
-  const raw = localStorage.getItem(FILES_KEY);
+  const raw = readItem(FILES_KEY);
   if (raw === cachedRaw) return cachedFiles;
   cachedRaw = raw;
   cachedFiles = parseFiles(raw);
@@ -106,7 +127,11 @@ export function totalBytes() {
 }
 
 // Resolves ok({ file }) or fail(reason). Refuses outright on a rejected
-// extension or an over-cap size — no silent failure, no truncation.
+// extension or an over-cap size — no silent failure, no truncation — and
+// says so, in words the dialog can show, when the browser refuses: a file it
+// can't read (moved or deleted since it was picked), or storage that is full
+// (the origin's quota is shared, so it can fill under MAX_TOTAL_BYTES).
+// Firefox names a full quota differently.
 /**
  * @param {File} file
  * @returns {Promise<StoreResult<{ file: KnowledgeFile }>>}
@@ -123,7 +148,13 @@ export async function addFile(file) {
     );
   }
 
-  const text = await file.text();
+  let text;
+  try {
+    text = await file.text();
+  } catch (error) {
+    if (!isDomError(error, ['NotReadableError'])) throw error;
+    return fail("The file couldn't be read. Check that it still exists, then add it again");
+  }
   const entry = {
     id: newId(),
     name: file.name,
@@ -131,7 +162,12 @@ export async function addFile(file) {
     addedAt: Date.now(),
     text,
   };
-  writeFiles([...files, entry]);
+  try {
+    writeFiles([...files, entry]);
+  } catch (error) {
+    if (!isDomError(error, ['QuotaExceededError', 'NS_ERROR_DOM_QUOTA_REACHED'])) throw error;
+    return fail('Browser storage is full. Remove a file to make room');
+  }
   return ok({ file: entry });
 }
 
@@ -141,7 +177,7 @@ export function removeFile(id) {
 }
 
 export function getRules() {
-  return localStorage.getItem(RULES_KEY) ?? '';
+  return readItem(RULES_KEY) ?? '';
 }
 
 // Returns ok({}) or fail(reason).

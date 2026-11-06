@@ -128,6 +128,30 @@ describe('KnowledgeModal', () => {
     expect(within(dialog).queryByRole('list', { name: 'Files' })).toBeNull();
   });
 
+  it('says in plain words when browser storage is full, as an alert', async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    await pick([textFile('notes.txt', 'hello')]);
+    expect(within(dialog).getByRole('alert').textContent).toBe(
+      "notes.txt wasn't added. Browser storage is full. Remove a file to make room.",
+    );
+    expect(within(dialog).queryByRole('list', { name: 'Files' })).toBeNull();
+  });
+
+  it('clears an add error when the dialog is opened again', async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    await pick([textFile('doc.pdf', 'x')]);
+    expect(within(dialog).getByRole('alert')).toBeTruthy();
+    await act(async () => fireEvent.keyDown(dialog, { key: 'Escape' }));
+
+    const reopened = await openDialog(ui);
+    expect(within(reopened.dialog).queryByRole('alert')).toBeNull();
+  });
+
   it('adds files dropped on the drop zone', async () => {
     const ui = renderModal();
     const { dialog } = await openDialog(ui);

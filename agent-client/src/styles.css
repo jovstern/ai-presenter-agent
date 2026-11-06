@@ -446,15 +446,23 @@ button:active {
   background: var(--color-overlay);
 }
 
+/*
+ * Anchored by its top edge, not centred: adding a file or an error grows it
+ * downward instead of moving the title and the field being used. dvh follows
+ * a phone's collapsing browser bars; the vh line before it is the fallback.
+ * No bottom padding: the sticky footer brings its own.
+ */
 .knowledge-modal__content {
   position: fixed;
-  top: 50%;
+  top: 8vh;
+  top: 8dvh;
   left: 50%;
   width: min(var(--dialog-width), calc(100vw - 2 * var(--gutter)));
-  max-height: 80vh;
-  padding: var(--space-5);
+  max-height: 84vh;
+  max-height: 84dvh;
+  padding: var(--space-5) var(--space-5) 0;
   overflow-y: auto;
-  transform: translate(-50%, -50%);
+  transform: translateX(-50%);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-card);
   background: var(--color-surface);
@@ -546,6 +554,20 @@ button:active {
   white-space: nowrap;
 }
 
+/* Quiet: no border or fill until hovered, so a long list isn't a column of
+   buttons. The hit area stays 44 × 44 px (the base button rule). */
+.knowledge-modal__remove {
+  padding: 0 var(--space-3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+.knowledge-modal__remove:hover {
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+}
+
 .knowledge-modal__rules-label {
   display: block;
   color: var(--color-text);
@@ -582,8 +604,17 @@ button:active {
   color: var(--color-danger);
 }
 
-.knowledge-modal__close {
-  margin-top: var(--space-4);
+/* Stuck to the bottom of the scrolling dialog, full width across its padding,
+   on the surface colour so the content scrolls under it. */
+.knowledge-modal__footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin: var(--space-2) calc(-1 * var(--space-5)) 0;
+  padding: var(--space-3) var(--space-5) var(--space-5);
+  border-top: var(--border-width) solid var(--color-border);
+  background: var(--color-surface);
 }
 
 /* ---- The failure toast --------------------------------------------------- */

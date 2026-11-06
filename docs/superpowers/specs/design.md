@@ -242,9 +242,18 @@ come from `status`.
     script, and the presenter draws on them when it talks."), under Add files;
   - Add files: a real button that opens the file picker (keyboard and pointer), and the drop
     target for dragged files;
-  - each file: name, size, and a Remove button named "Remove <file name>"; removing moves focus
-    to the next file's Remove, else the previous, else Add files;
-  - error: an inline `role="alert"` ("<file> wasn't added." and the store's reason);
+  - each file: name, size, and a quiet Remove button (no border or fill until hovered, still
+    44 × 44 px) named "Remove <file name>"; removing moves focus to the next file's Remove, else
+    the previous, else Add files;
+  - error: an inline `role="alert"` ("<file> wasn't added." and the store's reason), cleared
+    when the dialog is opened again. The browser's own refusals are reasons too, in plain
+    words: "Browser storage is full. Remove a file to make room" (`QuotaExceededError`) and
+    "The file couldn't be read. Check that it still exists, then add it again"
+    (`NotReadableError`). Storage blocked outright reads as empty (no files, no rules) instead of
+    throwing at mount (M7 fix wave);
+  - layout: the dialog is anchored by its top (8 dvh, `vh` fallback; at most 84 dvh tall), so
+    an added file or an error grows it downward; Close sits in a sticky footer, reachable at
+    360 px however long the content;
   - rules: a used / limit counter (`1,850 / 2,000`) the field is described by; a polite note
     once within 200 characters and again at the limit (not per keystroke); over the limit the
     text stays, unsaved, with `aria-invalid` and a `role="alert"` saying by how much;
@@ -252,7 +261,10 @@ come from `status`.
     returns focus to the knowledge button (M7 T5);
   - modal for assistive technology too: the card and the toast region behind it are `inert`
     while it is open, since Radix's `aria-hidden` on the page's other children never reaches
-    into the shadow root (M7 T6).
+    into the shadow root (M7 T6). A known consequence, kept on purpose: `inert` also silences
+    the card's live regions (the transcript, the status line, a toast's announcement) while
+    the dialog is open, so speech the agent produces meanwhile is not announced; it is in the
+    transcript once the dialog closes.
 - **Layout of the card:** three columns — the orb, the primary button, the knowledge button —
   with the transcript spanning them above and the status, reason and mic lines as a caption
   under the button column, aligned with the primary button (M7 fix wave). The knowledge button

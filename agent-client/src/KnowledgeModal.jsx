@@ -142,6 +142,13 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
     setUnsavedRules(knowledgeStore.setRules(text).ok ? null : text);
   }
 
+  // An add's error belongs to that visit: opened again, the dialog starts clean.
+  /** @param {boolean} nextOpen */
+  function handleOpenChange(nextOpen) {
+    if (nextOpen) setFileError(null);
+    onOpenChange(nextOpen);
+  }
+
   // The focus trap's Tab wrap, at the dialog's two edges; between them the
   // browser's own Tab order applies, and it stays inside the dialog.
   /** @param {KeyboardEvent<HTMLDivElement>} event */
@@ -157,11 +164,12 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
     const atEdge = event.shiftKey ? active === first || active === content : active === last;
     if (!atEdge) return;
     event.preventDefault();
-    (event.shiftKey ? last : first).focus();
+    // No stops at all can't happen with this markup, but a wrap must not throw.
+    (event.shiftKey ? last : first)?.focus();
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
       {/* Named by its content, not an aria-label: the visible count has to be
           part of the accessible name (WCAG 2.5.3, axe label-content-name-mismatch),
           and the icon is decoration. The name reads "Knowledge files: 0"; the
@@ -232,7 +240,11 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
                 <li key={file.id}>
                   <span className="knowledge-modal__file-name">{file.name}</span>
                   <span className="knowledge-modal__file-size">{formatSize(file.size)}</span>
-                  <button type="button" onClick={(event) => handleRemove(event, file.id)}>
+                  <button
+                    type="button"
+                    className="knowledge-modal__remove"
+                    onClick={(event) => handleRemove(event, file.id)}
+                  >
                     Remove <span className="visually-hidden">{file.name}</span>
                   </button>
                 </li>
@@ -273,7 +285,11 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
             </p>
           )}
 
-          <Dialog.Close className="knowledge-modal__close">Close</Dialog.Close>
+          {/* Sticky at the dialog's bottom edge, so Close is in reach however
+              long the list or the rules get, on the shortest phone. */}
+          <div className="knowledge-modal__footer">
+            <Dialog.Close>Close</Dialog.Close>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

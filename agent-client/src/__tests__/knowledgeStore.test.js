@@ -113,3 +113,57 @@ describe('knowledgeStore', () => {
     expect(message).toContain('just files');
   });
 });
+
+// What the browser itself can refuse: storage that is full, a file that can't
+// be read, storage that is blocked outright (a privacy setting, a sandboxed
+// frame). Each is a failure the dialog can show, never a throw.
+describe('knowledgeStore when the browser refuses', () => {
+  it('fails in plain words when browser storage is full, and stores nothing', async () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('The quota has been exceeded.', 'QuotaExceededError');
+    });
+    const result = await knowledgeStore.addFile(makeFile('notes.txt', 'hello'));
+    vi.restoreAllMocks();
+    expect(result).toEqual({
+      ok: false,
+      reason: 'Browser storage is full. Remove a file to make room',
+    });
+    expect(knowledgeStore.listFiles()).toHaveLength(0);
+  });
+
+  it("fails in plain words when the file can't be read", async () => {
+    const file = makeFile('notes.txt', 'hello');
+    vi.spyOn(file, 'text').mockRejectedValue(
+      new DOMException('The file could not be read.', 'NotReadableError'),
+    );
+    const result = await knowledgeStore.addFile(file);
+    expect(result).toEqual({
+      ok: false,
+      reason: "The file couldn't be read. Check that it still exists, then add it again",
+    });
+    expect(knowledgeStore.listFiles()).toHaveLength(0);
+  });
+
+  it('reads as empty, not a throw, when localStorage is blocked', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get() {
+        throw new DOMException('The operation is insecure.', 'SecurityError');
+      },
+    });
+    try {
+      expect(knowledgeStore.listFiles()).toEqual([]);
+      expect(knowledgeStore.getRules()).toBe('');
+      expect(knowledgeStore.hasContent()).toBe(false);
+      expect(knowledgeStore.totalBytes()).toBe(0);
+      expect(knowledgeStore.buildContextMessage()).toBe('');
+    } finally {
+      Object.defineProperty(
+        globalThis,
+        'localStorage',
+        /** @type {PropertyDescriptor} */ (descriptor),
+      );
+    }
+  });
+});

@@ -55,7 +55,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `<button>` that opens the file picker and takes dropped files), the file list with "Remove
     <file name>" buttons, an empty state, a rules field with a used / limit counter
     (`aria-describedby`; a polite note near the limit, a `role="alert"` over it, the text kept
-    but not saved) and `role="alert"` add errors. It reads `knowledgeStore.js` through
+    but not saved) and `role="alert"` add errors (full storage and an unreadable file
+    included, cleared on reopen); top-anchored, with Close in a sticky footer. It reads `knowledgeStore.js` through
     `useSyncExternalStore` (no mirrored state). Its Tab wrap and open focus are its own, read
     from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
     its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` / `tabStops`,
