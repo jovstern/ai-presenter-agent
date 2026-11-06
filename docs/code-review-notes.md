@@ -488,7 +488,7 @@ list.
 > — clears it, so at most one retry is ever scheduled. There is no separate "retry now" path: the
 > hook's `retry` *is* `connect()`, which resets the attempts and supersedes any in-flight attempt
 > by generation, and the UI shows Retry only once the backoff has given up (`failed`); while
-> `reconnecting` the button is Disconnect, which cancels the pending retry.
+> `reconnecting` the button is End (Disconnect until M7 T4), which cancels the pending retry.
 
 `retryNow` (`useLiveAgent.js:279-282`) and `scheduleReconnect` both schedule `connect` via
 `setTimeout` without storing the handle. Tapping "Reconnect" while a backoff retry is already
@@ -581,6 +581,12 @@ a framework's controlled input needs it.
 > A tool call ends an utterance episode (`agentActed()`): narration before each step of one
 > request ("Clicking the increment button now." ×3) is no talk loop, and an action that really
 > repeats is the action rules' to catch. Only turns with no tool call between them count.
+>
+> M7 T4 (M6 re-review): the corrective now goes through `sendTurn`, which holds every client
+> turn while a batch runs. Known gap, noted in `loopGuard.js`'s header: the agent's voice
+> picked up by the mic is transcribed as the user and clears the action window. Gating
+> `userSpoke()` on length was not done: the 14 live-e2e transcripts show no echo and one real
+> 3-word request fragment a gate would have dropped.
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says
@@ -678,6 +684,12 @@ dropped into the middle of the conversation. Guard both on `!resumeHandleRef.cur
 > one the live session holds (`sentRevision`) and which one the newest handle captured
 > (`handleRevision`), and a resume resends whenever the store moved past the handle's — a change
 > while no session was up, or one sent into the session after its newest handle.
+>
+> M7 T4 (M6 re-review): a resume's knowledge (and a fresh session's greeting) no longer lands
+> between a tool call the server queued before `live.connect()` resolved and its response:
+> that early batch starts first, and every client turn waits for the batch's end (`sendTurn`,
+> `heldTurns`), a knowledge change mid-batch included. The revision is taken when the
+> knowledge is really sent. Tests: "client turns around an early tool batch".
 
 ### [x] M10 — The React Compiler isn't running
 

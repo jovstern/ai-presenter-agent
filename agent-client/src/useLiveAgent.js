@@ -21,6 +21,8 @@ import { appendFragment, endTurn } from './transcript.js';
  *   the next connect.
  * @property {number} connectCount How many times connect() has run: a key for the alerts, so
  *   an identical alert after a new attempt is a new node, which screen readers announce.
+ * @property {number} failureCount How many times the session has gone `failed`: names the
+ *   failure, so the card shows each one's toast once (AgentApp.jsx).
  * @property {() => Promise<void>} connect Starts mic, playback and the session.
  * @property {() => void} disconnect
  * @property {() => Promise<void>} retry The same as connect.
@@ -46,11 +48,14 @@ import { appendFragment, endTurn } from './transcript.js';
  */
 export function useLiveAgent(bridge, nonce, workletUrl) {
   // details come with `reconnecting` and `failed`; kept with the status so
-  // the two can never disagree.
+  // the two can never disagree. `failures` counts the `failed` reports: the
+  // session makes one per failure, so the count tells a new failure from a
+  // re-render of the same one.
   const [connection, setConnection] = useState(
-    /** @type {{ status: AgentStatus, details: StatusDetails | null }} */ ({
+    /** @type {{ status: AgentStatus, details: StatusDetails | null, failures: number }} */ ({
       status: 'idle',
       details: null,
+      failures: 0,
     }),
   );
   const [transcript, setTranscript] = useState(/** @type {TranscriptEntry[]} */ ([]));
@@ -77,7 +82,11 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
           // rather than leave it live behind a dead session. `reconnecting`
           // keeps it, since the resumed session picks the frames back up.
           if (status === 'failed') stopAudio();
-          setConnection({ status, details: details ?? null });
+          setConnection((prev) => ({
+            status,
+            details: details ?? null,
+            failures: prev.failures + (status === 'failed' ? 1 : 0),
+          }));
         },
         onAudioChunk: (base64) => {
           playerRef.current?.enqueue(decodeOutputChunk(base64));
@@ -109,7 +118,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     setConnectCount((count) => count + 1);
     stopAudio();
     // Over plain http (or without AudioWorklet) the mic can never start, so
-    // no session is opened and no token minted: the card stays on Connect
+    // no session is opened and no token minted: the card stays on Talk
     // with the reason (docs/code-review-notes.md L6).
     const unsupported = voiceSupportError();
     setMicError(unsupported);
@@ -124,7 +133,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
         // Any capture failure (a blocked or missing mic, a worklet that
         // didn't load) means the agent can never hear the user: end the
         // session instead of showing "Live" while deaf, so the card offers
-        // Connect — the action the guidance names.
+        // Talk — the action the guidance names.
         disconnect();
       },
     });
@@ -164,6 +173,7 @@ export function useLiveAgent(bridge, nonce, workletUrl) {
     transcript,
     micError,
     connectCount,
+    failureCount: connection.failures,
     connect,
     disconnect,
     retry: connect,

@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createPlayer, startCapture, voiceSupportError } from '../audioIO.js';
+import {
+  AUDIO_RESUME_TIMEOUT_MS,
+  createPlayer,
+  startCapture,
+  voiceSupportError,
+} from '../audioIO.js';
 
 // audioIO.js against stubbed Web Audio and getUserMedia: the secure-context
 // check, and that capture releases everything it acquired (B2: no mic left
@@ -151,6 +156,60 @@ describe('startCapture', () => {
     expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
     expect(made.contexts[0].close).toHaveBeenCalledTimes(1);
     expect(made.nodes).toHaveLength(0);
+  });
+
+  // Safari may leave resume() pending forever rather than reject it (M6
+  // re-review): without a timeout the card would show Live while deaf.
+  describe('a resume() that never settles', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      made.resume.mockImplementationOnce(() => new Promise(() => {}));
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it(`is reported as an AudioResumeTimeoutError after ${AUDIO_RESUME_TIMEOUT_MS} ms, and everything is released`, async () => {
+      const onError = vi.fn();
+      const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn(), onError });
+      await vi.advanceTimersByTimeAsync(AUDIO_RESUME_TIMEOUT_MS - 1);
+      expect(onError).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await capture.ready;
+
+      expect(onError).toHaveBeenCalledTimes(1);
+      expect(onError.mock.calls[0][0].name).toBe('AudioResumeTimeoutError');
+      expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
+      expect(made.contexts[0].close).toHaveBeenCalledTimes(1);
+      expect(made.nodes).toHaveLength(0);
+    });
+
+    it('is not reported after a stop() during the wait', async () => {
+      const onError = vi.fn();
+      const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn(), onError });
+      await vi.advanceTimersByTimeAsync(0);
+      capture.stop();
+      await vi.advanceTimersByTimeAsync(AUDIO_RESUME_TIMEOUT_MS);
+      await capture.ready;
+
+      expect(onError).not.toHaveBeenCalled();
+      expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
+      expect(made.nodes).toHaveLength(0);
+    });
+  });
+
+  it('leaves no resume timer behind once the context has resumed', async () => {
+    vi.useFakeTimers();
+    try {
+      const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
+      await vi.advanceTimersByTimeAsync(0);
+      await capture.ready;
+      expect(made.nodes).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('base64-encodes each posted Int16 frame for the session', async () => {

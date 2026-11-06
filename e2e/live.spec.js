@@ -18,13 +18,17 @@ const LIVE_SOCKET = /^wss:\/\/generativelanguage\.googleapis\.com\//;
 
 /** @param {import('@playwright/test').Page} page */
 function card(page) {
-  const host = page.locator('#ai-presenter-agent-host');
+  // The card's landmark, not the whole host: the toast and Radix's
+  // announcer live in the shadow root too.
+  const panel = page.locator('#ai-presenter-agent-host').getByRole('complementary', {
+    name: 'AI presenter',
+  });
   return {
-    status: host.getByRole('status'),
+    status: panel.getByRole('status'),
     /** @param {string} name */
-    button: (name) => host.getByRole('button', { name, exact: true }),
-    userLines: host.locator('li.agent-app__line--user'),
-    agentLines: host.locator('li.agent-app__line--agent'),
+    button: (name) => panel.getByRole('button', { name, exact: true }),
+    userLines: panel.locator('li.transcript__entry[data-role="user"]'),
+    agentLines: panel.locator('li.transcript__entry[data-role="agent"]'),
   };
 }
 
@@ -155,7 +159,7 @@ test.afterEach(async ({ page }, testInfo) => {
 async function connectLive(page) {
   const { status, button } = card(page);
   await page.goto('/');
-  await button('Connect').click();
+  await button('Talk to the presenter').click();
   await expect(status).toHaveText('Live', { timeout: 15_000 });
 }
 
@@ -275,7 +279,7 @@ test('reconnect: a dropped socket recovers and the conversation carries on', asy
   extra.reconnectAttempts = sockets.length - 1;
   extra.resumed = resumedPerSocket.at(-1);
 
-  // The follow-up question is spoken ~12 s after Connect, after the drop: the
+  // The follow-up question is spoken ~12 s after Talk, after the drop: the
   // recovered session hears it and answers.
   const agentLinesBefore = await agentLines.count();
   await expect(userLines.first()).toBeVisible({ timeout: 45_000 });

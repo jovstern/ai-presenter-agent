@@ -68,7 +68,10 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       #8 and #9). *(M7 T2: `VolumeOrb.jsx`, levels from `getLevel()` in `audioIO.js`;
       `renderIsolation.test.jsx`.)*
 - [x] R19 A coalesced, bounded transcript with `aria-live` (M7 T3).
-- [ ] R20 Connection states shown in the card, with a Radix Toast and Retry.
+- [x] R20 Connection states shown in the card, with a Radix Toast and Retry. *(M7 T4:
+      `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
+      page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
+      one live announcement of the reason; F8 and Tab handled inside the shadow root).)*
 - [ ] R21 The knowledge modal is polished and has a component test.
 
 **M8: deploy and close the cycle (new issue)**
@@ -134,7 +137,7 @@ Language: JS with checkJs (ADR 0002).
 | helmet | server | security headers and CSP (H1 remainder) — `8.3.0` |
 | supertest, vitest | server | token-gate tests (R10) — `7.3.1`, `5.0.5` |
 | @playwright/test, @axe-core/playwright | root | e2e and a11y (R11, R12): `page.routeWebSocket` fakes Gemini Live with the real SDK socket code; axe walks the open shadow root — `1.64.1`, `4.14.0` |
-| @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention |
+| @radix-ui/react-toast | agent-client | connection toast (R20); Radix is the repo's primitive convention. Same release as `@radix-ui/react-dialog` (upgraded with it from `1.1.23`), so the shared primitives are one copy each — `1.3.1` |
 | zod | server | nonce query (moved from M8 into M5 T3), env config (R22), client-log body (R23) — `4.6.7` |
 | web-vitals | agent-client | real-user vitals in production (R23) |
 | compression | server | gzip static responses; M4 observer measured LCP 4.26 s → 1.86 s on mobile — `1.8.2` |
@@ -144,7 +147,7 @@ Language: JS with checkJs (ADR 0002).
 Dependencies from before this cycle, pinned exactly in M6 T4 (code-review-notes M8):
 `@google/genai` `2.32.0` (both packages, upgraded from `^2.22.0` after the Live shapes were
 verified against it); agent-client `react` / `react-dom` `19.3.0`, `@radix-ui/react-dialog`
-`1.1.23`, `vite` `8.3.0`, `@vitejs/plugin-react` `6.1.1`, `babel-plugin-react-compiler` `1.0.0`,
+`1.1.23` (`1.3.1` since M7 T4, with the toast), `vite` `8.3.0`, `@vitejs/plugin-react` `6.1.1`, `babel-plugin-react-compiler` `1.0.0`,
 `vitest` `5.0.1`, `@testing-library/react` `16.3.3`, `jsdom` `30.0.1`; server `express` `5.2.1`,
 `dotenv` `17.4.2`. Every `package.json` uses exact versions; add one with
 `npm install --save-exact`.
@@ -200,10 +203,10 @@ come from `status`.
 | State | Card shows |
 |---|---|
 | idle | orb at rest, "Talk to the presenter" button |
-| connecting | pending button, "Connecting…" |
+| connecting | the button pending (a spinner, still enabled) as Cancel, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
-| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) and the reason (`role="alert"`, keyed by the connect attempt so the same reason after Try again is announced again) plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once |
+| failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) and the reason as plain text under it, plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once per failure, above the card: the reason, the same action, Dismiss; it is the one live announcement of the reason (assertive), so the card's copy is not an alert (M7 T4) |
 | closed | back to idle |
 | mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
@@ -216,7 +219,7 @@ come from `status`.
   - error: an inline `role="alert"`;
   - a rules character counter.
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
-- **Desktop:** a 320 px card with a 16 px offset.
+- **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus
   returns to the button that opened it.
 
@@ -243,10 +246,11 @@ components use the tokens, never raw values.
 - **Shape:** radius 12 for the card and 8 for controls; one shadow token (deeper in dark); 1 px
   borders. Controls are at least 44 × 44 px.
 - **Spacing:** 4 / 8 / 12 / 16 / 24.
-- **Motion:** 150–200 ms ease-out for state changes. Under `prefers-reduced-motion` the
-  duration tokens are 0 and no transition or animation runs; the orb rings freeze to a static
-  level.
-- **Layout:** a 16 px gutter; the card is 320 px wide, and at 400 px and below it spans the
+- **Motion:** 150–200 ms ease-out for state changes (the toast slides in over 200 ms and
+  goes at once); the pending button's ring turns once per 900 ms (`--duration-spin`). Under
+  `prefers-reduced-motion` the duration tokens are 0 and no transition or animation runs; the
+  orb rings freeze to a static level, the pending ring stands still.
+- **Layout:** a 16 px gutter; the card is 344 px wide, and at 400 px and below it spans the
   viewport between the gutters; the dialog is at most 360 px.
 - **Layering:** the host gets `position:fixed; z-index:2147483000; display:block` (L3, L4),
   through `:host` in `styles.css`, not an inline style: the width changes at a breakpoint,

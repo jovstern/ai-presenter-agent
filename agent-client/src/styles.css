@@ -55,7 +55,7 @@
   /* Layout. The breakpoint (400px) is repeated in the media query below:
      custom properties can't be used in a media condition. */
   --gutter: var(--space-4);
-  --card-width: 320px;
+  --card-width: 344px; /* "Talk to the presenter" on one line, with room for wider system fonts */
   --dialog-width: 360px;
   --control-height: 44px;
   --transcript-max-height: 200px;
@@ -67,9 +67,11 @@
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
 
-  /* Motion: state changes only. */
+  /* Motion: state changes only, plus the pending spinner's turn (which
+     reduced motion stops, below, rather than zeroing). */
   --duration-fast: 150ms;
   --duration-base: 200ms;
+  --duration-spin: 900ms;
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /* Colour, light theme (contrast on --color-surface). */
@@ -273,6 +275,25 @@ button:active {
   background: var(--color-accent-hover);
 }
 
+/* Connecting: a ring spins before the label (Cancel). Under reduced motion it
+   stays as a still, open ring, which still reads as "in progress". */
+.agent-app__primary[data-pending]::before {
+  content: '';
+  flex: none;
+  width: var(--text-md);
+  height: var(--text-md);
+  border: var(--focus-ring-width) solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin var(--duration-spin) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 .agent-app__knowledge-btn {
   padding: 0 var(--space-3);
   font-variant-numeric: tabular-nums;
@@ -297,6 +318,7 @@ button:active {
 
 .agent-app__error,
 .agent-app__mic-error {
+  margin: 0;
   color: var(--color-danger);
 }
 
@@ -442,4 +464,108 @@ button:active {
 
 .knowledge-modal__close {
   margin-top: var(--space-4);
+}
+
+/* ---- The failure toast --------------------------------------------------- */
+
+/*
+ * Radix's toast viewport (AgentApp.jsx), in the shadow root beside the card.
+ * The host is position: fixed, so it is the containing block: the viewport
+ * sits just above the card, as wide as it, and a toast never covers the
+ * primary button. Empty, it has no height (Radix also turns its pointer
+ * events off), so it blocks nothing on the page.
+ */
+.toast-viewport {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0 0 var(--space-2);
+  list-style: none;
+}
+
+/* The reason and Dismiss on the first row, the action under the reason. A
+   danger edge marks it as a failure, and the words say so too. */
+.toast {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'title close'
+    'action action';
+  align-items: start;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-left: var(--space-1) solid var(--color-danger);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  color: var(--color-text);
+  font-family: var(--font-family);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+/* It slides in, and goes at once: when Retry leaves `failed`, the reason it
+   shows is already gone, so a fade-out would show an empty toast. */
+.toast[data-state='open'] {
+  animation: toast-in var(--duration-base) var(--ease-out);
+}
+
+/* Swipe right to dismiss (Radix's default direction). */
+.toast[data-swipe='move'] {
+  transform: translateX(var(--radix-toast-swipe-move-x));
+}
+
+.toast[data-swipe='cancel'] {
+  transform: translateX(0);
+  transition: transform var(--duration-base) var(--ease-out);
+}
+
+.toast[data-swipe='end'] {
+  animation: toast-swipe-out var(--duration-fast) var(--ease-out) forwards;
+}
+
+.toast__title {
+  grid-area: title;
+  align-self: center;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+.toast__action {
+  grid-area: action;
+  justify-self: start;
+}
+
+.toast__close {
+  grid-area: close;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--space-2));
+  }
+}
+
+@keyframes toast-swipe-out {
+  from {
+    transform: translateX(var(--radix-toast-swipe-end-x));
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
 }

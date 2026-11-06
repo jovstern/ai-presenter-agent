@@ -3,6 +3,33 @@ import { encodeInputFrame, levelOf, OUTPUT_SAMPLE_RATE } from './pcm.js';
 // The name public/capture-worklet.js registers its processor under.
 const CAPTURE_PROCESSOR = 'capture-processor';
 
+// How long capture waits for audioContext.resume(). Safari may leave it
+// pending forever instead of rejecting (M6 re-review), and a context that
+// never runs never posts a frame: past this the capture fails, so the card
+// ends the session rather than showing Live while deaf. Resuming takes a few
+// milliseconds when it works; 3 s leaves room for a busy device.
+export const AUDIO_RESUME_TIMEOUT_MS = 3000;
+
+/**
+ * `promise`, or a rejection with `makeError()` if it hasn't settled in `ms`.
+ * The timer is cleared either way.
+ * @template T
+ * @param {Promise<T>} promise
+ * @param {number} ms
+ * @param {() => Error} makeError
+ * @returns {Promise<T>}
+ */
+function withTimeout(promise, ms, makeError) {
+  /** @type {ReturnType<typeof setTimeout> | undefined} */
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(makeError()), ms);
+  });
+  return Promise.race([promise, /** @type {Promise<never>} */ (timeout)]).finally(() =>
+    clearTimeout(timer),
+  );
+}
+
 // Voice needs getUserMedia and AudioWorklet, and browsers expose both only to
 // a secure context (https, or http://localhost). Checked before Connect does
 // anything, so plain http fails with a reason instead of a TypeError from a
@@ -79,8 +106,14 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       // Created after awaits, the context is outside the click's user
       // activation, and Safari starts such a context suspended: a suspended
       // context never runs the worklet, so no frame would ever arrive. A
-      // refusal rejects, and is reported like any other capture failure.
-      await audioContext.resume();
+      // refusal rejects, and a resume that hangs times out (this file's own
+      // AudioResumeTimeoutError); both are reported like any other capture
+      // failure. Pressing Talk again is a fresh user activation.
+      await withTimeout(audioContext.resume(), AUDIO_RESUME_TIMEOUT_MS, () =>
+        Object.assign(new Error('The browser did not start audio in time.'), {
+          name: 'AudioResumeTimeoutError',
+        }),
+      );
       if (stopped) return release();
       source = audioContext.createMediaStreamSource(stream);
       // No outputs: the node is a sink, so nothing reaches the speakers, and
@@ -100,8 +133,9 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       source.connect(worklet);
     } catch (err) {
       // A DOMException from getUserMedia (NotAllowedError, NotFoundError, ...),
-      // from addModule (the worklet file failed to load) or from resume(): an Error either
-      // way, which AgentApp words by its name. Whatever was acquired goes. A
+      // from addModule (the worklet file failed to load) or from resume() (or
+      // its timeout): an Error either way, which AgentApp words by its name.
+      // Whatever was acquired goes. A
       // failure caused by stop() itself (addModule on a context it closed) is
       // not reported: nobody is waiting for this capture any more.
       release();

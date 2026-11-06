@@ -46,7 +46,7 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
 
     test('the sandbox page with the card idle', async ({ page }) => {
       await page.goto('/');
-      await expect(cardButton(page, 'Connect')).toBeVisible();
+      await expect(cardButton(page, 'Talk to the presenter')).toBeVisible();
       // The theme really switched (--color-surface), so axe saw this scheme's colours.
       await expect(page.locator(HOST).locator('.agent-app')).toHaveCSS(
         'background-color',
@@ -60,6 +60,27 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
       // The target app inside the iframe was analysed too (a frame target is a
       // list of plain selectors, the iframe first).
       expect(checked.some((target) => target[0] === '#target-app-frame')).toBe(true);
+    });
+
+    test.describe('with the page nonce rejected', () => {
+      test.use({ allowedConsoleErrors: [/status of 403/] });
+
+      // The failed card and its toast (Radix, in the shadow root), this theme's colours.
+      test('the sandbox page with the card failed and its toast', async ({ page }) => {
+        await stubToken(page, {
+          status: 403,
+          body: { error: { code: 'invalid_nonce', message: 'Unknown or expired nonce' } },
+        });
+        const { status, button, toasts } = card(page);
+        await page.goto('/');
+        await button('Talk to the presenter').click();
+        await expect(status).toHaveText("Can't connect");
+        await expect(toasts).toHaveCount(1);
+
+        const { violations, checkedInShadowRoot } = await analyze(page);
+        expect(violations).toEqual([]);
+        expect(checkedInShadowRoot('.toast')).toBe(true);
+      });
     });
 
     test('the sandbox page with the knowledge dialog open', async ({ page }) => {
@@ -83,7 +104,7 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   const { status, button } = card(page);
 
   await page.goto('/');
-  await button('Connect').click();
+  await button('Talk to the presenter').click();
   await expect(status).toHaveText('Live');
   // Fragments as Live streams them: coalesced into one turn (transcript.js).
   live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello' } } });

@@ -74,13 +74,21 @@ export function pageNonce(page) {
   return page.locator('script[data-ds-nonce]').getAttribute('data-ds-nonce');
 }
 
-/** @param {import('@playwright/test').Page} page */
+/**
+ * The card's own landmark, and the failure toasts beside it: both in the
+ * shadow root, but the toast (and Radix's announcer) outside the card, and
+ * the toast's action may share the card button's label.
+ * @param {import('@playwright/test').Page} page
+ */
 export function card(page) {
   const host = page.locator('#ai-presenter-agent-host');
+  const panel = host.getByRole('complementary', { name: 'AI presenter' });
   return {
-    status: host.getByRole('status'),
-    alert: host.getByRole('alert'),
+    panel,
+    status: panel.getByRole('status'),
+    alert: panel.getByRole('alert'),
     /** @param {string} name */
-    button: (name) => host.getByRole('button', { name, exact: true }),
+    button: (name) => panel.getByRole('button', { name, exact: true }),
+    toasts: host.getByRole('region', { name: 'Notifications (F8)' }).getByRole('listitem'),
   };
 }

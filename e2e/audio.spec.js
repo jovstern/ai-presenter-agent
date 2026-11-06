@@ -29,9 +29,11 @@ test('the capture worklet loads under the CSP and streams 16 kHz frames in real 
     });
   });
   await page.goto('/');
-  const host = page.locator('#ai-presenter-agent-host');
-  await host.getByRole('button', { name: 'Connect', exact: true }).click();
-  await expect(host.getByRole('status')).toHaveText('Live');
+  const panel = page
+    .locator('#ai-presenter-agent-host')
+    .getByRole('complementary', { name: 'AI presenter' });
+  await panel.getByRole('button', { name: 'Talk to the presenter', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('Live');
 
   // Frames queued while connecting are flushed in a burst at setupComplete,
   // so the rate is measured from a frame that arrives after that. The check
@@ -75,9 +77,9 @@ test('the capture worklet loads under the CSP and streams 16 kHz frames in real 
   expect(worklet.status()).toBe(200);
   expect(worklet.headers()['content-type']).toMatch(/^text\/javascript/);
 
-  // Disconnect stops the stream: no frame after the hang-up.
-  await host.getByRole('button', { name: 'Disconnect', exact: true }).click();
-  await expect(host.getByRole('status')).toHaveText('Not connected');
+  // End stops the stream: no frame after the hang-up.
+  await panel.getByRole('button', { name: 'End', exact: true }).click();
+  await expect(panel.getByRole('status')).toHaveText('Not connected');
   const afterHangUp = audioFrames.length;
   await page.waitForTimeout(500);
   expect(audioFrames).toHaveLength(afterHangUp);

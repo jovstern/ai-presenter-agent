@@ -20,8 +20,18 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await page.goto('/');
   await expect(status).toHaveText('Not connected');
 
-  await button('Connect').click();
+  // setupComplete held back, to see the pending state: the same button,
+  // still enabled, as a pending Cancel.
+  live.holdSetup(true);
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Connecting…');
+  await expect(button('Cancel')).toHaveAttribute('data-pending', 'true');
+  await expect(button('Cancel')).toBeEnabled();
+  await expect.poll(() => live.sockets.length).toBe(1);
+  live.holdSetup(false);
+  live.sendToLatest({ setupComplete: {} });
   await expect(status).toHaveText('Live');
+  await expect(button('End')).toBeVisible();
   expect(token.count).toBe(1);
   expect(live.sockets).toHaveLength(1);
   // The token request echoes the page's own nonce (H1).
@@ -74,6 +84,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   live.holdSetup(true);
   await live.sockets[0].close({ code: 1011, reason: 'e2e forced close' });
   await expect(status).toHaveText('Reconnecting (attempt 1 of 6)…');
+  await expect(button('End')).toBeEnabled();
   await expect.poll(() => live.sockets.length).toBe(2);
   expect(token.count).toBe(2); // exactly one fresh token for the one reconnect
 
@@ -83,9 +94,9 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   expect(token.nonces).toEqual([nonce, nonce]); // reusable within its TTL, by design (H1)
   expect(live.sockets).toHaveLength(2);
 
-  await button('Disconnect').click();
+  await button('End').click();
   await expect(status).toHaveText('Not connected');
-  await expect(button('Connect')).toBeFocused();
+  await expect(button('Talk to the presenter')).toBeFocused();
   // No retry was scheduled behind the hang-up.
   await page.waitForTimeout(1500);
   expect(token.count).toBe(2);
@@ -108,16 +119,22 @@ test.describe('when the server has no API key', () => {
       },
     });
     const live = await fakeGeminiLive(page);
-    const { status, alert, button } = card(page);
+    const { panel, status, alert, button, toasts } = card(page);
+    const reason =
+      "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).";
 
     await page.goto('/');
-    await button('Connect').focus();
+    await button('Talk to the presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
-    await expect(alert).toHaveText(
-      "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
-    );
+    // The reason stays in the card as plain text; the toast is what announces
+    // it, so there is no alert to announce it a second time.
+    await expect(panel).toContainText(reason);
+    await expect(alert).toHaveCount(0);
+    await expect(toasts).toHaveCount(1);
+    await expect(toasts).toContainText(reason);
+    await expect(toasts.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
     await expect(button('Try again')).toBeFocused();
     await expect(button('Reload page')).toHaveCount(0);
     // The backoff's first retry is immediate; give it room to (wrongly) happen.
@@ -125,9 +142,39 @@ test.describe('when the server has no API key', () => {
     expect(token.count).toBe(1);
     expect(live.sockets).toHaveLength(0);
 
-    // Try again asks the server once more, and fails the same way.
+    // The keyboard path into the toast, inside the shadow root: F8 (Radix's
+    // hotkey) focuses the viewport, Tab walks the toast, its action and
+    // Dismiss, then leaves for the card's button; Escape closes the toast from
+    // inside it and focus goes back to the card.
+    const viewport = page
+      .locator('#ai-presenter-agent-host')
+      .getByRole('region', { name: 'Notifications (F8)' })
+      .getByRole('list');
+    await page.keyboard.press('F8');
+    await expect(viewport).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(toasts).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(toasts.getByRole('button', { name: 'Try again', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(toasts.getByRole('button', { name: 'Dismiss', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(button('Try again')).toBeFocused();
+    await page.keyboard.press('F8');
+    await page.keyboard.press('Tab');
+    await expect(toasts).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(toasts).toHaveCount(0);
+    await expect(button('Try again')).toBeFocused();
+    // Once per failure: closed, it stays closed while the failure lasts.
+    await page.waitForTimeout(500);
+    await expect(toasts).toHaveCount(0);
+
+    // Try again asks the server once more, and fails the same way: a new
+    // failure, so a new toast.
     await page.keyboard.press('Enter');
     await expect.poll(() => token.count).toBe(2);
+    await expect(toasts).toHaveCount(1);
     await expect(button('Try again')).toBeFocused();
     expect(live.sockets).toHaveLength(0);
   });
@@ -142,16 +189,17 @@ test.describe('when the page nonce is rejected', () => {
       status: 403,
       body: { error: { code: 'invalid_nonce', message: 'Unknown or expired nonce' } },
     });
-    const { status, alert, button } = card(page);
+    const { panel, status, button, toasts } = card(page);
+    const reason = 'This page can no longer get a connection token. Reload the page to reconnect.';
 
     await page.goto('/');
-    await button('Connect').focus();
+    await button('Talk to the presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
-    await expect(alert).toHaveText(
-      'This page can no longer get a connection token. Reload the page to reconnect.',
-    );
+    await expect(panel).toContainText(reason);
+    await expect(toasts).toContainText(reason);
+    await expect(toasts.getByRole('button', { name: 'Reload page', exact: true })).toBeVisible();
     await expect(button('Reload page')).toBeFocused();
     await page.waitForTimeout(1500);
     expect(token.count).toBe(1);

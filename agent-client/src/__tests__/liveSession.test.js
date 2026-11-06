@@ -1593,6 +1593,112 @@ describe('createLiveSession: the SDK order (messages before connect() resolves)'
     });
   });
 
+  // M6 re-review: a client turn between a function call and its response
+  // breaks the model's turn (the M5 navigate stall). The early batch starts
+  // first, and the knowledge and the greeting wait until it is answered.
+  describe('client turns around an early tool batch', () => {
+    const EARLY_CALL = {
+      toolCall: { functionCalls: [{ id: 'early', name: 'click', args: { selector: 'b' } }] },
+    };
+
+    /** A dispatch that waits for the returned function to be called. */
+    function holdDispatch(bridge) {
+      let finish;
+      bridge.dispatchAction.mockImplementationOnce(
+        () => new Promise((resolve) => (finish = () => resolve({ success: true }))),
+      );
+      return () => finish();
+    }
+
+    const callOrder = (fn, i = 0) => fn.mock.invocationCallOrder[i];
+
+    it('on a resume with changed knowledge, sends the knowledge only after the early call is answered', async () => {
+      setRules('Be brief.');
+      const { liveSession, bridge } = setup();
+      const first = await connectAndEstablish(liveSession);
+      first.params.callbacks.onmessage({
+        sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+      });
+      drop(first);
+      setRules('Be very brief.');
+      await flush();
+      const resumed = live.calls.at(-1);
+      const finish = holdDispatch(bridge);
+
+      await establishInRealOrder(resumed, [EARLY_CALL]);
+      expect(bridge.dispatchAction).toHaveBeenCalledWith('click', ['b']);
+      expect(resumed.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      const { sendToolResponse, sendClientContent } = resumed.session;
+      expect(sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+      expect(callOrder(sendToolResponse)).toBeLessThan(callOrder(sendClientContent));
+    });
+
+    it('on a fresh session, sends the knowledge and then the greeting after the early call is answered', async () => {
+      setRules('Be brief.');
+      const { liveSession, bridge } = setup();
+      liveSession.connect();
+      await flush();
+      const call = live.calls[0];
+      const finish = holdDispatch(bridge);
+
+      await establishInRealOrder(call, [EARLY_CALL]);
+      expect(call.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      const { sendToolResponse, sendClientContent } = call.session;
+      expect(sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe brief.',
+        'Greet the user with a brief hello.',
+      ]);
+      expect(callOrder(sendToolResponse)).toBeLessThan(callOrder(sendClientContent));
+    });
+
+    it('holds a knowledge change made while a batch runs until the batch is answered, once', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      call.session.sendClientContent.mockClear();
+      const finish = holdDispatch(bridge);
+      call.params.callbacks.onmessage(EARLY_CALL);
+      await flush();
+
+      setRules('Be brief.');
+      setRules('Be very brief.');
+      expect(call.session.sendClientContent).not.toHaveBeenCalled();
+
+      finish();
+      await flush();
+      expect(call.session.sendClientContent.mock.calls.map(([arg]) => arg.turns)).toEqual([
+        'STRICT RULES (must always follow):\nBe very brief.',
+      ]);
+    });
+
+    it('never sends a held greeting into the replacement session after a drop', async () => {
+      const { liveSession, bridge } = setup();
+      liveSession.connect();
+      await flush();
+      const call = live.calls[0];
+      const finish = holdDispatch(bridge);
+      await establishInRealOrder(call, [EARLY_CALL]);
+
+      drop(call);
+      await flush();
+      const replacement = live.calls.at(-1);
+      await establish(replacement);
+      finish();
+      await flush();
+
+      expect(greetings(call.session)).toHaveLength(0);
+      // The replacement is a fresh session (no handle) and greets for itself, once.
+      expect(greetings(replacement.session)).toHaveLength(1);
+    });
+  });
+
   it('drops a queued tool call whose connect() was superseded', async () => {
     const { liveSession, bridge } = setup();
     liveSession.connect();

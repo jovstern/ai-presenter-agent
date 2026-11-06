@@ -76,6 +76,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`).
+- **Client turn** — anything the agent-client tells the model as content rather than as a tool
+  response: the knowledge context, the greeting, the loop's corrective turn. None is sent while
+  a tool batch runs: each is **held** (one per kind) until the batch's last response, since the
+  model takes a turn between a function call and its response as the user talking over it
+  (`sendTurn` in `liveSession.js`).
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
   **action signature** (tool name + normalised arguments) that is the 4th identical one in a
   row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
@@ -102,6 +107,14 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   talks (`agent-client/src/transcript.js`). Within a turn fragments join verbatim; a turn end
   (`turnComplete` or `interrupted`, `onTurnEnd`) followed by the same speaker continues the entry
   after one space. The list keeps 20 entries; the card shows the last 3 (`Transcript.jsx`).
+- **Primary button** — the card's one action, never disabled so focus stays on it: Talk to the
+  presenter, a **pending** Cancel while connecting, End while live or reconnecting, then Retry,
+  Try again or Reload page on `failed` (`AgentApp.jsx`).
+- **Failure toast** — the Radix toast shown once per `failed` report (`failureCount` in
+  `useLiveAgent.js`), above the card: the reason, the primary button's action, Dismiss
+  (`agent-client/src/FailureToast.jsx`). It is the one live announcement of the reason; the
+  card keeps the reason as plain text, and mic or voice-support problems get the card's alert
+  instead of a toast.
 
 ## Knowledge
 

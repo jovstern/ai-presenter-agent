@@ -19,15 +19,17 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   manual `useMemo`/`useCallback` for render-perf reasons unless the compiler demonstrably can't
   cover the case, and keep components free of bail-outs (a one-off build with
   `reactCompilerPreset({ panicThreshold: 'all_errors' })` lists them). UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
-  (`@radix-ui/react-*`); today that is only `KnowledgeModal.jsx`'s Dialog. Builds to a single IIFE
+  (`@radix-ui/react-*`); today that is `KnowledgeModal.jsx`'s Dialog and `FailureToast.jsx`'s Toast
+  (both `1.3.1`, which share one copy of each Radix primitive). Builds to a single IIFE
   script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
   `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck + test + build).
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested.
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
-    playback, barge-in) into React state; owns teardown on unmount. Connect first checks for a
+    playback, barge-in) into React state; owns teardown on unmount. Talk first checks for a
     secure context and AudioWorklet (`voiceSupportError()`), and opens no session without them.
-    Exposes `outputLevel()` / `micLevel()`, pull-only getters over the current player and capture.
+    Exposes `outputLevel()` / `micLevel()`, pull-only getters over the current player and capture,
+    and `failureCount`, which names each `failed` report for the toast.
   - `audioIO.js` — capture: the mic into `public/capture-worklet.js` (an AudioWorklet, loaded
     with `addModule` from `/agent-client/capture-worklet.js`, a URL `main.jsx` resolves next to
     its own script tag), which low-passes and resamples to 16 kHz Int16 off the main thread and
@@ -35,15 +37,22 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `public/` into `dist/`; the worklet is plain JS, linted with AudioWorklet globals only and
     typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`). Both the
     capture and the player have `getLevel()` (0..1, `pcm.js` `levelOf`): the mic's last frame,
-    and an `AnalyserNode` between the playback and the speakers.
+    and an `AnalyserNode` between the playback and the speakers. `audioContext.resume()` times
+    out after 3 s (`AudioResumeTimeoutError`; Safari may hang), failing the capture.
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
-  - `AgentApp.jsx` — a minimal card (an `<aside aria-label="AI presenter">` landmark): one
-    never-disabled Connect/Cancel/Disconnect/Retry/Try again/Reload page button, a status line
-    ("Can't connect" on a fatal failure), an alert on `failed` (keyed by the connect attempt, so
-    a repeat is announced), the transcript, the `📄` knowledge button and the volume orb. The
-    old `Toast.jsx` didn't survive the rebuild; its successor (Radix toast) returns with the
-    designed card in M7 (issue #11, T4).
+  - `AgentApp.jsx` — the card (an `<aside aria-label="AI presenter">` landmark): one
+    never-disabled primary button, Talk to the presenter / Cancel (pending, while connecting) /
+    End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
+    the failure's reason as plain text, a `role="alert"` for mic and voice-support guidance
+    (keyed by the connect attempt, so a repeat is announced), the transcript, the `📄`
+    knowledge button and the volume orb.
+  - `FailureToast.jsx` — the Radix toast on `failed`, once per failure: the reason, the card's
+    action under the same label, Dismiss. Its viewport sits above the card in the shadow root
+    and its announcer in `main.jsx`'s portal container; it is the one live announcement of the
+    reason (so the card has no alert for it). F8 reaches it; its own capture handlers walk Tab
+    (Radix compares `document.activeElement`, which in a shadow root is the host) and send
+    focus back to the primary button.
   - `Transcript.jsx` — the card's first row: the last 3 coalesced turns in an
     `aria-live="polite"` list that announces additions only (one node per fragment), a hidden
     "Presenter:" / "You:" prefix, scrolling past `--transcript-max-height` pinned to the newest
@@ -177,7 +186,7 @@ by `liveSession.test.js`; `useLiveAgent.js` is thin glue with its own Testing Li
 modeled on (team, data model, config UI) — it's explicitly "why decisions were made," not a
 description of this repo's own code. This rebuild deliberately excludes the agent-creation UI,
 template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) is IMPLEMENTED;
-§5.2 (Radix UI) is implemented for the Dialog only, the toast returns in M7.
+§5.2 (Radix UI) is implemented: the Dialog and the failure Toast (M7 T4).
 
 ## Workflow notes
 
@@ -188,34 +197,35 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 16 vitest files (300 tests): `actionTools`,
-  `audioIO` (the secure-context check; capture releases everything once; both `getLevel()`s
-  against a stubbed analyser), `bridge` (runs
+- Tests: `agent-client/src/__tests__/` has 16 vitest files (316 tests): `actionTools`,
+  `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
+  both `getLevel()`s against a stubbed analyser), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore`,
   `liveSession`, `loopGuard`, `pcm`, `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (last 3, live-region attributes, a node per fragment), `useLiveAgent.test.jsx` (Testing
-  Library) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
+  Library: the card's states and the failure toast — once per failure, one announcement, the
+  keyboard walk and focus return) and `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none
   under reduced motion); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 3 vitest files (54 tests): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
   inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health`, the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (21
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 4 Playwright specs (25
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
   text, by value, no match), a second connect and forged `window` messages ignored, snapshots), `loop.spec.js` (3: the real
-  `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
+  `/` page against a fake Gemini Live via `page.routeWebSocket` — the pending Cancel, a tool batch, a dropped
   socket, one token per reconnect, the page nonce; and the two fatal paths from the keyboard — `not_configured` offers Try again, no
-  Reload page; a rejected nonce offers Reload page),
+  Reload page, with its toast once per failure and F8 / Tab / Escape inside the shadow root; a rejected nonce offers Reload page),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
-  `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after Disconnect) and
-  `a11y.spec.js` (5: axe with zero violations on `/` idle, with the knowledge dialog open —
-  inside the shadow root —, connected with a coalesced transcript line (the fake-Live harness in
+  `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
+  `a11y.spec.js` (9: axe with zero violations, in light and dark, on `/` idle, failed with its
+  toast and with the knowledge dialog open — inside the shadow root —; connected with a coalesced transcript line (the fake-Live harness in
   `e2e/fakeLive.js`, shared with `loop.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
   Gemini: greeting, the six-step task, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
