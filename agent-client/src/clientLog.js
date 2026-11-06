@@ -11,8 +11,8 @@ import { onCLS, onINP, onLCP } from 'web-vitals';
 //
 // The beacons ride on the page nonce (server/app.js gates the endpoint on it,
 // as it does the token route), and a rejected beacon does log a console error
-// ("Failed to load resource … 403"). So once the page knows its nonce is dead,
-// a `token` failure, the log stops: that failure is not sent, nor is anything
+// ("Failed to load resource … 403"). So once the server refuses the page's token
+// request (a `token` failure: its nonce or origin), the log stops: that failure is not sent, nor is anything
 // after it. A page whose nonce expired (1 h) or outlived a server restart
 // loses its reports silently until then (README § Observability).
 
@@ -154,7 +154,7 @@ export function createClientLog({ nonce, send = sendBeacon }) {
  * Called once, by main.jsx.
  * @param {{ nonce: string, scriptUrl: string, send?: SendReport }} options
  * @returns {(details: StatusDetails) => void} Reports one `failed` connection; a
- *   `token` failure (the page nonce is dead) is not sent and stops the log.
+ *   `token` failure (the server refused the page's token request) is not sent and stops the log.
  */
 export function startClientLog({ nonce, scriptUrl, send }) {
   const { report, disable } = createClientLog({ nonce, send });
@@ -172,8 +172,9 @@ export function startClientLog({ nonce, scriptUrl, send }) {
   onINP(reportVital);
   onCLS(reportVital);
   return (details) => {
-    // The server rejected the page nonce, which gates this log too: every
-    // beacon from here on would 403 into the console. Stop instead.
+    // The server refused the page's token request (its nonce or origin), and
+    // the same gate guards this log: every beacon from here on would be
+    // refused into the console. Stop instead.
     if (details.fatal === 'token') {
       disable();
       return;

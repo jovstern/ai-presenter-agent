@@ -98,7 +98,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `onStatusChange` once per `failed` (the failures `failureCount` counts). Each report is a
     `navigator.sendBeacon` to `/api/client-log?nonce=…` with a JSON Blob; a missing or refusing
     `sendBeacon` drops it (no fetch fallback). A beacon the server rejects still logs a console
-    error, so a `token` failure (the page nonce is dead) is not sent and `disable()`s the log for
+    error, so a `token` failure (the server refused the page's token request: its nonce or origin) is not sent and `disable()`s the log for
     the rest of the page; a page whose nonce expired or outlived a server restart loses its
     reports until then. Per page: a repeated error once, at most 10 errors and 20 reports. The
     report builders are pure.

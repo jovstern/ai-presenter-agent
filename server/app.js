@@ -551,7 +551,8 @@ export function createApp({
 
   /**
    * The client log's body-parser errors: 413 past the cap, 415 for a charset
-   * or Content-Encoding it can't decode, 400 for anything else it refuses. Logged by type only: a parse error carries the raw body.
+   * or Content-Encoding it can't decode, 400 for anything else it refuses.
+   * Logged by type only: a parse error carries the raw body.
    * @param {unknown} err
    * @param {Request} req
    * @param {Response} res

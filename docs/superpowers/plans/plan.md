@@ -649,10 +649,15 @@ GIF, and the PR #9 body rewritten to the kit template. Wait for the merge.
 - The user creates the Render service from the blueprint and sets `GEMINI_API_KEY`.
 - The agent runs the e2e against the URL and the observer against production, and records
   `docs/metrics/m08.md`.
-- Hop count (`TRUST_PROXY_HOPS`): from one machine, load `/` 61 times, each with a different
-  forged first `X-Forwarded-For` entry. Hops right → the 61st gets 429 (Render's proxy
-  appends the real IP, so every load shares one bucket). Never a 429 → the hop count is
-  wrong; compare with `TRUST_PROXY_HOPS=2`.
+- Hop count (`TRUST_PROXY_HOPS`), two probes:
+  - (a) Spoofing (hops too many): from one machine, load `/` 61 times, each with a different
+    forged first `X-Forwarded-For` entry. Expect a 429 on the 61st. If none ever comes, the
+    hops are too many or Render doesn't append the client address: don't raise the hops; find
+    the header Render really uses for the client before trusting any.
+  - (b) Shared bucket (hops too few, e.g. Cloudflare's edge address appended before ours):
+    exhaust the page limit from one network (60 loads and a 429), then load `/` at once from a
+    second network (a phone on cellular). Expect 200; a 429 means the hops are too few, so try
+    `TRUST_PROXY_HOPS=2` and repeat both.
 
 *(medium, 15 min)*
 
