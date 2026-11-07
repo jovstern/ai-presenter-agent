@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-libra
 import { useState } from 'react';
 import { KnowledgeModal } from '../KnowledgeModal.jsx';
 import * as knowledgeStore from '../knowledgeStore.js';
+import { elementOf } from './defined.js';
 
 // The knowledge button and its dialog (spec Screens, R21), mounted the way
 // main.jsx mounts the widget: in an open shadow root, with the dialog portalled
@@ -54,16 +55,31 @@ function textFile(name, content) {
 
 /** @param {File[]} files */
 async function pick(files) {
-  const input = /** @type {HTMLInputElement} */ (shadowRoot.querySelector('input[type="file"]'));
+  const input = elementOf(shadowRoot.querySelector('input[type="file"]'), HTMLInputElement);
   await act(async () => fireEvent.change(input, { target: { files } }));
 }
 
-beforeEach(() => localStorage.clear());
+// jsdom has no scrollIntoView; a real browser always does. Stubbed per test
+// and put back as it was after each, so no other file sees the stub.
+/** @type {import('vitest').Mock<(arg?: boolean | ScrollIntoViewOptions) => void>} */
+let scrollIntoView;
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+
+beforeEach(() => {
+  localStorage.clear();
+  scrollIntoView = vi.fn();
+  Element.prototype.scrollIntoView = scrollIntoView;
+});
 
 afterEach(() => {
   cleanup();
   host.remove();
   vi.restoreAllMocks();
+  if (originalScrollIntoView) {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView);
+  } else {
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
+  }
 });
 
 describe('KnowledgeModal', () => {
@@ -97,6 +113,10 @@ describe('KnowledgeModal', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['notes.md5 BRemove notes.md']);
+    // Clamped to one line in CSS; the whole name stays in its title.
+    expect(list.querySelector('.knowledge-modal__file-name')?.getAttribute('title')).toBe(
+      'notes.md',
+    );
     expect(within(dialog).queryByText(/No files yet/)).toBeNull();
     expect(ui.getByRole('button', { name: 'Knowledge files: 1' })).toBeTruthy();
 
@@ -147,12 +167,15 @@ describe('KnowledgeModal', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('The operation is insecure.', 'SecurityError');
     });
-    const field = within(dialog).getByRole('textbox', { name: 'Rules' });
+    const field = elementOf(
+      within(dialog).getByRole('textbox', { name: 'Rules' }),
+      HTMLTextAreaElement,
+    );
     await act(async () => fireEvent.change(field, { target: { value: 'Be brief.' } }));
     expect(within(dialog).getByRole('alert').textContent).toBe(
       "This browser isn't letting the site save rules. They stay in the field but won’t survive a reload.",
     );
-    expect(/** @type {HTMLTextAreaElement} */ (field).value).toBe('Be brief.');
+    expect(field.value).toBe('Be brief.');
   });
 
   it("shows an alert when the browser won't let a file be removed, and keeps it listed", async () => {
@@ -217,24 +240,29 @@ describe('KnowledgeModal', () => {
     const polite = within(dialog).getByRole('status');
     expect(polite.textContent).toBe('');
     expect(knowledgeStore.getRules()).toBe('Speak French.');
+    // Its colour band (styles.css): none until near the limit.
+    expect(counter.hasAttribute('data-limit')).toBe(false);
 
     fireEvent.change(rules, { target: { value: 'a'.repeat(max - 10) } });
     const near = polite.textContent;
     expect(near).toBe('200 or fewer characters left.');
+    expect(counter.dataset.limit).toBe('near');
     // Nearer still, the same band: the message doesn't change, so it isn't
     // announced again on each keystroke.
     fireEvent.change(rules, { target: { value: 'a'.repeat(max - 5) } });
     expect(polite.textContent).toBe(near);
     fireEvent.change(rules, { target: { value: 'a'.repeat(max) } });
     expect(polite.textContent).toBe('At the 2,000-character limit.');
+    expect(counter.dataset.limit).toBe('near');
     expect(within(dialog).queryByRole('alert')).toBeNull();
   });
 
   it('keeps over-limit rules on screen with an alert, unsaved', async () => {
     const ui = renderModal();
     const { dialog } = await openDialog(ui);
-    const rules = /** @type {HTMLTextAreaElement} */ (
-      within(dialog).getByRole('textbox', { name: /Rules/ })
+    const rules = elementOf(
+      within(dialog).getByRole('textbox', { name: /Rules/ }),
+      HTMLTextAreaElement,
     );
     const max = knowledgeStore.MAX_RULES_CHARS;
     fireEvent.change(rules, { target: { value: 'Be brief.' } });
@@ -247,13 +275,39 @@ describe('KnowledgeModal', () => {
     expect(knowledgeStore.getRules()).toBe('Be brief.');
     const alert = within(dialog).getByRole('alert');
     expect(alert.textContent).toMatch(/5 characters over/);
+    const counter = within(dialog).getByText(/ \/ /);
+    expect(counter.dataset.limit).toBe('over');
     expect(rules.getAttribute('aria-invalid')).toBe('true');
     expect(rules.getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
+
+    // One over: the word is singular.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 1) } });
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/ 1 character over/);
 
     fireEvent.change(rules, { target: { value: 'Be brief, always.' } });
     expect(within(dialog).queryByRole('alert')).toBeNull();
     expect(rules.hasAttribute('aria-invalid')).toBe(false);
     expect(knowledgeStore.getRules()).toBe('Be brief, always.');
+  });
+
+  it('scrolls the over-limit alert into view once, when the rules go over', async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    const rules = within(dialog).getByRole('textbox', { name: /Rules/ });
+    const max = knowledgeStore.MAX_RULES_CHARS;
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max) } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // On a short phone the alert lands below the fold, under the field.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 1) } });
+    const alert = within(dialog).getByRole('alert');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(alert);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+
+    // Still over: no scroll on every keystroke, so the viewer can scroll away.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 2) } });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('focuses the first control on open', async () => {

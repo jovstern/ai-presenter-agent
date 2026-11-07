@@ -1,4 +1,8 @@
 import { TOOL_DECLARATIONS } from '../agent-client/src/actionTools.js';
+import {
+  createDomSnapshotContext,
+  formatSnapshotMessage,
+} from '../agent-client/src/domSnapshotContext.js';
 import ROUTES from '../target-app/routes.json' with { type: 'json' };
 import { test, expect } from './fixtures.js';
 
@@ -357,3 +361,118 @@ test.describe('fill on Settings', () => {
     expect(await fillEvents(page)).toHaveLength(before);
   });
 });
+
+// Issue #22: the Orders page has 139 data-testid elements, past bridge.js's
+// MAX_SNAPSHOT_NODES (30). A snapshot keeps the 30 nearest the frame's
+// viewport and says how many it left out; agent-client turns each one into a
+// keyframe or a delta as it would for the model (domSnapshotContext.js).
+test.describe('the Orders page, over the snapshot cap', () => {
+  const KEYFRAME_BUDGET_BYTES = 4096; // the spec's 4 kB
+  const ORDERS_ELEMENTS = 139;
+  const MAX_SNAPSHOT_NODES = 30;
+
+  test.beforeEach(async ({ page }) => {
+    // The sandbox page's frame fills the window; the fixture's is the
+    // default 300 x 150, which would leave hardly any row in view.
+    await page.evaluate(() => {
+      const iframe = document.querySelector('iframe');
+      if (iframe) iframe.style.cssText = 'display: block; width: 100%; height: 100vh; border: 0';
+    });
+  });
+
+  /**
+   * Runs one action and returns the snapshot sent just before its result.
+   * @param {import('@playwright/test').Page} page
+   * @param {string} action
+   * @param {unknown[]} args
+   */
+  async function snapshotOf(page, action, args) {
+    const before = (await received(page)).length;
+    expect(await act(page, action, args)).toEqual({ success: true });
+    const messages = (await received(page)).slice(before);
+    return messages.filter((message) => message.type === 'snapshot').at(-1);
+  }
+
+  const selectors = (/** @type {{ full: { selector: string }[] }} */ snapshot) =>
+    snapshot.full.map((node) => node.selector);
+  const bytes = (/** @type {string} */ text) => new TextEncoder().encode(text).length;
+
+  test('keeps what is in view, within the keyframe budget, and sends small changes as deltas', async ({
+    page,
+  }) => {
+    const context = createDomSnapshotContext();
+    context.markNavigated();
+    const loaded = await snapshotOf(page, 'navigate', ['orders']);
+
+    // On load: the top of the page, the first orders included; the far rows
+    // and the form below the table are left out, and counted.
+    expect(loaded.full).toHaveLength(MAX_SNAPSHOT_NODES);
+    expect(loaded.omitted).toBe(ORDERS_ELEMENTS - MAX_SNAPSHOT_NODES);
+    expect(selectors(loaded)).toEqual(expect.arrayContaining(['nav-orders', 'order-1003-select']));
+    expect(selectors(loaded)).not.toContain('order-1030-select');
+    expect(selectors(loaded)).not.toContain('order-customer');
+    const keyframe = formatSnapshotMessage(context.decide(loaded));
+    expect(keyframe).toContain(
+      `The page has ${ORDERS_ELEMENTS - MAX_SNAPSHOT_NODES} more elements`,
+    );
+    expect(bytes(keyframe)).toBeLessThanOrEqual(KEYFRAME_BUDGET_BYTES);
+
+    // Ticking a row: that checkbox, the count and Ship selected, as a delta.
+    const ticked = await snapshotOf(page, 'click', ['order-1003-select']);
+    expect(context.decide(ticked)).toEqual({
+      type: 'delta',
+      changed: [
+        expect.objectContaining({ selector: 'orders-selected-count', label: '1 selected' }),
+        expect.objectContaining({ selector: 'ship-selected', disabled: false }),
+        expect.objectContaining({ selector: 'order-1003-select', checked: true }),
+      ],
+      removed: [],
+    });
+    await expect(frame(page).getByRole('checkbox', { name: 'Select order 1003' })).toBeChecked();
+
+    // Scrolling to the form brings it in, as a keyframe of the new view.
+    const scrolled = await snapshotOf(page, 'scroll', ['order-customer']);
+    expect(selectors(scrolled)).toEqual(expect.arrayContaining(['order-customer', 'order-date']));
+    expect(selectors(scrolled)).not.toContain('order-1003-select');
+    const scrolledDecision = context.decide(scrolled);
+    expect(scrolledDecision.type).toBe('keyframe');
+    expect(bytes(formatSnapshotMessage(scrolledDecision))).toBeLessThanOrEqual(
+      KEYFRAME_BUDGET_BYTES,
+    );
+
+    // Filling a field of the form, now in view: one node, as a delta.
+    const filled = await snapshotOf(page, 'fill', ['order-customer', 'Pied Piper']);
+    expect(context.decide(filled)).toEqual({
+      type: 'delta',
+      changed: [{ ...selectorNode('order-customer', 'Customer'), value: 'Pied Piper' }],
+      removed: [],
+    });
+  });
+
+  test('a viewer’s scroll sends a snapshot of what came into view', async ({ page }) => {
+    expect(await act(page, 'navigate', ['orders'])).toEqual({ success: true });
+    const before = (await received(page)).length;
+
+    await frame(page)
+      .getByRole('button', { name: 'Ship order 1040' })
+      .evaluate((button) => button.scrollIntoView({ block: 'center' }));
+
+    await expect
+      .poll(async () =>
+        (await received(page))
+          .slice(before)
+          .filter((message) => message.type === 'snapshot')
+          .flatMap((snapshot) => snapshot.full.map((node) => node.selector)),
+      )
+      .toContain('order-1040-select');
+  });
+});
+
+/**
+ * A visible, enabled text input's snapshot node, before its value.
+ * @param {string} selector
+ * @param {string} label
+ */
+function selectorNode(selector, label) {
+  return { selector, tag: 'input', label, disabled: false, hidden: false };
+}

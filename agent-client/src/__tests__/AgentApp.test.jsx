@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { AgentApp } from '../AgentApp.jsx';
+import { preloadLiveSdk } from '../liveSdk.js';
+import { elementOf } from './defined.js';
 
 // The card behind the knowledge dialog, mounted the way main.jsx mounts it: in
 // an open shadow root, the dialog portalled into a container in that root.
@@ -16,6 +18,8 @@ vi.mock('../liveSession.js', () => ({
     sendAudioFrame: vi.fn(),
   })),
 }));
+
+vi.mock('../liveSdk.js', () => ({ preloadLiveSdk: vi.fn() }));
 
 vi.mock('../audioIO.js', () => ({
   voiceSupportError: vi.fn(() => null),
@@ -59,6 +63,7 @@ afterEach(() => {
   cleanup();
   host.remove();
   localStorage.clear();
+  vi.mocked(preloadLiveSdk).mockClear();
 });
 
 describe('AgentApp', () => {
@@ -67,7 +72,7 @@ describe('AgentApp', () => {
     const card = ui.getByRole('complementary', { name: 'AI presenter' });
     // Everything the card renders outside the dialog's portal: the card and
     // the toast viewport beside it.
-    const layer = /** @type {HTMLElement} */ (mountPoint.firstElementChild);
+    const layer = elementOf(mountPoint.firstElementChild, HTMLElement);
     expect(layer.contains(card)).toBe(true);
     expect(layer.querySelector('.toast-viewport')).not.toBeNull();
     expect(layer.hasAttribute('inert')).toBe(false);
@@ -85,5 +90,18 @@ describe('AgentApp', () => {
     expect(ui.queryByRole('dialog')).toBeNull();
     expect(layer.hasAttribute('inert')).toBe(false);
     await waitFor(() => expect(shadowRoot.activeElement).toBe(trigger));
+  });
+
+  // The SDK chunk loads on Talk (liveSdk.js); reaching for the button starts
+  // it early, so it is usually in before the press and the token are.
+  it('starts loading the SDK when the viewer points at or focuses Talk, not before', () => {
+    const { ui } = renderCard();
+    const talk = ui.getByRole('button', { name: 'Talk to the AI Presenter' });
+    expect(preloadLiveSdk).not.toHaveBeenCalled();
+
+    fireEvent.pointerEnter(talk);
+    expect(preloadLiveSdk).toHaveBeenCalledTimes(1);
+    fireEvent.focus(talk);
+    expect(preloadLiveSdk).toHaveBeenCalledTimes(2);
   });
 });

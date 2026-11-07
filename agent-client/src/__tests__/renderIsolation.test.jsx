@@ -3,6 +3,11 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { Profiler, useState } from 'react';
 import { AgentApp } from '../AgentApp.jsx';
 import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
+import { defined, elementOf } from './defined.js';
+
+/**
+ * @import { LiveSession, LiveSessionOptions } from '../liveSession.js'
+ */
 
 // Render isolation (spec goals #8 and #9, docs/code-review-notes.md L2, L8):
 // the volume orb animates at the display's frame rate without React rendering
@@ -17,12 +22,17 @@ import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
 // carries on undisturbed.
 
 const commits = vi.hoisted(() => ({ card: 0, orb: 0, knowledge: 0 }));
-const fakes = vi.hoisted(() => ({ sessions: [], levels: { output: 0, mic: 0 } }));
+const fakes = vi.hoisted(() => {
+  /** @type {{ sessions: (LiveSession & { options: LiveSessionOptions })[], levels: { output: number, mic: number } }} */
+  const recorded = { sessions: [], levels: { output: 0, mic: 0 } };
+  return recorded;
+});
 
 // The real VolumeOrb, inside a Profiler of its own: a commit there is a
 // render of the orb.
 vi.mock('../VolumeOrb.jsx', async (importOriginal) => {
-  const actual = /** @type {typeof import('../VolumeOrb.jsx')} */ (await importOriginal());
+  /** @type {typeof import('../VolumeOrb.jsx')} */
+  const actual = await importOriginal();
   return {
     /** @param {import('react').ComponentProps<typeof actual.VolumeOrb>} props */
     VolumeOrb: (props) => (
@@ -35,7 +45,8 @@ vi.mock('../VolumeOrb.jsx', async (importOriginal) => {
 
 // A sibling the transcript doesn't touch, probed the same way.
 vi.mock('../KnowledgeModal.jsx', async (importOriginal) => {
-  const actual = /** @type {typeof import('../KnowledgeModal.jsx')} */ (await importOriginal());
+  /** @type {typeof import('../KnowledgeModal.jsx')} */
+  const actual = await importOriginal();
   return {
     /** @param {import('react').ComponentProps<typeof actual.KnowledgeModal>} props */
     KnowledgeModal: (props) => (
@@ -47,7 +58,7 @@ vi.mock('../KnowledgeModal.jsx', async (importOriginal) => {
 });
 
 vi.mock('../liveSession.js', () => ({
-  createLiveSession: vi.fn((options) => {
+  createLiveSession: vi.fn((/** @type {LiveSessionOptions} */ options) => {
     const session = {
       options,
       connect: vi.fn(async () => {}),
@@ -84,6 +95,7 @@ const bridge = {
   close: vi.fn(),
 };
 
+/** @type {ReturnType<typeof fakeAnimationFrames>} */
 let frames;
 
 beforeEach(() => {
@@ -106,17 +118,21 @@ describe('render isolation', () => {
     // No StrictMode: its double render would double every count.
     const { container } = render(
       <Profiler id="card" onRender={() => commits.card++}>
-        <AgentApp bridge={bridge} nonce="page-nonce" workletUrl="/w.js" />
+        <AgentApp
+          bridge={bridge}
+          nonce="page-nonce"
+          workletUrl="/w.js"
+          portalContainer={document.body}
+        />
       </Profiler>,
     );
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Talk to the presenter' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Talk to the AI Presenter' }));
     });
-    act(() => fakes.sessions[0].options.onStatusChange('open'));
+    act(() => defined(fakes.sessions[0].options.onStatusChange)('open'));
     expect(screen.getByRole('status').textContent).toBe('Live');
 
-    const orb = /** @type {HTMLElement} */ (container.querySelector('[data-active="true"]'));
-    expect(orb).not.toBeNull();
+    const orb = elementOf(container.querySelector('[data-active="true"]'), HTMLElement);
     const cardBefore = commits.card;
     const orbBefore = commits.orb;
     const knowledgeBefore = commits.knowledge;
@@ -156,7 +172,7 @@ describe('render isolation', () => {
     // didn't change are skipped (the compiler caches their elements), and the
     // orb's loop carries on through it: no frame cancelled, the level not reset.
     const cancelsBefore = frames.cancel.mock.calls.length;
-    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    act(() => defined(fakes.sessions[0].options.onTranscript)({ role: 'agent', text: 'Hello!' }));
     expect(screen.getByText('Hello!')).toBeTruthy();
     expect(commits.card).toBeGreaterThan(cardBefore);
     expect(commits.orb).toBe(orbBefore);

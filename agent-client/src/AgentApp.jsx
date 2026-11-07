@@ -4,6 +4,7 @@ import { KnowledgeModal } from './KnowledgeModal.jsx';
 import { FailureToast } from './FailureToast.jsx';
 import { VolumeOrb } from './VolumeOrb.jsx';
 import { Transcript } from './Transcript.jsx';
+import { preloadLiveSdk } from './liveSdk.js';
 
 /** @import { BridgeChannel } from './bridgeChannel.js' */
 /** @import { StatusDetails } from './liveSession.js' */
@@ -40,12 +41,16 @@ function statusText(status, details) {
 // server again — it connects once the owner has fixed the key, without
 // losing the page (M6 T6, M4 re-review). Unless fixing the key restarted the
 // server: that wipes its in-memory nonces, the retry comes back a rejected
-// `token`, and the button becomes Reload page (the reason warns of it).
+// `token`, and the button becomes Reload page (the reason warns of it). An
+// SDK chunk that didn't load (`sdk`, liveSdk.js) gets Retry, which imports it
+// again.
 /**
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
  * @param {Pick<LiveAgent, 'connect' | 'disconnect' | 'retry'>} agent
- * @returns {{ label: string, onClick: () => void }}
+ * @returns {{ label: string, onClick: () => void, secondary?: boolean }}
+ *   `secondary`: End, the stop action, is drawn in outline (styles.css), so
+ *   it reads apart from Talk and Retry, the actions that start something.
  */
 function primaryAction(status, details, { connect, disconnect, retry }) {
   switch (status) {
@@ -53,14 +58,14 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
       return { label: 'Cancel', onClick: disconnect };
     case 'open':
     case 'reconnecting':
-      return { label: 'End', onClick: disconnect };
+      return { label: 'End', onClick: disconnect, secondary: true };
     case 'failed':
       if (details?.fatal === 'token') {
         return { label: 'Reload page', onClick: () => location.reload() };
       }
       return { label: details?.fatal === 'config' ? 'Try again' : 'Retry', onClick: retry };
     default: // idle, closed
-      return { label: 'Talk to the presenter', onClick: connect };
+      return { label: 'Talk to the AI Presenter', onClick: connect };
   }
 }
 
@@ -72,7 +77,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 /** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
-    return 'Microphone blocked — allow it in the address bar and press Talk to the presenter.';
+    return 'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.';
   }
   if (error.name === 'InsecureContextError') {
     return 'Voice needs a secure connection (https). Open this page over https, or on localhost.';
@@ -83,15 +88,15 @@ function micErrorText(error) {
   // audioIO.js's own name for the capture worklet failing to load: nothing
   // the viewer did, and a reload fetches the file again.
   if (error.name === 'WorkletLoadError') {
-    return "Voice couldn't start. Reload the page, then press Talk to the presenter.";
+    return "Voice couldn't start. Reload the page, then press Talk to the AI Presenter.";
   }
   // audioIO.js's own name for a resume() that never settled (Safari): another
   // press is a fresh user activation, which may let the context start.
   if (error.name === 'AudioResumeTimeoutError') {
-    return "Voice couldn't start: the browser kept audio paused. Press Talk to the presenter to try again.";
+    return "Voice couldn't start: the browser kept audio paused. Press Talk to the AI Presenter to try again.";
   }
   if (error.name === 'NotFoundError') {
-    return 'No microphone found. Connect one, then press Talk to the presenter.';
+    return 'No microphone found. Connect one, then press Talk to the AI Presenter.';
   }
   return `Microphone unavailable: ${error.message || String(error)}`;
 }
@@ -139,14 +144,24 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer, onFailure
         />
         {/* Animates outside React: its frames render nothing, and a card render
             (a transcript line) skips it, since its props are unchanged (VolumeOrb.jsx). */}
-        <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />
+        <VolumeOrb
+          active={status === 'open'}
+          reconnecting={status === 'reconnecting'}
+          outputLevel={outputLevel}
+          micLevel={micLevel}
+        />
         {/* Pending while connecting: a spinner, and the label says what a
-            press does now (Cancel). The status line says Connecting…. */}
+            press does now (Cancel). The status line says Connecting…. Pointing
+            at or focusing it starts loading the Gemini SDK, which the press
+            needs (liveSdk.js; a no-op once loaded). */}
         <button
           ref={primaryRef}
           className="agent-app__primary"
           data-pending={status === 'connecting' ? 'true' : undefined}
+          data-variant={action.secondary ? 'secondary' : undefined}
           onClick={action.onClick}
+          onPointerEnter={preloadLiveSdk}
+          onFocus={preloadLiveSdk}
         >
           {action.label}
         </button>

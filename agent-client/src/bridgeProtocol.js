@@ -25,8 +25,10 @@
  */
 /**
  * The full node list plus its diff against the bridge's previous snapshot.
- * `removed` holds selectors.
- * @typedef {{ full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} Snapshot
+ * `removed` holds selectors. `omitted` is set only on a page with more
+ * elements than the bridge's cap: how many it left out, those furthest from
+ * the viewport.
+ * @typedef {{ full: SnapshotNode[], changed: SnapshotNode[], removed: string[], omitted?: number }} Snapshot
  */
 /**
  * The handshake, posted to `window` with the bridge's MessagePort as its one
@@ -52,7 +54,7 @@
 /**
  * bridge -> agent: after every load and debounced DOM mutation, before each
  * successful action's result, and on request.
- * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} SnapshotMessage
+ * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[], omitted?: number }} SnapshotMessage
  */
 /**
  * bridge -> agent: a new document loaded in the frame. Sent before that

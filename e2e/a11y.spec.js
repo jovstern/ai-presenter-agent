@@ -46,7 +46,7 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
 
     test('the sandbox page with the card idle', async ({ page }) => {
       await page.goto('/');
-      await expect(cardButton(page, 'Talk to the presenter')).toBeVisible();
+      await expect(cardButton(page, 'Talk to the AI Presenter')).toBeVisible();
       // The theme really switched (--color-surface), so axe saw this scheme's colours.
       await expect(page.locator(HOST).locator('.agent-app')).toHaveCSS(
         'background-color',
@@ -73,19 +73,13 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         });
         const { status, button, toasts } = card(page);
         await page.goto('/');
-        await button('Talk to the presenter').click();
+        await button('Talk to the AI Presenter').click();
         await expect(status).toHaveText("Can't connect");
         await expect(toasts).toHaveCount(1);
         // The toast slides in from opacity 0: axe sampling mid-fade read its
         // colours blended with the page (1 flaky contrast failure in 26 runs,
         // docs/metrics/m07.md miss 2), so it waits for the toast to settle.
-        await toasts
-          .first()
-          .evaluate((toast) =>
-            Promise.all(
-              toast.getAnimations({ subtree: true }).map((animation) => animation.finished),
-            ),
-          );
+        await settled(toasts.first());
 
         const { violations, checkedInShadowRoot } = await analyze(page);
         expect(violations).toEqual([]);
@@ -96,7 +90,13 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
     test('the sandbox page with the knowledge dialog open', async ({ page }) => {
       await page.goto('/');
       await cardButton(page, 'Knowledge files: 0').click();
-      await expect(page.locator(HOST).getByRole('dialog', { name: 'Knowledge' })).toBeVisible();
+      const dialog = page.locator(HOST).getByRole('dialog', { name: 'Knowledge' });
+      await expect(dialog).toBeVisible();
+      // The dialog and its overlay fade in (styles.css): axe sampling mid-fade
+      // would read blended colours, as with the toast above, so it waits for
+      // both to settle.
+      await settled(dialog);
+      await settled(page.locator(HOST).locator('.knowledge-modal__overlay'));
 
       const { violations, checkedInShadowRoot } = await analyze(page);
       expect(violations).toEqual([]);
@@ -163,6 +163,13 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
   });
 }
 
+/** Resolves once every animation on `locator`'s element and its subtree has finished. */
+function settled(/** @type {import('@playwright/test').Locator} */ locator) {
+  return locator.evaluate((node) =>
+    Promise.all(node.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  );
+}
+
 /** Whether `locator` has focus in its own tree (the shadow root's, for the card). */
 function isFocused(/** @type {import('@playwright/test').Locator} */ locator) {
   return locator.evaluate((node) => {
@@ -180,7 +187,7 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   const { status, button } = card(page);
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   // Fragments as Live streams them: coalesced into one turn (transcript.js).
   live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello' } } });
@@ -194,7 +201,11 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   expect(checkedInShadowRoot('li')).toBe(true);
 });
 
-for (const path of ['/target-app/index.html', '/target-app/settings.html']) {
+for (const path of [
+  '/target-app/index.html',
+  '/target-app/settings.html',
+  '/target-app/orders.html',
+]) {
   test(`the target app at ${path}`, async ({ page }) => {
     await page.goto(path);
     const { violations } = await analyze(page);

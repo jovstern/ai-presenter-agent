@@ -1,7 +1,9 @@
 // Catches the model going in circles (docs/code-review-notes.md M6), in what it
 // does and in what it says. This module only detects; liveSession.js decides
 // what a trip does: a tripped action is not dispatched and is answered with a
-// failure telling the model to try something else; a tripped utterance gets
+// failure telling the model to stop, say what it has done and ask the user
+// whether to go on (#28; it used to say "try something different", which
+// invited the model to keep acting on its own); a tripped utterance gets
 // one corrective context turn. liveSession calls reset() on every manual
 // connect(), so a new conversation starts clean, userSpoke() on the user's
 // own transcription and agentActed() on every tool call.
@@ -30,14 +32,27 @@
 // - Period 1 (the same call on the same page; page signatures only): 4th in
 //   a row. A click that changes nothing, or a failing one (no snapshot, the
 //   page as it was).
-// - Period 2 (A-B-A-B): on the second B. The model bouncing between two pages
-//   or two buttons twice is the classic agent loop: the bare actions catch
-//   it (toggle, save, toggle, save), the page signatures one button
-//   flip-flopping between two states (a toggle on, off, on, off); home →
-//   settings → home once (A-B-A) still passes.
+// - Period 2 (A-B-A-B-A-B): on the third B. The model bouncing between two
+//   pages or two buttons is the classic agent loop: the bare actions catch it
+//   (toggle, save, …), the page signatures one button flip-flopping between
+//   two states (a toggle on, off, on, …).
+//   Two rounds pass (#28): "turn notifications on and save, then off and
+//   save" (toggle, save, toggle, save) and "Settings, Home, Settings, Home"
+//   are requests a user makes, and the old threshold of two refused their
+//   4th call. The ruling, of the issue's two options: both. (a) A period-2
+//   cycle trips on its third round, in both histories (the page signatures
+//   too, or Settings, Home twice, which meets the same two pages again,
+//   would still be refused); a runaway costs two more actions, then every
+//   further call of the cycle is refused. (b) Every refusal tells the model
+//   to stop, tell the user what it has done and ask whether to go on
+//   (liveSession.js), so a third round the user really asked for costs one
+//   question, not a dead end. (b) alone was not enough: the model would
+//   still have to stop half way through a request it was given.
 // - Period 3 (A-B-C-A-B-C): on the second C. A three-step routine (fill,
 //   toggle, save) is one task; doing it all again, unchanged, is a loop,
-//   whatever it left on the page.
+//   whatever it left on the page. Kept at two rounds in #28: no request for
+//   a routine twice has been seen, and both cycle rules now trip on the 6th
+//   call, which keeps the window at 6.
 // A cycle needs at least two different calls; a constant run is period 1's.
 // The window covers one request: the user speaking clears it, since a loop is
 // the model acting with no new input. Four separate "click increment"
@@ -60,20 +75,23 @@
 // clicks (docs/metrics/m06.md).
 // A known limit of the fingerprint: a page with an element that changes on
 // its own (a clock, a live feed) makes every state new, so a no-op loop there
-// never repeats a signature. The target app has none. A model that overshoots
-// (keeps clicking past the number it was asked for) is progress to the guard
-// too, and only the budget stops it: it sees the counter in each response.
-// ACTION_BUDGET is the
-// backstop: one request gets 50 actions, then each further one is refused
-// with a stop-and-ask (not "repeated"), until the user speaks. The six-step
-// task takes 6; 50 still lets "increment the counter to 50" finish, and with
-// the bridge's settle (100 ms quiet, 1 s cap per action) it bounds a runaway
-// to about a minute of acting, plus the model's own turns.
+// never repeats a signature. The target app has none. On a page over the
+// bridge's snapshot cap (Orders), the snapshot holds the elements nearest the
+// viewport, so the fingerprint depends on the scroll position too: a viewer's
+// scroll between two actions makes the next state new and resets period-1
+// detection. A model that overshoots (keeps clicking past the number it was
+// asked for) is progress to the guard too, and only the budget stops it: it
+// sees the counter in each response. ACTION_BUDGET is the backstop: one
+// request gets 50 actions, then each further one is refused with a
+// stop-and-ask (not "repeated"), until the user speaks. The six-step task
+// takes 6; 50 still lets "increment the counter to 50" finish, and with the
+// bridge's settle (100 ms quiet, 1 s cap per action) it bounds a runaway to
+// about a minute of acting, plus the model's own turns.
 const REPEAT_LIMIT = 3;
 export const ACTION_BUDGET = 50;
 const PAGE_RULES = [
   { period: 1, repeats: REPEAT_LIMIT + 1 },
-  { period: 2, repeats: 2 },
+  { period: 2, repeats: 3 },
   { period: 3, repeats: 2 },
 ];
 const BARE_RULES = PAGE_RULES.filter(({ period }) => period > 1);

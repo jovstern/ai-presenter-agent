@@ -83,7 +83,7 @@ describe('POST /api/client-log', () => {
     expect(clientLines(lines)[0].client).toEqual({ type: 'error', message: 'boom' });
   });
 
-  it.each(['config', 'token', 'exhausted'])(
+  it.each(['config', 'token', 'sdk', 'exhausted'])(
     'accepts a %s connection failure and logs it at warn',
     async (kind) => {
       const { app, lines } = setup();

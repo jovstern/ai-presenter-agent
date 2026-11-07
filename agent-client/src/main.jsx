@@ -7,29 +7,26 @@ import styles from './styles.css?inline';
 
 const HOST_ID = 'ai-presenter-agent-host';
 
+// This bundle's own URL. It is an ES module (vite.config.js), loaded with
+// <script type="module">, where document.currentScript is null, so its URL
+// comes from import.meta.url and its tag is found by that URL.
+const SCRIPT_URL = import.meta.url;
+// The directory the bundle is served from: the capture worklet
+// (public/capture-worklet.js) and the SDK chunk (liveSdk.js) ship next to it.
+// The client log reports only errors thrown from files under it.
+const BUNDLE_BASE = new URL('./', SCRIPT_URL).href;
+const WORKLET_URL = new URL('capture-worklet.js', BUNDLE_BASE).href;
 // The page nonce for /api/live-token (docs/code-review-notes.md H1). server/app.js
 // templates it into this script tag's data-ds-nonce: the CSP (script-src 'self')
-// rules out the inline script that used to set a window global. Read here, at the
-// bundle's top level, because document.currentScript points at this tag only
-// while it executes; mount() may run later, from DOMContentLoaded. This hides
+// rules out the inline script that used to set a window global. This hides
 // nothing from a hostile same-origin script — it can read the attribute just as
 // easily — which is the residual H1 gap, not a regression.
-const script = document.currentScript;
-const NONCE = script instanceof HTMLScriptElement ? (script.dataset.dsNonce ?? '') : '';
-// This bundle's own URL, captured here for the same reason. Not
-// import.meta.url: this IIFE build replaces `import.meta` with `{}` (Vite 8
-// warns as much), so its `url` is undefined. The client log reports only
-// errors thrown from this URL.
-const SCRIPT_URL = script instanceof HTMLScriptElement ? script.src : '';
-// The capture worklet (public/capture-worklet.js) ships next to this bundle,
-// so it is resolved against SCRIPT_URL. The fallback is where server/app.js
-// serves the bundle.
-const WORKLET_URL = new URL('capture-worklet.js', SCRIPT_URL || `${location.origin}/agent-client/`)
-  .href;
+const script = Array.from(document.scripts).find((tag) => tag.src === SCRIPT_URL);
+const NONCE = script?.dataset.dsNonce ?? '';
 
 // Started here, once per page and before the mount, so an error while
 // mounting is reported and LCP is observed from the start (spec R23).
-const reportFailure = startClientLog({ nonce: NONCE, scriptUrl: SCRIPT_URL });
+const reportFailure = startClientLog({ nonce: NONCE, bundleBase: BUNDLE_BASE });
 
 function mount() {
   if (document.getElementById(HOST_ID)) return; // already mounted

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { tabStops } from '../shadowFocus.js';
+import { elementOf } from './defined.js';
 
 // The Tab stops a focus wrap goes to (KnowledgeModal.jsx): only what a Tab
 // press can land on, so never a control that isn't rendered.
@@ -38,7 +39,7 @@ describe('tabStops', () => {
 
   it('asks the browser whether a control is rendered, where it can (display: none from a stylesheet, say)', () => {
     const node = container(`<button id="a">A</button><button id="b">B</button>`);
-    const b = /** @type {HTMLElement} */ (node.querySelector('#b'));
+    const b = elementOf(node.querySelector('#b'), HTMLElement);
     Object.defineProperty(b, 'checkVisibility', { value: () => false });
     expect(tabStops(node).map((stop) => stop.id)).toEqual(['a']);
   });

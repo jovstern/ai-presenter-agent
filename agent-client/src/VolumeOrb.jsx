@@ -14,8 +14,11 @@ import { useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
 // for reduced motion: idle, a hang-up, an unmount or a change of preference
 // cancels the pending frame. Without the loop the variables are removed, and
 // styles.css shows the orb at rest (or, live under reduced motion, a static
-// level). Decorative: hidden from assistive technology, since the card's
-// status line says the same thing in words (L2).
+// level). While the session reconnects, the loop is off and styles.css
+// pulses the halo slowly instead (data-reconnecting; CSS only, none under
+// reduced motion), so the orb shows something is still happening.
+// Decorative: hidden from assistive technology, since the card's status line
+// says the same thing in words (L2).
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 // A rising level shows at once; a falling one keeps this share of the last
@@ -39,13 +42,15 @@ function prefersReducedMotion() {
 /**
  * @param {{
  *   active: boolean,
+ *   reconnecting?: boolean,
  *   outputLevel: () => number,
  *   micLevel: () => number,
  * }} props
- *   `active` is true while the session is open; the two sources return 0..1
+ *   `active` is true while the session is open, `reconnecting` while it
+ *   reconnects; the two sources return 0..1
  *   (useLiveAgent.js) and are read once per animation frame.
  */
-export function VolumeOrb({ active, outputLevel, micLevel }) {
+export function VolumeOrb({ active, reconnecting = false, outputLevel, micLevel }) {
   const orbRef = useRef(/** @type {HTMLDivElement | null} */ (null));
   const reducedMotion = useSyncExternalStore(subscribeToReducedMotion, prefersReducedMotion);
   const animate = active && !reducedMotion;
@@ -87,5 +92,13 @@ export function VolumeOrb({ active, outputLevel, micLevel }) {
     };
   }, [animate]);
 
-  return <div ref={orbRef} className="volume-orb" data-active={active} aria-hidden="true" />;
+  return (
+    <div
+      ref={orbRef}
+      className="volume-orb"
+      data-active={active}
+      data-reconnecting={reconnecting ? 'true' : undefined}
+      aria-hidden="true"
+    />
+  );
 }

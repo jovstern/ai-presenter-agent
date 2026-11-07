@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 import { VolumeOrb } from '../VolumeOrb.jsx';
 import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
+import { elementOf } from './defined.js';
 
 // The orb's animation loop: when it runs, what it writes, and that it stops.
 // Render isolation (no React render per frame) is renderIsolation.test.jsx.
 
+/** @type {ReturnType<typeof fakeAnimationFrames>} */
 let frames;
+/** @type {ReturnType<typeof fakeReducedMotion>} */
 let motion;
+/** @type {{ output: number, mic: number }} */
 let levels;
 
 /** @param {{ active?: boolean }} [props] */
@@ -15,7 +19,7 @@ function renderOrb({ active = true } = {}) {
   const utils = render(
     <VolumeOrb active={active} outputLevel={() => levels.output} micLevel={() => levels.mic} />,
   );
-  const orb = /** @type {HTMLElement} */ (utils.container.firstElementChild);
+  const orb = elementOf(utils.container.firstElementChild, HTMLElement);
   return { orb, ...utils };
 }
 
@@ -141,6 +145,20 @@ describe('VolumeOrb', () => {
     expect(frames.pendingCount).toBe(1);
     frames.tick();
     expect(Number(cssLevel(orb))).toBeCloseTo(0.5, 3);
+  });
+
+  // The pulse itself is CSS (styles.css); the orb only says it reconnects.
+  it('marks reconnecting for the CSS pulse, runs no loop then, and drops the mark after', () => {
+    const { container, rerender } = render(
+      <VolumeOrb active={false} reconnecting outputLevel={() => 1} micLevel={() => 1} />,
+    );
+    const orb = elementOf(container.firstElementChild, HTMLElement);
+    expect(orb.dataset.reconnecting).toBe('true');
+    expect(frames.request).not.toHaveBeenCalled();
+
+    rerender(<VolumeOrb active outputLevel={() => 1} micLevel={() => 1} />);
+    expect(orb.hasAttribute('data-reconnecting')).toBe(false);
+    expect(frames.pendingCount).toBe(1);
   });
 
   it('treats a browser without matchMedia as having no motion preference', () => {

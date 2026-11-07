@@ -17,6 +17,6 @@ declare const sampleRate: number;
 declare function registerProcessor(
   name: string,
   processorCtor: new () => AudioWorkletProcessor & {
-    process(inputs: Float32Array[][]): boolean;
+    process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean;
   },
 ): void;

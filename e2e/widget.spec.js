@@ -42,7 +42,7 @@ test.describe('the card through every connection state', () => {
     // connecting: setupComplete held back; the same button, enabled, as a
     // pending Cancel.
     live.holdSetup(true);
-    await button('Talk to the presenter').click();
+    await button('Talk to the AI Presenter').click();
     await expect(status).toHaveText('Connecting…');
     await expect(button('Cancel')).toHaveAttribute('data-pending', 'true');
     await expect(button('Cancel')).toBeEnabled();
@@ -126,7 +126,7 @@ test.describe('the card through every connection state', () => {
 
     await button('End').click();
     await expect(status).toHaveText('Not connected');
-    await expect(button('Talk to the presenter')).toBeFocused();
+    await expect(button('Talk to the AI Presenter')).toBeFocused();
     await pause();
   });
 });
@@ -164,7 +164,7 @@ test.describe('when the server has no API key', () => {
     };
 
     await page.goto('/');
-    await button('Talk to the presenter').focus();
+    await button('Talk to the AI Presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
@@ -242,7 +242,7 @@ test.describe('when the page nonce is rejected', () => {
     const reason = 'This page can no longer get a connection token. Reload the page to reconnect.';
 
     await page.goto('/');
-    await button('Talk to the presenter').focus();
+    await button('Talk to the AI Presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
@@ -279,12 +279,12 @@ test('a blocked microphone shows the guidance and leaves the card on Talk', asyn
   const { status, alert, button, toasts } = card(page);
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(alert).toHaveText(
-    'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
+    'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.',
   );
   await expect(status).toHaveText('Not connected');
-  await expect(button('Talk to the presenter')).toBeVisible();
+  await expect(button('Talk to the AI Presenter')).toBeVisible();
   await expect(toasts).toHaveCount(0);
 });
 
@@ -297,7 +297,7 @@ const VIEWPORTS = [
   { width: 1440, height: 900 },
 ];
 const GUTTER = 16;
-const CARD_WIDTH = 344;
+const CARD_WIDTH = 352;
 // Longer than the transcript box at any width, so it scrolls.
 const LONG_TURN = Array.from(
   { length: 12 },
@@ -331,7 +331,7 @@ for (const viewport of VIEWPORTS) {
 
       // Tab from the top of the page (the host page, then the target app's
       // iframe) reaches the card's primary button, with a visible focus ring.
-      const talk = button('Talk to the presenter');
+      const talk = button('Talk to the AI Presenter');
       for (let i = 0; i < 40 && !(await isFocused(talk)); i++) {
         await page.keyboard.press('Tab');
       }
@@ -381,14 +381,14 @@ for (const viewport of VIEWPORTS) {
       for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         await page.emulateMedia({ colorScheme });
         // The theme has switched, and the primary button's colour transition
-        // has ended, so axe reads this scheme's colours, not a blend.
+        // has ended, so axe reads this scheme's colours, not a blend. End is
+        // the outline button: the surface behind the accent text.
         const dark = colorScheme === 'dark';
-        await expect(panel).toHaveCSS(
-          'background-color',
-          dark ? 'rgb(24, 24, 27)' : 'rgb(255, 255, 255)',
-        );
+        const surface = dark ? 'rgb(24, 24, 27)' : 'rgb(255, 255, 255)';
+        await expect(panel).toHaveCSS('background-color', surface);
+        await expect(button('End')).toHaveCSS('background-color', surface);
         await expect(button('End')).toHaveCSS(
-          'background-color',
+          'color',
           dark ? 'rgb(129, 140, 248)' : 'rgb(79, 70, 229)',
         );
         const results = await new AxeBuilder({ page }).include(HOST).analyze();
@@ -442,7 +442,7 @@ test.describe('at 390 px, while the transcript grows', () => {
     const live = await fakeGeminiLive(page);
     const { status, transcript, button } = card(page);
     await page.goto('/');
-    await button('Talk to the presenter').click();
+    await button('Talk to the AI Presenter').click();
     await expect(status).toHaveText('Live');
     // Past the press's 500 ms input window: what follows is speech, not input.
     await page.waitForTimeout(600);
@@ -485,6 +485,35 @@ test.describe('at 390 px, while the transcript grows', () => {
       worst = Math.max(worst, session.sum);
     }
     expect(worst, JSON.stringify(shifts)).toBeLessThanOrEqual(0.05);
+  });
+});
+
+test.describe('at 360 × 640, the knowledge dialog', () => {
+  test.use({ viewport: { width: 360, height: 640 } });
+
+  test('scrolls the over-limit alert into view above the sticky footer (U8)', async ({ page }) => {
+    await page.goto('/');
+    await page.locator(HOST).getByRole('button', { name: 'Knowledge files: 0' }).click();
+    const dialog = page.locator(HOST).getByRole('dialog', { name: 'Knowledge' });
+    await expect(dialog).toBeVisible();
+
+    // One over the limit (knowledgeStore.js MAX_RULES_CHARS).
+    await dialog.getByRole('textbox', { name: 'Rules' }).fill('x'.repeat(2001));
+    const alert = dialog.getByRole('alert').filter({ hasText: 'over the limit' });
+    await expect(alert).toBeVisible();
+
+    const footer = dialog.locator('.knowledge-modal__footer');
+    // The scroll has finished once the alert's box stops moving.
+    await expect
+      .poll(async () => {
+        const [alertBox, footerBox] = await Promise.all([
+          alert.boundingBox(),
+          footer.boundingBox(),
+        ]);
+        if (!alertBox || !footerBox) return Number.POSITIVE_INFINITY;
+        return alertBox.y + alertBox.height - footerBox.y;
+      })
+      .toBeLessThanOrEqual(0);
   });
 });
 
