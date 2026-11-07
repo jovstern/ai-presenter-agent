@@ -1,6 +1,22 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { defined } from './defined.js';
+
+/** @import { BridgeMessage, SnapshotMessage } from '../bridgeProtocol.js' */
+
+/**
+ * The stubbed frame a test drives: the document and window it holds, every
+ * `src` the bridge set, and the hooks that load a page into it.
+ * @typedef {object} FrameStub
+ * @property {Document} doc
+ * @property {string} path
+ * @property {string[]} srcSets
+ * @property {((value: string) => void) | null} onSrcSet
+ * @property {EventTarget} win
+ * @property {(path: string) => void} load A new document at `path` finishes loading.
+ * @property {() => Promise<string>} nextSrcSet Resolves with the next `src` the bridge sets.
+ */
 
 // sandbox/ has no package or test runner of its own, so its bridge script is
 // run here as the page would run it: a classic script evaluated once against
@@ -16,24 +32,22 @@ const ROUTES_JSON = readFileSync(
   path.resolve(import.meta.dirname, '../../../target-app/routes.json'),
   'utf8',
 );
+/** @type {Record<string, string>} */
 const ROUTES = JSON.parse(ROUTES_JSON);
 
+/** @type {FrameStub} */
 let frame;
+/** @type {MessagePort} */
 let agentPort;
+/** @type {MessagePort[]} */
 let openPorts = [];
 
+/** @returns {FrameStub} */
 function stubFrame(
   routesBlock = `<script type="application/json" id="ds-routes">${ROUTES_JSON}</script>`,
 ) {
   document.body.innerHTML = `<iframe id="target-app-frame"></iframe>${routesBlock}`;
-  const iframe = document.getElementById('target-app-frame');
-  const state = {
-    doc: document.implementation.createHTMLDocument(''),
-    path: '/target-app/index.html',
-    srcSets: [],
-    onSrcSet: null,
-  };
-  Object.defineProperty(iframe, 'contentDocument', { get: () => state.doc });
+  const iframe = defined(document.getElementById('target-app-frame'), 'the frame');
   // One window per document, as in a browser, where a document's listeners
   // (the bridge's beforeunload / pagehide) go with it.
   const newWindow = () =>
@@ -49,23 +63,30 @@ function stubFrame(
       HTMLTextAreaElement: window.HTMLTextAreaElement,
       HTMLSelectElement: window.HTMLSelectElement,
     });
-  state.win = newWindow();
+  /** @type {FrameStub} */
+  const state = {
+    doc: document.implementation.createHTMLDocument(''),
+    path: '/target-app/index.html',
+    srcSets: [],
+    onSrcSet: null,
+    win: newWindow(),
+    load: (path) => {
+      state.path = path;
+      state.doc = document.implementation.createHTMLDocument('');
+      state.win = newWindow();
+      iframe.dispatchEvent(new Event('load'));
+    },
+    nextSrcSet: () => new Promise((resolve) => (state.onSrcSet = resolve)),
+  };
+  Object.defineProperty(iframe, 'contentDocument', { get: () => state.doc });
   Object.defineProperty(iframe, 'contentWindow', { get: () => state.win });
   Object.defineProperty(iframe, 'src', {
     get: () => state.srcSets.at(-1) ?? '',
-    set: (value) => {
+    set: (/** @type {string} */ value) => {
       state.srcSets.push(value);
       state.onSrcSet?.(value);
     },
   });
-  // A new document at `path` finishes loading in the frame.
-  state.load = (path) => {
-    state.path = path;
-    state.doc = document.implementation.createHTMLDocument('');
-    state.win = newWindow();
-    iframe.dispatchEvent(new Event('load'));
-  };
-  state.nextSrcSet = () => new Promise((resolve) => (state.onSrcSet = resolve));
   return state;
 }
 
@@ -85,12 +106,50 @@ function handshake() {
   return port1;
 }
 
+/**
+ * Resolves with the next bridge message of `type` on the port.
+ * @template {BridgeMessage['type']} T
+ * @param {MessagePort} port
+ * @param {T} type
+ * @returns {Promise<Extract<BridgeMessage, { type: T }>>}
+ */
 function nextMessage(port, type) {
   return new Promise((resolve) => {
     port.onmessage = (event) => {
       if (event.data?.type === type) resolve(event.data);
     };
   });
+}
+
+/**
+ * The value of a form control the bridge can fill (or a button, which has a
+ * value too), or a failure if `el` is anything else.
+ * @param {EventTarget | null} el
+ */
+function valueOf(el) {
+  if (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement ||
+    el instanceof HTMLButtonElement
+  ) {
+    return el.value;
+  }
+  throw new Error('expected a form control');
+}
+
+/** @param {string} testId */
+function byTestId(testId) {
+  const el = frame.doc.querySelector(`[data-testid="${testId}"]`);
+  if (!(el instanceof HTMLElement)) throw new Error(`no element with data-testid="${testId}"`);
+  return el;
+}
+
+/** Sends one fill and resolves with its reply. @param {string} id @param {string} selector @param {string} value */
+function fill(id, selector, value) {
+  const result = nextMessage(agentPort, 'action-result');
+  agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
+  return result;
 }
 
 beforeEach(() => {
@@ -161,6 +220,7 @@ describe('sandbox/bridge.js navigate', () => {
 
   it('is not resolved by a load of some other page', async () => {
     const srcSet = frame.nextSrcSet();
+    /** @type {BridgeMessage[]} */
     const replies = [];
     agentPort.onmessage = (event) => replies.push(event.data);
     agentPort.postMessage({ type: 'action', id: 'a2', action: 'navigate', args: ['settings'] });
@@ -178,6 +238,7 @@ describe('sandbox/bridge.js navigate', () => {
   it('reports failure, inside the agent channel’s 4 s action timeout, when the page never loads', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     const srcSet = frame.nextSrcSet();
+    /** @type {BridgeMessage[]} */
     const replies = [];
     agentPort.onmessage = (event) => replies.push(event.data);
     agentPort.postMessage({ type: 'action', id: 'a3', action: 'navigate', args: ['settings'] });
@@ -209,7 +270,7 @@ describe('sandbox/bridge.js fill', () => {
     });
 
     expect(await result).toEqual({ type: 'action-result', id: 'f1', success: true });
-    expect(frame.doc.querySelector('input').value).toBe('Ada');
+    expect(valueOf(frame.doc.querySelector('input'))).toBe('Ada');
   });
 
   // Found by the checkJs pass: an element without `value` got an expando and a
@@ -243,8 +304,7 @@ describe('sandbox/bridge.js fill', () => {
       success: false,
       error: 'data-testid="target" is not a text input',
     });
-    const target = frame.doc.querySelector('[data-testid="target"]');
-    expect(target.value === 'Ada').toBe(false);
+    expect(valueOf(byTestId('target')) === 'Ada').toBe(false);
   });
 
   it.each([
@@ -256,7 +316,7 @@ describe('sandbox/bridge.js fill', () => {
     agentPort.postMessage({ type: 'action', id: 'f5', action: 'fill', args: ['target', value] });
 
     expect(await result).toMatchObject({ id: 'f5', success: true });
-    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe(value);
+    expect(valueOf(byTestId('target'))).toBe(value);
   });
 
   const PLAN = `<select data-testid="plan">
@@ -264,13 +324,6 @@ describe('sandbox/bridge.js fill', () => {
       <option value="pro">Pro plan</option>
       <option value="team">Team plan</option>
     </select>`;
-
-  /** Sends one fill and resolves with its reply. */
-  function fill(id, selector, value) {
-    const result = nextMessage(agentPort, 'action-result');
-    agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
-    return result;
-  }
 
   it.each([
     ['its visible text', 'Pro plan'],
@@ -284,7 +337,7 @@ describe('sandbox/bridge.js fill', () => {
       id: 'f7',
       success: true,
     });
-    expect(frame.doc.querySelector('select').value).toBe('pro');
+    expect(valueOf(frame.doc.querySelector('select'))).toBe('pro');
   });
 
   it('prefers an option whose text matches over one whose value does', async () => {
@@ -294,12 +347,12 @@ describe('sandbox/bridge.js fill', () => {
     </select>`;
 
     expect(await fill('f8', 'plan', 'a')).toMatchObject({ success: true });
-    expect(frame.doc.querySelector('select').value).toBe('b');
+    expect(valueOf(frame.doc.querySelector('select'))).toBe('b');
   });
 
   it('fails, naming the options, and leaves the selection alone when no option matches', async () => {
     frame.doc.body.innerHTML = PLAN;
-    const select = frame.doc.querySelector('select');
+    const select = defined(frame.doc.querySelector('select'));
     select.value = 'team';
     const events = vi.fn();
     select.addEventListener('input', events);
@@ -322,13 +375,15 @@ describe('sandbox/bridge.js fill', () => {
     ['a select', PLAN.replace('data-testid="plan"', 'data-testid="target"'), 'Team plan'],
   ])('fires bubbling input and change events on %s', async (_name, html, value) => {
     frame.doc.body.innerHTML = html;
+    /** @type {[string, boolean, string][]} */
     const seen = [];
-    const record = (event) => seen.push([event.type, event.bubbles, event.target.value]);
+    const record = (/** @type {Event} */ event) =>
+      seen.push([event.type, event.bubbles, valueOf(event.target)]);
     frame.doc.body.addEventListener('input', record);
     frame.doc.body.addEventListener('change', record);
 
     expect(await fill('f10', 'target', value)).toMatchObject({ success: true });
-    const expected = frame.doc.querySelector('[data-testid="target"]').value;
+    const expected = valueOf(byTestId('target'));
     expect(seen).toEqual([
       ['input', true, expected],
       ['change', true, expected],
@@ -339,30 +394,37 @@ describe('sandbox/bridge.js fill', () => {
   // element's own `value` property; only the prototype's native setter gets
   // past that, so the bridge must not assign through the instance.
   it.each([
-    ['an input', '<input data-testid="target" />', 'HTMLInputElement', 'Ada', 'Ada'],
+    ['an input', '<input data-testid="target" />', window.HTMLInputElement, 'Ada', 'Ada'],
     [
       'a textarea',
       '<textarea data-testid="target"></textarea>',
-      'HTMLTextAreaElement',
+      window.HTMLTextAreaElement,
       'Ada',
       'Ada',
     ],
   ])(
     'sets %s through its prototype’s native value setter',
-    async (_name, html, type, value, set) => {
+    async (_name, html, element, value, set) => {
       frame.doc.body.innerHTML = html;
-      const target = frame.doc.querySelector('[data-testid="target"]');
+      const target = byTestId('target');
       const instanceSetter = vi.fn();
       Object.defineProperty(target, 'value', {
         configurable: true,
         get: () => '',
         set: instanceSetter,
       });
-      const { prototype } = window[type];
-      const native = Object.getOwnPropertyDescriptor(prototype, 'value');
-      const nativeSetter = vi.fn(function (v) {
-        native.set.call(this, v);
-      });
+      const { prototype } = element;
+      const native = defined(
+        Object.getOwnPropertyDescriptor(prototype, 'value'),
+        'the native value descriptor',
+      );
+      const nativeSet = defined(native.set, 'the native value setter');
+      const nativeSetter = vi.fn(
+        /** @this {HTMLElement} @param {string} v */
+        function (v) {
+          nativeSet.call(this, v);
+        },
+      );
       Object.defineProperty(prototype, 'value', { ...native, set: nativeSetter });
       try {
         expect(await fill('f11', 'target', value)).toMatchObject({ success: true });
@@ -376,12 +438,6 @@ describe('sandbox/bridge.js fill', () => {
 });
 
 describe('sandbox/bridge.js fill refuses what a user could not do', () => {
-  function fill(id, selector, value) {
-    const result = nextMessage(agentPort, 'action-result');
-    agentPort.postMessage({ type: 'action', id, action: 'fill', args: [selector, value] });
-    return result;
-  }
-
   it.each([
     ['a disabled input', '<input data-testid="target" disabled value="old" />', 'is disabled'],
     [
@@ -406,7 +462,7 @@ describe('sandbox/bridge.js fill refuses what a user could not do', () => {
       success: false,
       error: `data-testid="target" ${why}`,
     });
-    expect(frame.doc.querySelector('[data-testid="target"]').value).toBe('old');
+    expect(valueOf(byTestId('target'))).toBe('old');
     expect(events).not.toHaveBeenCalled();
   });
 
@@ -417,7 +473,7 @@ describe('sandbox/bridge.js fill refuses what a user could not do', () => {
       success: false,
       error: 'data-testid="plan" is disabled',
     });
-    expect(frame.doc.querySelector('select').value).toBe('free');
+    expect(valueOf(frame.doc.querySelector('select'))).toBe('free');
   });
 
   it.each([
@@ -433,7 +489,7 @@ describe('sandbox/bridge.js fill refuses what a user could not do', () => {
       success: false,
       error: 'data-testid="plan" has option "Team plan", but it is disabled',
     });
-    expect(frame.doc.querySelector('select').value).toBe('free');
+    expect(valueOf(frame.doc.querySelector('select'))).toBe('free');
   });
 
   it('selects the matched option itself when two options share a value', async () => {
@@ -442,7 +498,7 @@ describe('sandbox/bridge.js fill refuses what a user could not do', () => {
       <option value="m">Medium (fitted)</option>
     </select>`;
     expect(await fill('d4', 'size', 'Medium (fitted)')).toMatchObject({ success: true });
-    expect(frame.doc.querySelector('select').selectedIndex).toBe(1);
+    expect(defined(frame.doc.querySelector('select')).selectedIndex).toBe(1);
   });
 
   // maxlength: failing, not truncating, so the model never believes it typed
@@ -455,13 +511,13 @@ describe('sandbox/bridge.js fill refuses what a user could not do', () => {
       success: false,
       error: 'data-testid="target" takes at most 5 characters; the value has 12',
     });
-    expect(frame.doc.querySelector('input').value).toBe('');
+    expect(valueOf(frame.doc.querySelector('input'))).toBe('');
   });
 
   it('fills a value that fits the maxlength', async () => {
     frame.doc.body.innerHTML = '<textarea data-testid="target" maxlength="5"></textarea>';
     expect(await fill('d6', 'target', 'Ada')).toMatchObject({ success: true });
-    expect(frame.doc.querySelector('textarea').value).toBe('Ada');
+    expect(valueOf(frame.doc.querySelector('textarea'))).toBe('Ada');
   });
 });
 
@@ -471,7 +527,7 @@ describe('sandbox/bridge.js selectors', () => {
   it('finds an element whose data-testid has a quote and a backslash in it', async () => {
     frame.doc.body.innerHTML = '<button data-testid=\'say "hi" \\ bye\'>Hi</button>';
     const clicked = vi.fn();
-    frame.doc.querySelector('button').addEventListener('click', clicked);
+    defined(frame.doc.querySelector('button')).addEventListener('click', clicked);
     const result = nextMessage(agentPort, 'action-result');
     agentPort.postMessage({
       type: 'action',
@@ -487,12 +543,8 @@ describe('sandbox/bridge.js selectors', () => {
 
 describe('sandbox/bridge.js channel', () => {
   it('keeps replying on the port when MessagePort.prototype.postMessage is patched after load', async () => {
-    const tap = vi.fn();
     const original = MessagePort.prototype.postMessage;
-    MessagePort.prototype.postMessage = function (...args) {
-      tap(...args);
-      return original.apply(this, args);
-    };
+    const tap = vi.spyOn(MessagePort.prototype, 'postMessage');
     try {
       const result = nextMessage(agentPort, 'action-result');
       // Sent with the captured original, so the tap only sees the bridge's reply if the bridge used the patched one.
@@ -500,7 +552,7 @@ describe('sandbox/bridge.js channel', () => {
       expect(await result).toMatchObject({ id: 'a4', success: false });
       expect(tap).not.toHaveBeenCalled();
     } finally {
-      MessagePort.prototype.postMessage = original;
+      tap.mockRestore();
     }
   });
 });
@@ -513,7 +565,9 @@ describe('sandbox/bridge.js snapshots', () => {
 
   // Resolves with the debounced snapshot of the new content, skipping the
   // load's own snapshot of the still-empty document.
+  /** @param {string} html */
   function loadPage(html) {
+    /** @type {Promise<SnapshotMessage>} */
     const snapshot = new Promise((resolve) => {
       agentPort.onmessage = ({ data }) => {
         if (data?.type === 'snapshot' && data.full.length > 0) resolve(data);
@@ -546,7 +600,7 @@ describe('sandbox/bridge.js snapshots', () => {
   // change listener the MutationObserver never sends this snapshot.
   it('sends a snapshot when a checkbox is toggled', async () => {
     await loadPage(SETTINGS);
-    const toggle = frame.doc.querySelector('[data-testid="toggle"]');
+    const toggle = byTestId('toggle');
     const next = nextMessage(agentPort, 'snapshot');
 
     toggle.click();
@@ -632,9 +686,10 @@ describe('sandbox/bridge.js snapshots', () => {
     ).join('');
     const { full } = await loadPage(`<select data-testid="many">${options}</select>`);
 
-    expect(full[0].options).toHaveLength(20);
-    expect(full[0].options[0]).toBe(`00${'y'.repeat(58)}…`);
-    expect(full[0].value).toBe(full[0].options[0]);
+    const listed = defined(full[0].options, 'the options');
+    expect(listed).toHaveLength(20);
+    expect(listed[0]).toBe(`00${'y'.repeat(58)}…`);
+    expect(full[0].value).toBe(listed[0]);
   });
 
   it('reports an empty select with no value', async () => {
@@ -738,9 +793,10 @@ describe("sandbox/bridge.js an action's page", () => {
   // Captured before any test fakes setTimeout: a real wait, so a port message
   // that is going to arrive gets the chance to.
   const realSetTimeout = globalThis.setTimeout;
-  const sleep = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms));
+  const sleep = (/** @type {number} */ ms) => new Promise((resolve) => realSetTimeout(resolve, ms));
   // Waits, in real time, for port messages that are on their way: a fixed
   // sleep can be too short on a loaded machine.
+  /** @param {() => boolean} predicate */
   async function until(predicate) {
     for (let waited = 0; !predicate() && waited < 2000; waited += 5) await sleep(5);
   }
@@ -749,6 +805,7 @@ describe("sandbox/bridge.js an action's page", () => {
   // the counter in its click handler. Resolves once the load's snapshot and
   // the debounced one of the new content are in, so a test starts quiet.
   async function loadCounterPage() {
+    /** @type {BridgeMessage[]} */
     const messages = [];
     agentPort.onmessage = ({ data }) => messages.push(data);
     frame.load('/target-app/index.html');
@@ -756,8 +813,8 @@ describe("sandbox/bridge.js an action's page", () => {
       <span data-testid="counter-value">0</span>
       <button data-testid="counter-increment">Increment</button>
       <button data-testid="noop">Nothing</button>`;
-    frame.doc.querySelector('[data-testid="counter-increment"]').addEventListener('click', () => {
-      const value = frame.doc.querySelector('[data-testid="counter-value"]');
+    byTestId('counter-increment').addEventListener('click', () => {
+      const value = byTestId('counter-value');
       value.textContent = String(Number(value.textContent) + 1);
     });
     await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS);
@@ -826,7 +883,7 @@ describe("sandbox/bridge.js an action's page", () => {
 
   it('restarts the quiet window on every mutation, and answers by the cap on a page that never stops', async () => {
     const messages = await loadCounterPage();
-    const value = frame.doc.querySelector('[data-testid="counter-value"]');
+    const value = byTestId('counter-value');
 
     await click('c3', 'noop');
     // A mutation every 50 ms, so the page is never quiet for 100 ms.
@@ -861,6 +918,7 @@ describe("sandbox/bridge.js an action's page", () => {
   });
 
   it('posts a navigate’s settled snapshot after the load’s own, then the result', async () => {
+    /** @type {BridgeMessage[]} */
     const messages = [];
     agentPort.onmessage = ({ data }) => messages.push(data);
     const srcSet = frame.nextSrcSet();
@@ -878,7 +936,9 @@ describe("sandbox/bridge.js an action's page", () => {
       'snapshot', // the settled page
       'action-result',
     ]);
-    expect(messages[2].full).toEqual([expect.objectContaining({ selector: 'save-button' })]);
+    expect(messages[2]).toMatchObject({
+      full: [expect.objectContaining({ selector: 'save-button' })],
+    });
     expect(messages[3]).toEqual({ type: 'action-result', id: 'n1', success: true });
   });
 
@@ -887,7 +947,7 @@ describe("sandbox/bridge.js an action's page", () => {
   // into a keyframe; the action's own snapshot covers that change instead.
   it('cancels an earlier change’s pending debounced snapshot when an action starts', async () => {
     const messages = await loadCounterPage();
-    frame.doc.querySelector('[data-testid="noop"]').textContent = 'Still nothing';
+    byTestId('noop').textContent = 'Still nothing';
     await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS - 50);
 
     await click('c5', 'noop');
@@ -908,7 +968,7 @@ describe("sandbox/bridge.js an action's page", () => {
 
   it('still sends that earlier change when the action fails', async () => {
     const messages = await loadCounterPage();
-    frame.doc.querySelector('[data-testid="noop"]').textContent = 'Still nothing';
+    byTestId('noop').textContent = 'Still nothing';
 
     await click('c6', 'missing');
     await until(() => messages.length >= 1);
@@ -927,9 +987,9 @@ describe("sandbox/bridge.js an action's page", () => {
   // The click handler stands in for the browser starting the navigation.
   /** @param {string} selector */
   function startsNavigation(selector) {
-    frame.doc
-      .querySelector(`[data-testid="${selector}"]`)
-      .addEventListener('click', () => frame.win.dispatchEvent(new Event('beforeunload')));
+    byTestId(selector).addEventListener('click', () =>
+      frame.win.dispatchEvent(new Event('beforeunload')),
+    );
   }
 
   it('answers a click that starts a navigation only once the new page has loaded and settled', async () => {
@@ -952,7 +1012,9 @@ describe("sandbox/bridge.js an action's page", () => {
       'snapshot', // the settled new page
       'action-result',
     ]);
-    expect(messages[2].full).toEqual([expect.objectContaining({ selector: 'save-button' })]);
+    expect(messages[2]).toMatchObject({
+      full: [expect.objectContaining({ selector: 'save-button' })],
+    });
     expect(messages[3]).toEqual({ type: 'action-result', id: 'l1', success: true });
   });
 
@@ -1005,6 +1067,7 @@ describe("sandbox/bridge.js an action's page", () => {
   // a page that never stops mutating still answers by it, inside the agent
   // channel's 4 s action timeout (bridgeChannel.js).
   it('answers a navigate that loads at the last moment onto a page that never settles by the deadline', async () => {
+    /** @type {BridgeMessage[]} */
     const messages = [];
     agentPort.onmessage = ({ data }) => messages.push(data);
     const srcSet = frame.nextSrcSet();

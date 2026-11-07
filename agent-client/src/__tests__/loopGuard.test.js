@@ -7,6 +7,9 @@ import {
   ACTION_BUDGET,
 } from '../loopGuard.js';
 
+/** @import { SnapshotNode } from '../bridgeProtocol.js' */
+
+/** @type {typeof actionSignature} */
 const sig = (name, args, page) => actionSignature(name, args, page);
 const increment = sig('click', { selector: 'counter-increment' });
 const decrement = sig('click', { selector: 'counter-decrement' });
@@ -225,9 +228,8 @@ describe('loopGuard: cycles on the real app, whose states never repeat', () => {
   });
 
   it('trips toggle, save on its third round, the 6th call, and every call after', () => {
-    const runaway = /** @type {(keyof typeof steps)[]} */ (
-      Array.from({ length: 10 }, (_, i) => (i % 2 ? 'save' : 'toggle'))
-    );
+    /** @type {(keyof typeof steps)[]} */
+    const runaway = Array.from({ length: 10 }, (_, i) => (i % 2 ? 'save' : 'toggle'));
     expect(play(runaway)).toEqual([...Array(5).fill(false), ...Array(5).fill(true)]);
   });
 
@@ -257,6 +259,12 @@ describe('loopGuard: cycles on the real app, whose states never repeat', () => {
 });
 
 describe('pageFingerprint', () => {
+  /**
+   * @param {string} selector
+   * @param {string} label
+   * @param {Partial<SnapshotNode>} [extra]
+   * @returns {SnapshotNode}
+   */
   const node = (selector, label, extra = {}) => ({
     selector,
     tag: 'span',

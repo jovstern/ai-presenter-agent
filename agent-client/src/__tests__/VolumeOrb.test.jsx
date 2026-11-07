@@ -2,12 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 import { VolumeOrb } from '../VolumeOrb.jsx';
 import { fakeAnimationFrames, fakeReducedMotion } from './rafHarness.js';
+import { elementOf } from './defined.js';
 
 // The orb's animation loop: when it runs, what it writes, and that it stops.
 // Render isolation (no React render per frame) is renderIsolation.test.jsx.
 
+/** @type {ReturnType<typeof fakeAnimationFrames>} */
 let frames;
+/** @type {ReturnType<typeof fakeReducedMotion>} */
 let motion;
+/** @type {{ output: number, mic: number }} */
 let levels;
 
 /** @param {{ active?: boolean }} [props] */
@@ -15,7 +19,7 @@ function renderOrb({ active = true } = {}) {
   const utils = render(
     <VolumeOrb active={active} outputLevel={() => levels.output} micLevel={() => levels.mic} />,
   );
-  const orb = /** @type {HTMLElement} */ (utils.container.firstElementChild);
+  const orb = elementOf(utils.container.firstElementChild, HTMLElement);
   return { orb, ...utils };
 }
 
@@ -148,7 +152,7 @@ describe('VolumeOrb', () => {
     const { container, rerender } = render(
       <VolumeOrb active={false} reconnecting outputLevel={() => 1} micLevel={() => 1} />,
     );
-    const orb = /** @type {HTMLElement} */ (container.firstElementChild);
+    const orb = elementOf(container.firstElementChild, HTMLElement);
     expect(orb.dataset.reconnecting).toBe('true');
     expect(frames.request).not.toHaveBeenCalled();
 

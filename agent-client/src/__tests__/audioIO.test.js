@@ -5,6 +5,7 @@ import {
   startCapture,
   voiceSupportError,
 } from '../audioIO.js';
+import { defined } from './defined.js';
 
 // audioIO.js against stubbed Web Audio and getUserMedia: the secure-context
 // check, and that capture releases everything it acquired (B2: no mic left
@@ -13,9 +14,117 @@ import {
 
 const WORKLET_URL = '/agent-client/capture-worklet.js';
 
-/** Everything a capture created, so a test can check each was released. */
+/** @import { Mock } from 'vitest' */
+
+/**
+ * Everything a capture created, so a test can check each was released.
+ * @typedef {{
+ *   tracks: { stop: Mock<() => void> }[],
+ *   contexts: FakeAudioContext[],
+ *   nodes: FakeAudioWorkletNode[],
+ *   analysers: FakeAnalyser[],
+ *   sources: FakeBufferSource[],
+ *   events: string[],
+ *   addModule: Mock<(url: string) => Promise<void>>,
+ *   resume: Mock<() => Promise<void>>,
+ * }} Made
+ */
+/** @type {Made} */
 let made;
 
+/**
+ * @typedef {{
+ *   connect: Mock<(destination: unknown) => void>,
+ *   start: Mock<(when: number) => void>,
+ *   stop: Mock<() => void>,
+ *   onended: (() => void) | null,
+ * }} FakeBufferSource
+ */
+
+/**
+ * The player's analyser: getFloatTimeDomainData copies `samples`, the window a
+ * test sets as "what is playing now".
+ * @typedef {{
+ *   fftSize: number,
+ *   samples: Float32Array,
+ *   connect: Mock<(destination: unknown) => void>,
+ *   disconnect: Mock<() => void>,
+ *   getFloatTimeDomainData: Mock<(out: Float32Array) => void>,
+ * }} FakeAnalyser
+ */
+
+class FakeAudioContext {
+  constructor() {
+    this.close = vi.fn(async () => {});
+    this.resume = made.resume;
+    this.audioWorklet = { addModule: made.addModule };
+    this.source = { connect: vi.fn(), disconnect: vi.fn() };
+    this.destination = { name: 'destination' };
+    this.currentTime = 0;
+    this.sampleRate = 24000;
+    made.contexts.push(this);
+  }
+  createMediaStreamSource() {
+    return this.source;
+  }
+  createAnalyser() {
+    /** @type {FakeAnalyser} */
+    const analyser = {
+      fftSize: 2048,
+      samples: new Float32Array(0),
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      getFloatTimeDomainData: vi.fn((out) => out.set(analyser.samples.subarray(0, out.length))),
+    };
+    made.analysers.push(analyser);
+    return analyser;
+  }
+  /**
+   * @param {number} channels
+   * @param {number} length
+   * @param {number} rate
+   */
+  createBuffer(channels, length, rate) {
+    return { duration: length / rate, copyToChannel: vi.fn() };
+  }
+  createBufferSource() {
+    /** @type {FakeBufferSource} */
+    const source = { connect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null };
+    made.sources.push(source);
+    return source;
+  }
+}
+
+class FakeAudioWorkletNode {
+  /**
+   * @param {FakeAudioContext} context
+   * @param {string} name
+   * @param {AudioWorkletNodeOptions} options
+   */
+  constructor(context, name, options) {
+    this.name = name;
+    this.options = options;
+    this.port = {
+      /** @type {((event: { data: ArrayBuffer }) => void) | null} */
+      onmessage: null,
+      close: vi.fn(),
+    };
+    this.disconnect = vi.fn();
+    made.events.push('node');
+    made.nodes.push(this);
+  }
+}
+
+/**
+ * Posts one frame from the worklet, as its port would.
+ * @param {FakeAudioWorkletNode} node
+ * @param {ArrayBuffer} data
+ */
+function postFrame(node, data) {
+  defined(node.port.onmessage, 'the port handler')({ data });
+}
+
+/** @param {{ getUserMedia: () => Promise<unknown> }} mediaDevices */
 function fakeMediaDevices({ getUserMedia }) {
   vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
 }
@@ -45,53 +154,6 @@ beforeEach(() => {
     }),
   };
   vi.stubGlobal('isSecureContext', true);
-
-  class FakeAudioContext {
-    constructor() {
-      this.close = vi.fn(async () => {});
-      this.resume = made.resume;
-      this.audioWorklet = { addModule: made.addModule };
-      this.source = { connect: vi.fn(), disconnect: vi.fn() };
-      this.destination = { name: 'destination' };
-      this.currentTime = 0;
-      this.sampleRate = 24000;
-      made.contexts.push(this);
-    }
-    createMediaStreamSource() {
-      return this.source;
-    }
-    // The player's analyser: getFloatTimeDomainData copies `samples`, the
-    // window a test sets as "what is playing now".
-    createAnalyser() {
-      const analyser = {
-        fftSize: 2048,
-        samples: new Float32Array(0),
-        connect: vi.fn(),
-        disconnect: vi.fn(),
-        getFloatTimeDomainData: vi.fn((out) => out.set(analyser.samples.subarray(0, out.length))),
-      };
-      made.analysers.push(analyser);
-      return analyser;
-    }
-    createBuffer(channels, length, rate) {
-      return { duration: length / rate, copyToChannel: vi.fn() };
-    }
-    createBufferSource() {
-      const source = { connect: vi.fn(), start: vi.fn(), stop: vi.fn(), onended: null };
-      made.sources.push(source);
-      return source;
-    }
-  }
-  class FakeAudioWorkletNode {
-    constructor(context, name, options) {
-      this.name = name;
-      this.options = options;
-      this.port = { onmessage: null, close: vi.fn() };
-      this.disconnect = vi.fn();
-      made.events.push('node');
-      made.nodes.push(this);
-    }
-  }
   vi.stubGlobal('AudioContext', FakeAudioContext);
   vi.stubGlobal('AudioWorkletNode', FakeAudioWorkletNode);
   fakeMediaDevices({ getUserMedia: vi.fn(async () => fakeStream()) });
@@ -217,7 +279,7 @@ describe('startCapture', () => {
     const capture = startCapture({ workletUrl: WORKLET_URL, onFrame });
     await capture.ready;
 
-    made.nodes[0].port.onmessage({ data: new Int16Array([1, -1]).buffer });
+    postFrame(made.nodes[0], new Int16Array([1, -1]).buffer);
     expect(onFrame).toHaveBeenCalledWith(btoa('\x01\x00\xff\xff'));
   });
 
@@ -227,7 +289,7 @@ describe('startCapture', () => {
     await capture.ready;
     const [context] = made.contexts;
     const [node] = made.nodes;
-    const { onmessage } = node.port;
+    const onmessage = defined(node.port.onmessage, 'the port handler');
 
     capture.stop();
     capture.stop(); // idempotent: nothing is released twice
@@ -245,6 +307,7 @@ describe('startCapture', () => {
 
   it('a stop() while the worklet loads releases the mic and builds no node', async () => {
     const onError = vi.fn();
+    /** @type {(() => void) | undefined} */
     let finishLoad;
     made.addModule.mockImplementation(
       // A real addModule on a context closed mid-load rejects.
@@ -254,7 +317,7 @@ describe('startCapture', () => {
     await vi.waitFor(() => expect(made.contexts).toHaveLength(1));
 
     capture.stop();
-    finishLoad();
+    defined(finishLoad, 'the pending load')();
     await capture.ready;
 
     expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
@@ -264,12 +327,13 @@ describe('startCapture', () => {
   });
 
   it('a stop() before the mic is granted stops the track when it arrives', async () => {
+    /** @type {((stream: unknown) => void) | undefined} */
     let grant;
     fakeMediaDevices({ getUserMedia: () => new Promise((resolve) => (grant = resolve)) });
     const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
 
     capture.stop();
-    grant(fakeStream());
+    defined(grant, 'the pending grant')(fakeStream());
     await capture.ready;
 
     expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
@@ -316,11 +380,11 @@ describe('startCapture getLevel', () => {
     expect(capture.getLevel()).toBe(0);
 
     // About -20 dBFS: two thirds of the way up (pcm.js levelOf).
-    made.nodes[0].port.onmessage({ data: new Int16Array([3277, -3277, 3277, -3277]).buffer });
+    postFrame(made.nodes[0], new Int16Array([3277, -3277, 3277, -3277]).buffer);
     expect(capture.getLevel()).toBeCloseTo(2 / 3, 2);
-    made.nodes[0].port.onmessage({ data: new Int16Array(4).buffer });
+    postFrame(made.nodes[0], new Int16Array(4).buffer);
     expect(capture.getLevel()).toBe(0);
-    made.nodes[0].port.onmessage({ data: new Int16Array([3277, -3277]).buffer });
+    postFrame(made.nodes[0], new Int16Array([3277, -3277]).buffer);
 
     capture.stop();
     expect(capture.getLevel()).toBe(0);

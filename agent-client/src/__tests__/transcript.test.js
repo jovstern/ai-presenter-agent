@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { appendFragment, endTurn, entryText, MAX_ENTRIES } from '../transcript.js';
 
-/** @import { TranscriptEntry } from '../transcript.js' */
+/**
+ * @import { TranscriptEntry } from '../transcript.js'
+ * @import { TranscriptFragment } from '../liveSession.js'
+ */
 
 /**
  * Folds fragments (and `'end'` for a turn boundary) into a transcript.
@@ -15,8 +18,10 @@ function play(steps, start = []) {
   );
 }
 
-const agent = (/** @type {string} */ text) => ({ role: /** @type {const} */ ('agent'), text });
-const user = (/** @type {string} */ text) => ({ role: /** @type {const} */ ('user'), text });
+/** @type {(text: string) => TranscriptFragment} */
+const agent = (text) => ({ role: 'agent', text });
+/** @type {(text: string) => TranscriptFragment} */
+const user = (text) => ({ role: 'user', text });
 const lines = (/** @type {TranscriptEntry[]} */ list) =>
   list.map((entry) => `${entry.role}: ${entryText(entry)}`);
 

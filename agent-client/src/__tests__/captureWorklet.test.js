@@ -1,4 +1,5 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { defined } from './defined.js';
 
 // public/capture-worklet.js runs in an AudioWorkletGlobalScope. Here that
 // scope is stubbed: AudioWorkletProcessor gives each instance a port that
@@ -9,35 +10,65 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 const FRAME_SAMPLES = 1280;
 const QUANTUM = 128; // samples per process() call, as in the browser
 
-/** @type {new () => { port: { posted: { message: ArrayBuffer, transfer: ArrayBuffer[] }[] }, process: (inputs: Float32Array[][]) => boolean }} */
-let Processor;
+/**
+ * @typedef {{ posted: { message: ArrayBuffer, transfer: ArrayBuffer[] }[] }} RecordingPort
+ * @typedef {new () => { port: RecordingPort, process: (inputs: Float32Array[][]) => boolean }} ProcessorClass
+ */
+
+// Not a literal in the import(): the worklet is a classic script (no exports)
+// that jsconfig.worklet.json checks against its own scope's types, and a
+// literal specifier would pull it into this program without them.
+const WORKLET = '../../public/capture-worklet.js';
+
+/** @type {{ name: string, Processor: ProcessorClass | null }} */
+const registered = { name: '', Processor: null };
 
 beforeAll(async () => {
   class AudioWorkletProcessor {
     constructor() {
+      /** @type {RecordingPort['posted']} */
       const posted = [];
       this.port = {
         posted,
+        /**
+         * @param {ArrayBuffer} message
+         * @param {ArrayBuffer[]} transfer
+         */
         postMessage: (message, transfer) => posted.push({ message, transfer }),
       };
     }
   }
   vi.stubGlobal('AudioWorkletProcessor', AudioWorkletProcessor);
-  vi.stubGlobal('registerProcessor', (name, ctor) => {
-    expect(name).toBe('capture-processor');
-    Processor = ctor;
-  });
+  vi.stubGlobal(
+    'registerProcessor',
+    (/** @type {string} */ name, /** @type {ProcessorClass} */ ctor) => {
+      registered.name = name;
+      registered.Processor = ctor;
+    },
+  );
   vi.stubGlobal('sampleRate', 48000);
-  await import('../../public/capture-worklet.js');
+  await import(WORKLET);
 });
 
 afterEach(() => {
   vi.stubGlobal('sampleRate', 48000);
 });
 
-/** A processor at `rate`, fed `seconds` of `signal(t)` in 128-sample quanta. */
+/** The class the worklet registered, under the name audioIO.js builds its node with. */
+function processorClass() {
+  expect(registered.name).toBe('capture-processor');
+  return defined(registered.Processor, 'the registered processor');
+}
+
+/**
+ * A processor at `rate`, fed `seconds` of `signal(t)` in 128-sample quanta.
+ * @param {number} rate
+ * @param {number} seconds
+ * @param {(t: number) => number} signal
+ */
 function run(rate, seconds, signal) {
   vi.stubGlobal('sampleRate', rate);
+  const Processor = processorClass();
   const processor = new Processor();
   const total = Math.round(rate * seconds);
   for (let start = 0; start < total; start += QUANTUM) {
@@ -52,13 +83,21 @@ function run(rate, seconds, signal) {
   return frames;
 }
 
-/** Peak amplitude (as a Float32 fraction) over the frames, skipping the first. */
+/**
+ * Peak amplitude (as a Float32 fraction) over the frames, skipping the first.
+ * @param {Int16Array[]} frames
+ */
 function peak(frames) {
   let max = 0;
   for (const frame of frames.slice(1)) for (const s of frame) max = Math.max(max, Math.abs(s));
   return max / 0x7fff;
 }
 
+/**
+ * @param {number} hz
+ * @param {number} amplitude
+ * @returns {(t: number) => number}
+ */
 const tone = (hz, amplitude) => (t) => amplitude * Math.sin(2 * Math.PI * hz * t);
 
 describe('capture worklet', () => {
@@ -110,6 +149,7 @@ describe('capture worklet', () => {
 
   it('waits quietly through a quantum with no input channel', () => {
     vi.stubGlobal('sampleRate', 48000);
+    const Processor = processorClass();
     const processor = new Processor();
     expect(processor.process([[]])).toBe(true);
     expect(processor.process([])).toBe(true);

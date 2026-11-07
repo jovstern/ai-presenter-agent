@@ -11,19 +11,29 @@ import {
   vitalReport,
 } from '../clientLog.js';
 
+/**
+ * @import { Mock } from 'vitest'
+ * @import { LCPMetric } from 'web-vitals'
+ * @import { ErrorReport, VitalReport } from '../clientLog.js'
+ */
+
 // The directory the bundle's files are served from (main.jsx), and two of them.
 const BASE = 'http://agent.test/agent-client/';
 const SCRIPT = `${BASE}agent-client.js`;
 const SDK_CHUNK = `${BASE}web-Ab12Cd34.js`;
 const NONCE = '6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b';
 
-/** An Error thrown from `file`, as the browser would stack it. */
+/**
+ * An Error thrown from `file`, as the browser would stack it.
+ * @param {string} file
+ */
 function errorFrom(file, message = 'x is undefined') {
   const error = new TypeError(message);
   error.stack = `TypeError: ${message}\n    at f (${file}:1:200)`;
   return error;
 }
 
+/** @param {string} file */
 function errorEvent(file, error = errorFrom(file)) {
   return new ErrorEvent('error', {
     message: `Uncaught ${String(error)}`,
@@ -104,13 +114,14 @@ describe('rejectionReport', () => {
 
 describe('vitalReport', () => {
   it('keeps only the name, value, rating and id', () => {
+    /** @type {LCPMetric} */
     const metric = {
       name: 'LCP',
       value: 1234.5,
       rating: 'good',
       id: 'v6-1-2',
       delta: 1234.5,
-      entries: [{}],
+      entries: [],
       navigationType: 'navigate',
     };
     expect(vitalReport(metric)).toEqual({
@@ -149,6 +160,7 @@ describe('connectionReport', () => {
 });
 
 describe('createClientLog', () => {
+  /** @type {VitalReport} */
   const VITAL = { type: 'vital', name: 'CLS', value: 0.01, rating: 'good', id: 'v6-1' };
 
   it('sends each report as JSON to the client-log path with the page nonce in the query', () => {
@@ -166,6 +178,7 @@ describe('createClientLog', () => {
   it('sends a repeated error once', () => {
     const send = vi.fn();
     const { report } = createClientLog({ nonce: NONCE, send });
+    /** @type {ErrorReport} */
     const error = { type: 'error', message: 'boom', source: `${SCRIPT}:1:1` };
     report(error);
     report({ ...error });
@@ -203,13 +216,14 @@ describe('createClientLog', () => {
   });
 
   it('sends with sendBeacon and a JSON Blob by default', async () => {
+    /** @type {Mock<Navigator['sendBeacon']>} */
     const sendBeacon = vi.fn(() => true);
     vi.stubGlobal('navigator', { sendBeacon });
     createClientLog({ nonce: NONCE }).report(VITAL);
     expect(sendBeacon).toHaveBeenCalledTimes(1);
     const [url, blob] = sendBeacon.mock.calls[0];
     expect(url).toBe(`${CLIENT_LOG_PATH}?nonce=${NONCE}`);
-    expect(blob).toBeInstanceOf(Blob);
+    if (!(blob instanceof Blob)) throw new Error('expected a Blob body');
     expect(blob.type).toBe('application/json');
     expect(JSON.parse(await blob.text())).toEqual(VITAL);
   });

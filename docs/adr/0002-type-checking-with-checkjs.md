@@ -50,12 +50,30 @@ It widens from there.
 - `maxNodeModuleJsDepth: 0` in both configs: `allowJs` otherwise type-checks untyped
   third-party JS (`compression`'s dependencies, `punycode`) under our `strict`. A dependency
   without types needs its `@types` package (`@types/compression`) or fails the check.
-- **`src/__tests__/` is not type-checked yet.** Its fakes stand in loosely for typed values
-  (strings for snapshot nodes, partial sessions); typing them is test churn with no bug to
-  find. Widening to the tests is a later task, not a looser setting. The same holds for
-  `server/__tests__/` (the server config includes only `*.js` at its root) and `e2e/`
-  (linted, not type-checked).
+- **`src/__tests__/` was not type-checked at first** (it is since M9 T5, below): its fakes
+  stood in loosely for typed values (strings for snapshot nodes, partial sessions).
+  `server/__tests__/` still isn't (the server config includes only `*.js` at its root), nor
+  is `e2e/` (linted, not type-checked).
 - Typing surfaced three real bugs, fixed with tests: a model-supplied `toString` tool name
   threw in `toPositionalArgs`; a token response without a token threw outside `openSession`'s
   `try` and left the status at `connecting`; `fill` on an element without `value` reported
   success.
+
+## The unit tests (M9 T5, #21)
+
+- `agent-client/jsconfig.tests.json` extends `jsconfig.json` with `src/__tests__/` and Node's
+  types (the tests read files with `node:fs`); `npm run typecheck` runs it third. The main
+  config still excludes the tests, so neither `node` nor any test type reaches `src/`.
+- 767 errors, nearly all fakes and helpers without types. The fakes are now typed as what
+  they stand in for (`SnapshotNode`s, `LiveSessionOptions`, `BridgeChannel` methods, the
+  `FakeAudioContext`'s nodes); a test that needs a value it knows is there narrows it with
+  `defined()` or `elementOf()` (`src/__tests__/defined.js`), which throw with a message
+  instead of casting past `null`. The ~19 uncommented casts the tests already had went the
+  same way.
+- One cast is left, in `liveSdk.test.js`: a one-export stand-in for the SDK module, which the
+  loader only passes on. No `@ts-expect-error`.
+- `captureWorklet.test.js` imports the worklet through a non-literal specifier: the worklet is
+  a classic script that `jsconfig.worklet.json` checks against its own scope, and a literal
+  `import()` would pull it into the tests' program without those types.
+- `@types/node` comes in transitively (the SDK's `protobufjs`, Vite), not as a direct
+  dependency.

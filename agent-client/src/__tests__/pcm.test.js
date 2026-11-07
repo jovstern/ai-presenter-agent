@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { bytesToInt16, decodeOutputChunk, encodeInputFrame, levelOf } from '../pcm.js';
 
-/** Little-endian bytes of the given Int16 samples. */
+/**
+ * Little-endian bytes of the given Int16 samples.
+ * @param {...number} samples
+ */
 function le16(...samples) {
   return new Uint8Array(new Int16Array(samples).buffer);
 }

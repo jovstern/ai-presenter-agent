@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 // bridgeProtocol.js and carries a copy of its `#region bridge protocol`
 // instead (docs/adr/0002-type-checking-with-checkjs.md). These read both files
 // as text and fail the moment the copies differ.
+/** @param {string} relativePath */
 function read(relativePath) {
   return readFileSync(path.resolve(import.meta.dirname, relativePath), 'utf8');
 }
@@ -15,6 +16,7 @@ const BRIDGE_SOURCE = read('../../../sandbox/bridge.js');
 
 // The region's body, without its opening line (which says which copy it is)
 // and with each line's indentation dropped (bridge.js nests it in an IIFE).
+/** @param {string} source */
 function protocolRegion(source) {
   const match = source.match(/\/\/ #region bridge protocol[^\n]*\n([\s\S]*?)\/\/ #endregion/);
   if (!match) throw new Error('no `// #region bridge protocol` ... `// #endregion` block');
@@ -25,6 +27,7 @@ function protocolRegion(source) {
 }
 
 // The `type` literal of every message typedef in a region.
+/** @param {string} region */
 function messageTypes(region) {
   return [...region.matchAll(/\{ type: '([^']+)'/g)].map((match) => match[1]).sort();
 }

@@ -1,18 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectBridge } from '../bridgeChannel.js';
+import { defined } from './defined.js';
+
+/** @import { AgentMessage } from '../bridgeProtocol.js' */
 
 // A fake sandbox/bridge.js end: connectBridge() hands it the transferred port
 // through an injected postConnect, because jsdom drops postMessage transfer lists.
 function setup() {
-  let bridgePort = null;
+  /** @type {MessagePort[]} */
+  const handed = [];
   const channel = connectBridge({
     postConnect: (port) => {
-      bridgePort = port;
+      handed.push(port);
     },
   });
+  const bridgePort = defined(handed[0], 'the port handed to postConnect');
+  /** @type {AgentMessage[]} */
   const inbox = [];
+  /** @type {((message: AgentMessage) => void) | null} */
   let waiter = null;
-  bridgePort.onmessage = (event) => {
+  bridgePort.onmessage = (/** @type {MessageEvent<AgentMessage>} */ event) => {
     if (waiter) {
       const resolve = waiter;
       waiter = null;
@@ -21,11 +28,21 @@ function setup() {
       inbox.push(event.data);
     }
   };
+  /** @returns {Promise<AgentMessage>} */
   const nextBridgeMessage = () =>
-    inbox.length ? Promise.resolve(inbox.shift()) : new Promise((resolve) => (waiter = resolve));
-  return { channel, bridgePort, nextBridgeMessage };
+    inbox.length
+      ? Promise.resolve(defined(inbox.shift()))
+      : new Promise((resolve) => (waiter = resolve));
+  // The next message, which must be an action (with the id its result answers).
+  const nextAction = async () => {
+    const message = await nextBridgeMessage();
+    if (message.type !== 'action') throw new Error(`expected an action, got ${message.type}`);
+    return message;
+  };
+  return { channel, bridgePort, nextBridgeMessage, nextAction };
 }
 
+/** @type {(() => void)[]} */
 let cleanup = [];
 
 afterEach(() => {
@@ -57,12 +74,12 @@ describe('connectBridge', () => {
   });
 
   it('sends actions on the port and correlates results by id', async () => {
-    const { channel, bridgePort, nextBridgeMessage } = open();
+    const { channel, bridgePort, nextAction } = open();
 
     const first = channel.dispatchAction('click', ['save-button']);
     const second = channel.dispatchAction('navigate', ['settings']);
-    const firstMsg = await nextBridgeMessage();
-    const secondMsg = await nextBridgeMessage();
+    const firstMsg = await nextAction();
+    const secondMsg = await nextAction();
 
     expect(firstMsg).toMatchObject({ type: 'action', action: 'click', args: ['save-button'] });
     expect(secondMsg).toMatchObject({ type: 'action', action: 'navigate', args: ['settings'] });
@@ -82,10 +99,10 @@ describe('connectBridge', () => {
   });
 
   it('ignores a result for an unknown id', async () => {
-    const { channel, bridgePort, nextBridgeMessage } = open();
+    const { channel, bridgePort, nextAction } = open();
 
     const pending = channel.dispatchAction('click', ['a']);
-    const { id } = await nextBridgeMessage();
+    const { id } = await nextAction();
     bridgePort.postMessage({ type: 'action-result', id: 'someone-else', success: true });
     bridgePort.postMessage({ type: 'action-result', id, success: false, error: 'real reply' });
 
@@ -137,7 +154,7 @@ describe('connectBridge', () => {
     channel.onNavigated(removedNavigated)();
 
     // Subscribers are called in order, so once these resolve the removed ones had their chance.
-    const gotNavigated = new Promise((resolve) => channel.onNavigated(resolve));
+    const gotNavigated = new Promise((resolve) => channel.onNavigated(() => resolve(undefined)));
     const gotSnapshot = new Promise((resolve) => channel.onSnapshot(resolve));
     bridgePort.postMessage({ type: 'navigated' });
     bridgePort.postMessage({ type: 'snapshot', full: [], changed: [], removed: [] });
@@ -151,12 +168,12 @@ describe('connectBridge', () => {
   it('ignores forged results and snapshots posted on window', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const addListener = vi.spyOn(window, 'addEventListener');
-    const { channel, nextBridgeMessage } = open();
+    const { channel, nextAction } = open();
     const onSnapshot = vi.fn();
     channel.onSnapshot(onSnapshot);
 
     const pending = channel.dispatchAction('click', ['a']);
-    const { id } = await nextBridgeMessage();
+    const { id } = await nextAction();
 
     // A co-resident page script that guessed the id still can't answer for the bridge.
     const origin = window.location.origin;
@@ -200,12 +217,8 @@ describe('connectBridge', () => {
 describe('connectBridge vs. a patched MessagePort.prototype.postMessage', () => {
   it('keeps sending on the port with the postMessage captured at load', async () => {
     const { channel, nextBridgeMessage } = open();
-    const tap = vi.fn();
-    const original = MessagePort.prototype.postMessage;
-    MessagePort.prototype.postMessage = function (...args) {
-      tap(...args);
-      return original.apply(this, args);
-    };
+    // Patched after load, calling through: the channel must not send with it.
+    const tap = vi.spyOn(MessagePort.prototype, 'postMessage');
     try {
       channel.requestSnapshot();
       channel.dispatchAction('click', ['save-button']);
@@ -213,7 +226,7 @@ describe('connectBridge vs. a patched MessagePort.prototype.postMessage', () => 
       expect(await nextBridgeMessage()).toMatchObject({ type: 'action', action: 'click' });
       expect(tap).not.toHaveBeenCalled();
     } finally {
-      MessagePort.prototype.postMessage = original;
+      tap.mockRestore();
     }
   });
 });

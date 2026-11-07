@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-libra
 import { useState } from 'react';
 import { KnowledgeModal } from '../KnowledgeModal.jsx';
 import * as knowledgeStore from '../knowledgeStore.js';
+import { elementOf } from './defined.js';
 
 // The knowledge button and its dialog (spec Screens, R21), mounted the way
 // main.jsx mounts the widget: in an open shadow root, with the dialog portalled
@@ -54,7 +55,7 @@ function textFile(name, content) {
 
 /** @param {File[]} files */
 async function pick(files) {
-  const input = /** @type {HTMLInputElement} */ (shadowRoot.querySelector('input[type="file"]'));
+  const input = elementOf(shadowRoot.querySelector('input[type="file"]'), HTMLInputElement);
   await act(async () => fireEvent.change(input, { target: { files } }));
 }
 
@@ -151,12 +152,15 @@ describe('KnowledgeModal', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('The operation is insecure.', 'SecurityError');
     });
-    const field = within(dialog).getByRole('textbox', { name: 'Rules' });
+    const field = elementOf(
+      within(dialog).getByRole('textbox', { name: 'Rules' }),
+      HTMLTextAreaElement,
+    );
     await act(async () => fireEvent.change(field, { target: { value: 'Be brief.' } }));
     expect(within(dialog).getByRole('alert').textContent).toBe(
       "This browser isn't letting the site save rules. They stay in the field but won’t survive a reload.",
     );
-    expect(/** @type {HTMLTextAreaElement} */ (field).value).toBe('Be brief.');
+    expect(field.value).toBe('Be brief.');
   });
 
   it("shows an alert when the browser won't let a file be removed, and keeps it listed", async () => {
@@ -241,8 +245,9 @@ describe('KnowledgeModal', () => {
   it('keeps over-limit rules on screen with an alert, unsaved', async () => {
     const ui = renderModal();
     const { dialog } = await openDialog(ui);
-    const rules = /** @type {HTMLTextAreaElement} */ (
-      within(dialog).getByRole('textbox', { name: /Rules/ })
+    const rules = elementOf(
+      within(dialog).getByRole('textbox', { name: /Rules/ }),
+      HTMLTextAreaElement,
     );
     const max = knowledgeStore.MAX_RULES_CHARS;
     fireEvent.change(rules, { target: { value: 'Be brief.' } });

@@ -209,7 +209,8 @@ cd agent-client
 npm test        # vitest: 21 files, 432 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
-                   # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
+                   # in its own project (jsconfig.worklet.json, AudioWorklet globals only),
+                   # and the unit tests in theirs (jsconfig.tests.json)
 npm run build   # agent-client/dist/: agent-client.js (an ES module), the SDK chunk
                 # web-<hash>.js (ADR 0005), and public/capture-worklet.js
 
@@ -457,7 +458,6 @@ Filed as issues at the close of cycle 1 (`docs/superpowers/specs/assessment.md` 
   and Firefox (verified in Chromium only);
 - [#20](https://github.com/jovstern/ai-presenter-agent/issues/20) bundle headroom: 0.76 kB under
   the 180 kB budget (drop the Gemini SDK for a direct socket, or load it on Talk);
-- [#21](https://github.com/jovstern/ai-presenter-agent/issues/21) typecheck the unit tests;
 - [#22](https://github.com/jovstern/ai-presenter-agent/issues/22) tune the snapshot cap and
   refresh ratio on a larger target page.
 

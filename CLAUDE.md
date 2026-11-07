@@ -238,9 +238,12 @@ Typecheck is `checkJs` + `strict` on plain JS with JSDoc types
 ([ADR 0002](docs/adr/0002-type-checking-with-checkjs.md)): `npm run typecheck` in each package
 runs `tsc -p jsconfig.json` (TypeScript 7; plain `tsc` ignores `jsconfig.json`); agent-client's
 also runs `tsc -p jsconfig.worklet.json` for the capture worklet (ES lib plus a small
-AudioWorkletGlobalScope shim, so no DOM names leak into it or its names into `src/`).
-agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`); it excludes
-`src/__tests__/` for now. The page nonce is no longer a window global: `main.jsx` reads it off
+AudioWorkletGlobalScope shim, so no DOM names leak into it or its names into `src/`), and
+`tsc -p jsconfig.tests.json` for `src/__tests__/` (the main config plus Node's types for the
+tests' `node:fs` reads; the main config excludes the tests, so no test-only type reaches `src/`).
+The tests' fakes are typed as the values they stand in for; `src/__tests__/defined.js`'s
+`defined()` and `elementOf()` narrow a value or a queried node a test knows is there, instead of
+a cast. agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`). The page nonce is no longer a window global: `main.jsx` reads it off
 its own script tag's `data-ds-nonce` (the `document.scripts` entry whose `src` is
 `import.meta.url`: a module script has no `document.currentScript`) and passes it down as a prop. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
 
@@ -322,7 +325,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   failure reported to `onFailure` once; End as the outline variant; the orb marked while
   reconnecting) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes; `data-reconnecting` with no loop); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
+  reduced motion; a write only when the 2-decimal level changes; `data-reconnecting` with no loop); `rafHarness.js` holds their fake rAF and `matchMedia`, and `defined.js` the tests' narrowing helpers. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
   capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no

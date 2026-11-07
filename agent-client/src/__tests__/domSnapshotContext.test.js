@@ -1,16 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { createDomSnapshotContext, formatSnapshotMessage } from '../domSnapshotContext.js';
 
+/** @import { Snapshot, SnapshotNode } from '../bridgeProtocol.js' */
+
+/**
+ * A visible, enabled span per selector, the shape bridge.js reports.
+ * @param {...string} selectors
+ * @returns {SnapshotNode[]}
+ */
+function nodes(...selectors) {
+  return selectors.map((selector) => ({
+    selector,
+    tag: 'span',
+    label: selector,
+    disabled: false,
+    hidden: false,
+  }));
+}
+
+/**
+ * A snapshot from selectors: `full` and `changed` become nodes, `removed` stays selectors.
+ * @param {{ full?: string[], changed?: string[], removed?: string[] }} [selectors]
+ * @returns {Snapshot}
+ */
 function snapshot({ full = [], changed = [], removed = [] } = {}) {
-  return { full, changed, removed };
+  return { full: nodes(...full), changed: nodes(...changed), removed };
 }
 
 describe('domSnapshotContext', () => {
   it('sends a keyframe the first time, regardless of delta size', () => {
     const ctx = createDomSnapshotContext();
     const decision = ctx.decide(snapshot({ full: ['a', 'b', 'c'], changed: [], removed: [] }));
-    expect(decision.type).toBe('keyframe');
-    expect(decision.nodes).toEqual(['a', 'b', 'c']);
+    expect(decision).toEqual({ type: 'keyframe', nodes: nodes('a', 'b', 'c') });
   });
 
   it('sends a compact delta when the change is small relative to the page', () => {
@@ -19,8 +40,7 @@ describe('domSnapshotContext', () => {
     const decision = ctx.decide(
       snapshot({ full: ['a', 'b', 'c', 'd', 'e'], changed: ['a'], removed: [] }),
     );
-    expect(decision.type).toBe('delta');
-    expect(decision.changed).toEqual(['a']);
+    expect(decision).toEqual({ type: 'delta', changed: nodes('a'), removed: [] });
   });
 
   it('falls back to a keyframe when the delta covers most of the page', () => {
@@ -37,8 +57,7 @@ describe('domSnapshotContext', () => {
     ctx.decide(snapshot({ full: ['a', 'b', 'c', 'd', 'e'] }));
     ctx.markNavigated();
     const decision = ctx.decide(snapshot({ full: ['x', 'y'], changed: ['x'], removed: [] }));
-    expect(decision.type).toBe('keyframe');
-    expect(decision.nodes).toEqual(['x', 'y']);
+    expect(decision).toEqual({ type: 'keyframe', nodes: nodes('x', 'y') });
   });
 
   it('only forces one keyframe per markNavigated() call', () => {
@@ -53,13 +72,13 @@ describe('domSnapshotContext', () => {
   });
 
   it('formats a keyframe message', () => {
-    const message = formatSnapshotMessage({ type: 'keyframe', nodes: ['a'] });
+    const message = formatSnapshotMessage({ type: 'keyframe', nodes: nodes('a') });
     expect(message).toContain('full');
     expect(message).toContain('"a"');
   });
 
   it('formats a delta message with changed and removed', () => {
-    const message = formatSnapshotMessage({ type: 'delta', changed: ['a'], removed: ['b'] });
+    const message = formatSnapshotMessage({ type: 'delta', changed: nodes('a'), removed: ['b'] });
     expect(message).toContain('delta');
     expect(message).toContain('"a"');
     expect(message).toContain('"b"');

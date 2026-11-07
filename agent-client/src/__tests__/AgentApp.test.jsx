@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
 import { AgentApp } from '../AgentApp.jsx';
 import { preloadLiveSdk } from '../liveSdk.js';
+import { elementOf } from './defined.js';
 
 // The card behind the knowledge dialog, mounted the way main.jsx mounts it: in
 // an open shadow root, the dialog portalled into a container in that root.
@@ -71,7 +72,7 @@ describe('AgentApp', () => {
     const card = ui.getByRole('complementary', { name: 'AI presenter' });
     // Everything the card renders outside the dialog's portal: the card and
     // the toast viewport beside it.
-    const layer = /** @type {HTMLElement} */ (mountPoint.firstElementChild);
+    const layer = elementOf(mountPoint.firstElementChild, HTMLElement);
     expect(layer.contains(card)).toBe(true);
     expect(layer.querySelector('.toast-viewport')).not.toBeNull();
     expect(layer.hasAttribute('inert')).toBe(false);

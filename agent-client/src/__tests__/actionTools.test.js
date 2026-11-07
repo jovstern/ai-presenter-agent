@@ -1,15 +1,21 @@
 import { describe, expect, it } from 'vitest';
 import ROUTES from '../../../target-app/routes.json' with { type: 'json' };
 import { TOOL_DECLARATIONS, toPositionalArgs } from '../actionTools.js';
+import { defined } from './defined.js';
 
 describe('TOOL_DECLARATIONS', () => {
-  const declaration = (name) => TOOL_DECLARATIONS.find((tool) => tool.name === name);
+  /** @param {string} name */
+  const declaration = (name) =>
+    defined(
+      TOOL_DECLARATIONS.find((tool) => tool.name === name),
+      name,
+    );
 
   // docs/code-review-notes.md M1: one route list, target-app/routes.json.
   it('offers exactly the routes of target-app/routes.json to navigate', () => {
-    expect(declaration('navigate').parametersJsonSchema.properties.route.enum).toEqual(
-      Object.keys(ROUTES),
-    );
+    expect(declaration('navigate').parametersJsonSchema).toMatchObject({
+      properties: { route: { enum: Object.keys(ROUTES) } },
+    });
   });
 
   it('tells the model fill picks a select’s option by its visible text', () => {

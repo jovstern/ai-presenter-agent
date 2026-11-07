@@ -3,13 +3,17 @@ import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { SdkLoadError, createSdkLoader } from '../liveSdk.js';
 
+/** @import { LiveSdk } from '../liveSdk.js' */
+
 const SRC = path.resolve(import.meta.dirname, '..');
 /** @param {string} name */
 const source = (name) => readFileSync(path.join(SRC, name), 'utf8');
 
 describe('createSdkLoader', () => {
   it('imports the SDK once and shares it between callers', async () => {
-    const sdk = { GoogleGenAI: class {} };
+    // The loader only hands the module on, never reads it, so a stand-in with
+    // one export is enough; typing it as the whole SDK module is the cast.
+    const sdk = /** @type {LiveSdk} */ (/** @type {unknown} */ ({ GoogleGenAI: class {} }));
     const importSdk = vi.fn(async () => sdk);
     const load = createSdkLoader(importSdk);
 

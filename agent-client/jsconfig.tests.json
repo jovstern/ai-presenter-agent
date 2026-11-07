@@ -1,0 +1,8 @@
+{
+  "extends": "./jsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src/__tests__"],
+  "exclude": []
+}

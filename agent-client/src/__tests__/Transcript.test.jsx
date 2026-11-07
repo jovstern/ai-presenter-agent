@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Transcript } from '../Transcript.jsx';
 import { appendFragment, endTurn } from '../transcript.js';
+import { elementOf } from './defined.js';
 
 /** @import { TranscriptEntry } from '../transcript.js' */
 
@@ -27,7 +28,7 @@ function build(steps, start = []) {
  */
 function renderTranscript(entries, reserve = false) {
   const utils = render(<Transcript entries={entries} reserve={reserve} />);
-  const live = /** @type {HTMLElement} */ (utils.container.querySelector('[aria-live]'));
+  const live = elementOf(utils.container.querySelector('[aria-live]'), HTMLElement);
   return { live, ...utils };
 }
 
@@ -89,7 +90,7 @@ describe('Transcript', () => {
 
   it('reserves its box while a session runs or once it has entries, and not idle and empty', () => {
     const { container, rerender } = renderTranscript([]);
-    const outer = /** @type {HTMLElement} */ (container.firstElementChild);
+    const outer = elementOf(container.firstElementChild, HTMLElement);
     expect(outer.hasAttribute('data-reserved')).toBe(false);
     expect(screen.queryByText('The conversation appears here.')).toBeNull();
 
@@ -175,7 +176,7 @@ describe('Transcript: following the newest line', () => {
    * @param {number} clientHeight
    */
   function fakeLayout(box, clientHeight) {
-    const inner = /** @type {HTMLElement} */ (box.firstElementChild);
+    const inner = elementOf(box.firstElementChild, HTMLElement);
     let content = 0;
     let top = 0;
     const shift = () => Number(/^0 (\d+)px$/.exec(inner.style.translate)?.[1] ?? 0);
@@ -214,7 +215,7 @@ describe('Transcript: following the newest line', () => {
   // each new one (a layout shift).
   it('draws content shorter than the box at its bottom, next to the controls', () => {
     const { box, grow } = setup();
-    const content = /** @type {HTMLElement} */ (box.firstElementChild);
+    const content = elementOf(box.firstElementChild, HTMLElement);
     grow(100);
     expect(content.style.translate).toBe('0 92px');
     grow(150);
@@ -228,7 +229,7 @@ describe('Transcript: following the newest line', () => {
   // overflowed, became a Tab stop and faded its top edge with nothing cut off.
   it('measures a fractional content height without overflowing by a fraction of a pixel', () => {
     const { box, grow } = setup();
-    const content = /** @type {HTMLElement} */ (box.firstElementChild);
+    const content = elementOf(box.firstElementChild, HTMLElement);
     grow(191.4);
     expect(content.style.translate).toBe('');
     expect(box.hasAttribute('tabindex')).toBe(false);
