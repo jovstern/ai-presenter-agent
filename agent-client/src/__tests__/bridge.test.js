@@ -176,7 +176,7 @@ describe('sandbox/bridge.js navigate', () => {
   });
 
   it('reports failure, inside the agent channel’s 4 s action timeout, when the page never loads', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     const srcSet = frame.nextSrcSet();
     const replies = [];
     agentPort.onmessage = (event) => replies.push(event.data);
@@ -781,8 +781,8 @@ describe("sandbox/bridge.js an action's page", () => {
   }
 
   beforeEach(() => {
-    // Date too: the bridge measures its deadline with Date.now().
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    // performance too: the bridge measures its deadline with performance.now().
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
   });
 
   it('posts the snapshot showing a click’s change before the click’s result, and no second one', async () => {
@@ -975,6 +975,30 @@ describe("sandbox/bridge.js an action's page", () => {
     await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
     await until(() => messages.length >= 4);
     expect(messages[3]).toEqual({ type: 'action-result', id: 'l3', success: true });
+  });
+
+  it('gives up on a navigate that never loads, so the next action answers after the quiet window', async () => {
+    const messages = await loadCounterPage();
+    const srcSet = frame.nextSrcSet();
+    agentPort.postMessage({ type: 'action', id: 'n3', action: 'navigate', args: ['settings'] });
+    await srcSet;
+    frame.win.dispatchEvent(new Event('beforeunload')); // the browser starting it
+
+    await vi.advanceTimersByTimeAsync(ACTION_DEADLINE_MS);
+    await until(() => messages.length >= 1);
+    expect(messages).toEqual([
+      {
+        type: 'action-result',
+        id: 'n3',
+        success: false,
+        error: 'The page did not finish loading.',
+      },
+    ]);
+
+    await click('c7', 'counter-increment');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 3);
+    expect(messages.slice(1).map((m) => m.type)).toEqual(['snapshot', 'action-result']);
   });
 
   // The worst case: a navigate whose page loads just before the deadline onto

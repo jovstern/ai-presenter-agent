@@ -43,7 +43,9 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   navigation (a link click), the new page once loaded. All of it ends within 3.7 s of the
   action's start. That snapshot goes out just before the action's result, so it rides in that
   successful action's tool response as `page` (#25). A change the viewer makes during the
-  window is credited to the action.
+  window is credited to the action. A navigation that starts but never commits (a 204, a
+  download) makes the next successful action wait out its deadline once; the target app has
+  none.
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
   or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
 - **Delta** — a snapshot told to the model as only what changed and what was removed. Cheaper

@@ -181,7 +181,7 @@
   let loadWaiters = [];
 
   // Resolves true once a document at `path` (any document, for null) loads in
-  // the frame, or false at `deadline` (a Date.now() time). Matched by path, so
+  // the frame, or false at `deadline` (a performance.now() time). Matched by path, so
   // a load of some other page in the meantime (the viewer clicking a link in
   // the frame) doesn't count as a navigate finishing. A load of the same path
   // from another cause can't be told apart, but it does put the requested
@@ -202,12 +202,15 @@
           resolve(loaded);
         },
       };
-      const timer = setTimeout(() => waiter.settle(false), Math.max(0, deadline - Date.now()));
+      const timer = setTimeout(
+        () => waiter.settle(false),
+        Math.max(0, deadline - performance.now()),
+      );
       loadWaiters.push(waiter);
     });
   }
 
-  // Each action takes its deadline (a Date.now() time, ACTION_DEADLINE_MS
+  // Each action takes its deadline (a performance.now() time, ACTION_DEADLINE_MS
   // after it started), then the positional args actionTools.js orders for it.
   /** @type {Record<ActionName, (deadline: number, ...args: string[]) => Promise<ActionResult>>} */
   const actions = {
@@ -232,7 +235,12 @@
       iframe.src = routePath;
       // Don't report success until the new document is actually in place, and
       // don't claim it was when it never arrived.
-      if (!(await loaded)) return { success: false, error: 'The page did not finish loading.' };
+      if (!(await loaded)) {
+        // Given up on, so the next action doesn't wait out its own deadline
+        // for this dead navigation (pageSettled does the same for a link's).
+        navigationInFlight = false;
+        return { success: false, error: 'The page did not finish loading.' };
+      }
       return { success: true };
     },
     async fill(_deadline, selector, value) {
@@ -348,7 +356,7 @@
         error: `Action "${action}" is not allowed`,
       };
     }
-    const deadline = Date.now() + ACTION_DEADLINE_MS;
+    const deadline = performance.now() + ACTION_DEADLINE_MS;
     // An earlier change's debounced snapshot, landing inside this action's
     // settle window, would make its page a keyframe; a success's own snapshot
     // covers that change, and a failure sends it as the debounce would have.
@@ -624,7 +632,12 @@
   const settleWaiters = new Set();
 
   // Set when the frame's document starts to unload (a link click, a form
-  // submit, a script setting location, a navigate), cleared by the next load.
+  // submit, a script setting location, a navigate), cleared by the next load
+  // or by an action that gave up waiting for it. A navigation that starts but
+  // never commits (a 204, a download, one cancelled) fires beforeunload and
+  // no load, so the flag stays set and the next successful action waits out
+  // its own deadline once before clearing it. Not reachable on today's target
+  // app, which has neither.
   let navigationInFlight = false;
 
   function scheduleDebouncedSnapshot() {
@@ -660,8 +673,8 @@
       if (navigationInFlight && !(await waitForLoadOf(null, deadline))) {
         navigationInFlight = false;
       }
-      await quietPage(Math.max(0, Math.min(SETTLE_CAP_MS, deadline - Date.now())));
-      if (!navigationInFlight || Date.now() >= deadline) return;
+      await quietPage(Math.max(0, Math.min(SETTLE_CAP_MS, deadline - performance.now())));
+      if (!navigationInFlight || performance.now() >= deadline) return;
     }
   }
 

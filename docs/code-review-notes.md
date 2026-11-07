@@ -452,6 +452,12 @@ if (message.toolCall) {
 > = 3.7 s after the action starts, inside the agent's 4 s. An action also cancels an earlier
 > change's pending debounced snapshot when it starts (it would land in the settle window and
 > force a keyframe); a success's snapshot covers that change, and a failure re-arms it.
+> Re-review minors: a navigate that fails to load clears the in-flight mark too, so the next
+> action doesn't wait for the dead navigation; the deadline is measured with `performance.now()`
+> (monotonic), not `Date.now()`. Known and accepted: a navigation that starts but never commits
+> (a 204, a download, a cancelled one) fires `beforeunload` and no load, so the mark stays set
+> and the next successful action waits out its 3.7 s deadline once before clearing it; not
+> reachable on today's target app.
 
 Two issues in one area:
 
