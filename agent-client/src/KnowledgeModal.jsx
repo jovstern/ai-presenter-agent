@@ -341,8 +341,8 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
               role="alert"
               ref={scrollIntoViewOnMount}
             >
-              Rules are {formatCount(over)} characters over the limit and aren&rsquo;t saved.
-              Shorten them to save.
+              Rules are {formatCount(over)} {over === 1 ? 'character' : 'characters'} over the limit
+              and aren&rsquo;t saved. Shorten them to save.
             </p>
           )}
 

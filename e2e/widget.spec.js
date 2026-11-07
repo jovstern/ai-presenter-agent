@@ -297,7 +297,7 @@ const VIEWPORTS = [
   { width: 1440, height: 900 },
 ];
 const GUTTER = 16;
-const CARD_WIDTH = 344;
+const CARD_WIDTH = 352;
 // Longer than the transcript box at any width, so it scrolls.
 const LONG_TURN = Array.from(
   { length: 12 },
@@ -485,6 +485,35 @@ test.describe('at 390 px, while the transcript grows', () => {
       worst = Math.max(worst, session.sum);
     }
     expect(worst, JSON.stringify(shifts)).toBeLessThanOrEqual(0.05);
+  });
+});
+
+test.describe('at 360 × 640, the knowledge dialog', () => {
+  test.use({ viewport: { width: 360, height: 640 } });
+
+  test('scrolls the over-limit alert into view above the sticky footer (U8)', async ({ page }) => {
+    await page.goto('/');
+    await page.locator(HOST).getByRole('button', { name: 'Knowledge files: 0' }).click();
+    const dialog = page.locator(HOST).getByRole('dialog', { name: 'Knowledge' });
+    await expect(dialog).toBeVisible();
+
+    // One over the limit (knowledgeStore.js MAX_RULES_CHARS).
+    await dialog.getByRole('textbox', { name: 'Rules' }).fill('x'.repeat(2001));
+    const alert = dialog.getByRole('alert').filter({ hasText: 'over the limit' });
+    await expect(alert).toBeVisible();
+
+    const footer = dialog.locator('.knowledge-modal__footer');
+    // The scroll has finished once the alert's box stops moving.
+    await expect
+      .poll(async () => {
+        const [alertBox, footerBox] = await Promise.all([
+          alert.boundingBox(),
+          footer.boundingBox(),
+        ]);
+        if (!alertBox || !footerBox) return Number.POSITIVE_INFINITY;
+        return alertBox.y + alertBox.height - footerBox.y;
+      })
+      .toBeLessThanOrEqual(0);
   });
 });
 

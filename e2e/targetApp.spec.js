@@ -52,8 +52,37 @@ test.describe('the Orders page on a phone', () => {
     const region = page.getByRole('region', { name: 'Orders' });
 
     await expect(region).toHaveClass(/table-scroll--more/);
+    // Focused from the keyboard, the fade gives way, so the focus ring (drawn
+    // outside the border box, which a mask clips) shows whole.
+    for (
+      let i = 0;
+      i < 20 && !(await region.evaluate((el) => el === document.activeElement));
+      i++
+    ) {
+      await page.keyboard.press('Tab');
+    }
+    await expect(region).toBeFocused();
+    await expect(region).toHaveClass(/table-scroll--more/);
+    expect(await region.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
+    await expect(region).toHaveCSS('mask-image', 'none');
+    expect(await region.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe('none');
+
     await region.evaluate((box) => box.scrollTo({ left: box.scrollWidth }));
     await expect(region).not.toHaveClass(/table-scroll--more/);
+  });
+
+  test('a tick the browser restores on Back matches the count (M-A)', async ({ page }) => {
+    await page.goto('/target-app/orders.html');
+    await page.getByRole('checkbox', { name: 'Select order 1003' }).check();
+    await expect(page.getByTestId('orders-selected-count')).toHaveText('1 selected');
+
+    await page.getByTestId('nav-home').click();
+    await expect(page).toHaveURL(/index\.html$/);
+    await page.goBack();
+
+    await expect(page.getByRole('checkbox', { name: 'Select order 1003' })).toBeChecked();
+    await expect(page.getByTestId('orders-selected-count')).toHaveText('1 selected');
+    await expect(page.getByTestId('ship-selected')).toBeEnabled();
   });
 });
 

@@ -201,7 +201,7 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 7 specs, 47 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 7 specs, 49 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
@@ -366,14 +366,16 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   below), a keyboard walk from the top of the page through the transcript, the primary button
   and the knowledge button (focus ring visible), the dialog inside the viewport with the card
   inert behind it (absent from Chromium's accessibility tree, read over CDP) and back on
-  Escape, and axe on the connected card in light and dark.
+  Escape, and axe on the connected card in light and dark. At 360 × 640, rules typed over the
+  limit scroll their alert into view above the dialog's sticky footer.
 - `sdk.spec.js` — the lazy SDK (ADR 0005): the built entry has no SDK code and both files are
   within the spec's budgets; the page loads without the SDK chunk, pointing at Talk fetches it
   once, and Talk connects (twice, one fetch); an aborted chunk ends in "Can't connect" with one
   toast and Retry, nothing retried by itself, and Retry loads it and connects.
 - `targetApp.spec.js` — the target app's own layout: Orders loaded with `orders.js` held back
   300 ms shifts less than 0.05 (its rows are static markup; built by the script they once
-  shifted the page 0.679), its table fades at the right edge until scrolled to the end, and at
+  shifted the page 0.679), its table fades at the right edge until scrolled to the end (but not while it has keyboard
+  focus, so the focus ring shows whole), a tick the browser restores on Back is counted, and at
   360 px with a session open Create order (Orders) and Save (Settings), scrolled to the bottom,
   sit above the card.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real

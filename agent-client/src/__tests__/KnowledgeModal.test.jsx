@@ -59,9 +59,11 @@ async function pick(files) {
   await act(async () => fireEvent.change(input, { target: { files } }));
 }
 
-// jsdom has no scrollIntoView; a real browser always does.
+// jsdom has no scrollIntoView; a real browser always does. Stubbed per test
+// and put back as it was after each, so no other file sees the stub.
 /** @type {import('vitest').Mock<(arg?: boolean | ScrollIntoViewOptions) => void>} */
 let scrollIntoView;
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
 
 beforeEach(() => {
   localStorage.clear();
@@ -73,6 +75,11 @@ afterEach(() => {
   cleanup();
   host.remove();
   vi.restoreAllMocks();
+  if (originalScrollIntoView) {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', originalScrollIntoView);
+  } else {
+    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
+  }
 });
 
 describe('KnowledgeModal', () => {
@@ -272,6 +279,10 @@ describe('KnowledgeModal', () => {
     expect(counter.dataset.limit).toBe('over');
     expect(rules.getAttribute('aria-invalid')).toBe('true');
     expect(rules.getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
+
+    // One over: the word is singular.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 1) } });
+    expect(within(dialog).getByRole('alert').textContent).toMatch(/ 1 character over/);
 
     fireEvent.change(rules, { target: { value: 'Be brief, always.' } });
     expect(within(dialog).queryByRole('alert')).toBeNull();

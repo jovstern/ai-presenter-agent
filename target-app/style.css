@@ -140,9 +140,14 @@ button:disabled:hover {
   background: #fff;
 }
 
-/* A touch screen gets a 44 px tall target on every button. */
+/* A touch screen gets a 44 px tall target on every button and field (a
+   min-height, so a taller textarea keeps its height). A checkbox keeps its
+   size: its label is the 44 px target. */
 @media (pointer: coarse) {
-  button {
+  button,
+  input:not([type='checkbox'], [type='radio']),
+  select,
+  textarea {
     min-height: 44px;
   }
 }
@@ -159,6 +164,12 @@ button:disabled:hover {
    scrolled to its end): the right edge fades out. A mask, so nothing moves. */
 .table-scroll--more {
   mask-image: linear-gradient(to left, transparent, #000 40px);
+}
+
+/* Focused from the keyboard, the fade gives way: a mask clips to the border
+   box, and the focus ring is drawn outside it. */
+.table-scroll--more:focus-visible {
+  mask-image: none;
 }
 
 table {
@@ -212,6 +223,21 @@ td.select label {
   min-width: 44px;
   min-height: 44px;
   cursor: pointer;
+}
+
+/* A shipped order's checkbox (always unticked): the browser's own disabled
+   box is a faint ~1.3:1 outline. Drawn here instead, a mid-grey edge (4.5:1
+   on white) on a grey fill: plainly there, and plainly off. */
+td.select input:disabled {
+  appearance: none;
+  box-sizing: border-box;
+  border: 1px solid #767676;
+  border-radius: 3px;
+  background: #e6e6e6;
+}
+
+td.select label:has(input:disabled) {
+  cursor: not-allowed;
 }
 
 /* A phone: tighter cells, so more of the table fits before it scrolls. */

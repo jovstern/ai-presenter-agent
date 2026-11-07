@@ -45,6 +45,10 @@
     shipSelected.disabled = count === 0;
   }
 
+  // A tick the browser restored (Back, a reload) counts too: once now, and
+  // again on pageshow, which follows the restore (M9 fix wave 2, M-A).
+  updateSelection();
+  window.addEventListener('pageshow', updateSelection);
   body.addEventListener('change', updateSelection);
   body.addEventListener('click', (event) => {
     const ship = event.target instanceof Element ? event.target.closest('button') : null;

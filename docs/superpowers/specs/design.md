@@ -286,7 +286,7 @@ come from `status`.
   the card's padding and the two buttons' padding tighten (and at 340 px and below the gutter halves) so "Talk to the AI Presenter" fits
   at 320 px and keeps room at 360 px.
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
-- **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the AI Presenter" wrapped).
+- **Desktop:** a 352 px card with a 16 px offset (320 until M7 T4, where "Talk to the AI Presenter" wrapped; 344 until M9, raised so the label has at least the room it has on a 380 px phone).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus
   returns to the button that opened it.
 
@@ -318,7 +318,7 @@ components use the tokens, never raw values.
   goes at once); the pending button's ring turns once per 900 ms (`--duration-spin`). Under
   `prefers-reduced-motion` the duration tokens are 0 and no transition or animation runs; the
   orb rings freeze to a static level, the pending ring stands still.
-- **Layout:** a 16 px gutter; the card is 344 px wide, and at 400 px and below it spans the
+- **Layout:** a 16 px gutter; the card is 352 px wide, and at 400 px and below it spans the
   viewport between the gutters; the dialog is at most 360 px.
 - **Layering:** the host gets `position:fixed; z-index:2147483000; display:block` (L3, L4),
   through `:host` in `styles.css`, not an inline style: the width changes at a breakpoint,

@@ -211,7 +211,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   60-row table, each row a checkbox and a Ship button, with a selected count and Ship
   selected, then an eleven-field New order form; 139 `data-testid`s, past the snapshot cap; the
   rows are static markup, so a late `orders.js` only wires up the controls and moves nothing,
-  and a right-edge fade marks a table scrolled short of its end), `style.css` (every page's
+  and counts a tick the browser restores on Back; a right-edge fade marks a table scrolled
+  short of its end, lifted while the table has keyboard focus so the focus ring shows whole),
+  `style.css` (every page's
   `main` keeps 360 px free at its bottom, so its last control scrolls clear of the session
   card), and `routes.json` — the one route list (route name →
   page path): the server templates it into the sandbox page for `bridge.js`, and
@@ -362,7 +364,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 7 Playwright specs (47
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 7 Playwright specs (49
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (14: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
@@ -374,7 +376,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
   response's `page` showing 1, 2, 3; ten identical counter clicks all run (the loop guard judges
   each on the page it was taken on), the counter at 10; navigate, toggle on, save, toggle off,
-  save all `success: true` (an explicit two-round request passes the loop guard, #28); a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
+  save all `success: true` (an explicit two-round request passes the loop guard, #28); a link click answered with the new page's keyframe), `widget.spec.js` (9, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on
@@ -385,12 +387,14 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   blocked-mic guidance; at 360, 768 and 1440 px the card's placement, a keyboard walk of the
   whole card, the dialog making the card inert (Chromium's accessibility tree, over CDP) and axe in
   light and dark; and at 390 px the layout-shift check — worst CLS session window ≤ 0.05 while
-  the transcript grows over six turns, the newest line in view),
+  the transcript grows over six turns, the newest line in view; and at 360 × 640 the
+  over-limit rules alert scrolled into view above the dialog's sticky footer, U8),
   `sdk.spec.js` (3, ADR 0005: the built entry has no SDK code and both files are within the
   spec's budgets; the page loads without the SDK chunk, a hover fetches it once, Talk connects;
   an aborted chunk gives Can't connect with one toast and Retry, which loads it and connects),
-  `targetApp.spec.js` (4, M9 fix wave: Orders with `orders.js` held back 300 ms shifts under
-  0.05; its table's right-edge fade until scrolled to the end; at 360 px with a session open,
+  `targetApp.spec.js` (5, M9 fix wave: Orders with `orders.js` held back 300 ms shifts under
+  0.05; its table's right-edge fade until scrolled to the end, lifted while the table has
+  keyboard focus so its focus ring shows whole; a tick restored on Back counted; at 360 px with a session open,
   Create order on Orders and Save on Settings, scrolled to the bottom, sit above the card),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and

@@ -55,7 +55,10 @@
   /* Layout. The breakpoint (400px) is repeated in the media query below:
      custom properties can't be used in a media condition. */
   --gutter: var(--space-4);
-  --card-width: 344px; /* "Talk to the AI Presenter" on one line, with room for wider system fonts */
+  /* "Talk to the AI Presenter" on one line, with room for wider system fonts:
+     352 px (344 until M9) gives the label at least the room it has on a 380 px
+     phone. */
+  --card-width: 352px;
   --dialog-width: 360px;
   --control-height: 44px;
   --orb-size: var(--control-height); /* decorative, so it may shrink below the hit area */
@@ -114,7 +117,7 @@
 }
 
 /* Phones: the card spans the width, a gutter each side (spec Screens). */
-@media (max-width: 400px) {
+@media (width <= 400px) {
   :host {
     left: var(--gutter);
     width: auto;
@@ -360,7 +363,7 @@ button:active {
    hit area to keep), half gaps and tighter padding. Without it the label had
    7 px to spare at 380 px and none at 360 px; with it, 39 px at 360 px and
    20 px at 341 px in system-ui, room for a wider system font. */
-@media (max-width: 379px) {
+@media (width < 380px) {
   :host {
     --orb-size: 32px;
   }
@@ -378,7 +381,7 @@ button:active {
 
 /* The narrowest phones (320 px) also take a half gutter: there the label has
    15 px to spare. A 360 px phone keeps the 16 px gutter (spec Screens). */
-@media (max-width: 340px) {
+@media (width <= 340px) {
   :host {
     --gutter: var(--space-2);
   }
@@ -563,6 +566,12 @@ button:active {
   max-height: 84dvh;
   padding: var(--space-5) var(--space-5) 0;
   overflow-y: auto;
+  /* Scrolling something into view (the over-limit alert) stops above the
+     sticky footer, not under it: the footer's height (its border, padding and
+     the Close button) plus a gap. */
+  scroll-padding-bottom: calc(
+    var(--border-width) + var(--space-3) + var(--control-height) + var(--space-5) + var(--space-2)
+  );
   transform: translateX(-50%);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-card);
