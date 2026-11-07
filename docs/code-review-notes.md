@@ -255,6 +255,9 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 > endpoint (see the editorial note at the top and ADR 0001). The two in-memory gate maps are
 > also TTL-pruned and size-capped now (`server/expiringMap.js`), so a flood can't grow them
 > without limit, and serving the nonce-templated page is rate-limited per IP (M5 fix wave).
+> M9 T1 ([ADR 0005](adr/0005-load-the-gemini-sdk-on-talk.md)): `agent-client.js` is a module
+> script now, so `main.jsx` finds its tag (and `data-ds-nonce`) by `import.meta.url` instead of
+> `document.currentScript`; its lazy SDK chunk is a same-origin script, so the CSP is unchanged.
 > Deliberate gap: `style-src` allows `'unsafe-inline'`. The agent-client's shadow root gets its
 > stylesheet as a runtime `<style>` element (`main.jsx`), and Radix Dialog's react-remove-scroll
 > injects a `<style>` and inline style attributes when the knowledge dialog opens; neither can

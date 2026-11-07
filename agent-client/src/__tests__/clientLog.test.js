@@ -11,7 +11,10 @@ import {
   vitalReport,
 } from '../clientLog.js';
 
-const SCRIPT = 'http://agent.test/agent-client/agent-client.js';
+// The directory the bundle's files are served from (main.jsx), and two of them.
+const BASE = 'http://agent.test/agent-client/';
+const SCRIPT = `${BASE}agent-client.js`;
+const SDK_CHUNK = `${BASE}web-Ab12Cd34.js`;
 const NONCE = '6f1c2a8e-3b4d-4e5f-8a9b-0c1d2e3f4a5b';
 
 /** An Error thrown from `file`, as the browser would stack it. */
@@ -37,7 +40,7 @@ afterEach(() => {
 
 describe('errorEventReport', () => {
   it('reports an error from this bundle with its message, source and stack', () => {
-    expect(errorEventReport(errorEvent(SCRIPT), SCRIPT)).toEqual({
+    expect(errorEventReport(errorEvent(SCRIPT), BASE)).toEqual({
       type: 'error',
       message: 'Uncaught TypeError: x is undefined',
       source: `${SCRIPT}:1:200`,
@@ -45,10 +48,16 @@ describe('errorEventReport', () => {
     });
   });
 
+  it('reports an error from the lazily loaded SDK chunk too', () => {
+    expect(errorEventReport(errorEvent(SDK_CHUNK), BASE)).toMatchObject({
+      source: `${SDK_CHUNK}:1:200`,
+    });
+  });
+
   it("ignores another script's error (the host page, the bridge, an extension)", () => {
-    expect(errorEventReport(errorEvent('http://agent.test/sandbox/bridge.js'), SCRIPT)).toBeNull();
+    expect(errorEventReport(errorEvent('http://agent.test/sandbox/bridge.js'), BASE)).toBeNull();
     // A cross-origin script's error reaches the page as "Script error." with no file.
-    expect(errorEventReport(new ErrorEvent('error', { message: 'Script error.' }), SCRIPT)).toBe(
+    expect(errorEventReport(new ErrorEvent('error', { message: 'Script error.' }), BASE)).toBe(
       null,
     );
   });
@@ -59,13 +68,13 @@ describe('errorEventReport', () => {
 
   it('leaves the stack out when the error is not an Error', () => {
     const event = new ErrorEvent('error', { message: 'boom', filename: SCRIPT, error: 'boom' });
-    expect(errorEventReport(event, SCRIPT)).not.toHaveProperty('stack');
+    expect(errorEventReport(event, BASE)).not.toHaveProperty('stack');
   });
 
   it('clips long messages and stacks', () => {
     const error = errorFrom(SCRIPT, 'm'.repeat(1000));
     error.stack = 's'.repeat(5000);
-    const report = errorEventReport(errorEvent(SCRIPT, error), SCRIPT);
+    const report = errorEventReport(errorEvent(SCRIPT, error), BASE);
     expect(report?.message).toHaveLength(500);
     expect(report?.stack).toHaveLength(2000);
   });
@@ -73,17 +82,23 @@ describe('errorEventReport', () => {
 
 describe('rejectionReport', () => {
   it('reports an Error whose stack names this bundle', () => {
-    expect(rejectionReport(errorFrom(SCRIPT, 'nope'), SCRIPT)).toEqual({
+    expect(rejectionReport(errorFrom(SCRIPT, 'nope'), BASE)).toEqual({
       type: 'error',
       message: 'Unhandled rejection: TypeError: nope',
       stack: `TypeError: nope\n    at f (${SCRIPT}:1:200)`,
     });
   });
 
+  it('reports an Error from the SDK chunk', () => {
+    expect(rejectionReport(errorFrom(SDK_CHUNK, 'nope'), BASE)).toMatchObject({
+      message: 'Unhandled rejection: TypeError: nope',
+    });
+  });
+
   it('ignores a rejection from another script, or one that is not an Error', () => {
-    expect(rejectionReport(errorFrom('http://agent.test/target-app/home.js'), SCRIPT)).toBeNull();
-    expect(rejectionReport('a string', SCRIPT)).toBeNull();
-    expect(rejectionReport(undefined, SCRIPT)).toBeNull();
+    expect(rejectionReport(errorFrom('http://agent.test/target-app/home.js'), BASE)).toBeNull();
+    expect(rejectionReport('a string', BASE)).toBeNull();
+    expect(rejectionReport(undefined, BASE)).toBeNull();
   });
 });
 
@@ -216,7 +231,7 @@ describe('createClientLog', () => {
 describe('startClientLog', () => {
   it("reports this bundle's window errors and rejections, and returns the connection reporter", () => {
     const send = vi.fn();
-    const reportFailure = startClientLog({ nonce: NONCE, scriptUrl: SCRIPT, send });
+    const reportFailure = startClientLog({ nonce: NONCE, bundleBase: BASE, send });
 
     window.dispatchEvent(errorEvent(SCRIPT));
     window.dispatchEvent(errorEvent('http://agent.test/sandbox/bridge.js'));
@@ -238,7 +253,7 @@ describe('startClientLog', () => {
 
   it('sends no token failure and nothing after it: the server rejected the page nonce', () => {
     const send = vi.fn();
-    const reportFailure = startClientLog({ nonce: NONCE, scriptUrl: SCRIPT, send });
+    const reportFailure = startClientLog({ nonce: NONCE, bundleBase: BASE, send });
 
     reportFailure({ attempt: 0, maxAttempts: 6, reason: 'Reload.', fatal: 'token' });
     window.dispatchEvent(errorEvent(SCRIPT, errorFrom(SCRIPT, 'after the token failure')));

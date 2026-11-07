@@ -4,6 +4,7 @@ import { KnowledgeModal } from './KnowledgeModal.jsx';
 import { FailureToast } from './FailureToast.jsx';
 import { VolumeOrb } from './VolumeOrb.jsx';
 import { Transcript } from './Transcript.jsx';
+import { preloadLiveSdk } from './liveSdk.js';
 
 /** @import { BridgeChannel } from './bridgeChannel.js' */
 /** @import { StatusDetails } from './liveSession.js' */
@@ -40,7 +41,9 @@ function statusText(status, details) {
 // server again — it connects once the owner has fixed the key, without
 // losing the page (M6 T6, M4 re-review). Unless fixing the key restarted the
 // server: that wipes its in-memory nonces, the retry comes back a rejected
-// `token`, and the button becomes Reload page (the reason warns of it).
+// `token`, and the button becomes Reload page (the reason warns of it). An
+// SDK chunk that didn't load (`sdk`, liveSdk.js) gets Retry, which imports it
+// again.
 /**
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
@@ -141,12 +144,16 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer, onFailure
             (a transcript line) skips it, since its props are unchanged (VolumeOrb.jsx). */}
         <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />
         {/* Pending while connecting: a spinner, and the label says what a
-            press does now (Cancel). The status line says Connecting…. */}
+            press does now (Cancel). The status line says Connecting…. Pointing
+            at or focusing it starts loading the Gemini SDK, which the press
+            needs (liveSdk.js; a no-op once loaded). */}
         <button
           ref={primaryRef}
           className="agent-app__primary"
           data-pending={status === 'connecting' ? 'true' : undefined}
           onClick={action.onClick}
+          onPointerEnter={preloadLiveSdk}
+          onFocus={preloadLiveSdk}
         >
           {action.label}
         </button>

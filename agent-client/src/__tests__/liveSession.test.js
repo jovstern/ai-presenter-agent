@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createLiveSession } from '../liveSession.js';
+import { SdkLoadError, loadLiveSdk } from '../liveSdk.js';
 import { setRules } from '../knowledgeStore.js';
 import LIVE_MODEL from '../liveModel.json' with { type: 'json' };
 
@@ -26,6 +27,14 @@ vi.mock('@google/genai/web', () => {
     }
   }
   return { GoogleGenAI, Modality: { AUDIO: 'AUDIO' } };
+});
+
+// The real loader (it imports the mock above), wrapped so a test can make
+// one load fail the way a chunk that didn't arrive does.
+vi.mock('../liveSdk.js', async (importOriginal) => {
+  /** @type {typeof import('../liveSdk.js')} */
+  const original = await importOriginal();
+  return { ...original, loadLiveSdk: vi.fn(original.loadLiveSdk) };
 });
 
 const MAX_ATTEMPTS = 6;
@@ -724,6 +733,53 @@ describe('createLiveSession', () => {
     expect(call.session.sendClientContent).toHaveBeenCalledTimes(contextSendsBefore);
     expect(bridge.close).not.toHaveBeenCalled();
   });
+  // The SDK is a chunk of its own, loaded on Talk (liveSdk.js). A chunk that
+  // didn't arrive (the network, a page older than the deploy) fails the
+  // attempt at once: the backoff is for the voice socket, and spending a
+  // minute of retries on a missing file would only hide it.
+  it('fails at once with a Retry when the SDK chunk does not load, and loads it on the next connect()', async () => {
+    vi.mocked(loadLiveSdk).mockRejectedValueOnce(
+      new SdkLoadError(new TypeError('Failed to fetch')),
+    );
+    const { liveSession, statuses, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+
+    expect(statusNames()).toEqual(['connecting', 'failed']);
+    expect(statuses.at(-1)).toMatchObject({
+      reason: "The voice client couldn't load. Check your connection, then retry.",
+      fatal: 'sdk', // not a reload: Retry imports the chunk again
+    });
+    expect(live.calls).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    liveSession.connect();
+    await flush();
+    await establish(live.calls[0]);
+    expect(statusNames().at(-1)).toBe('open');
+  });
+
+  it('asks for the token while the SDK chunk is still loading, not after it', async () => {
+    /** @type {(sdk: import('../liveSdk.js').LiveSdk) => void} */
+    let finishLoad = () => {};
+    const realLoad = vi.mocked(loadLiveSdk).getMockImplementation();
+    vi.mocked(loadLiveSdk).mockImplementationOnce(
+      () => new Promise((resolve) => (finishLoad = resolve)),
+    );
+    const { liveSession, statusNames } = setup();
+
+    liveSession.connect();
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(live.calls).toHaveLength(0);
+
+    finishLoad(await realLoad());
+    await flush();
+    await establish(live.calls[0]);
+    expect(statusNames()).toEqual(['connecting', 'open']);
+  });
+
   it('treats a not_configured server error as a fatal config failure, with a contact-the-owner reason', async () => {
     fetchMock.mockImplementation(async () =>
       tokenResponse(500, apiError('not_configured', "The server isn't configured to connect")),

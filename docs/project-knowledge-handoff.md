@@ -143,7 +143,8 @@ docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/
 target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
                  routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
-agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
+agent-client/    React 19 app (React Compiler on), built to an ES module plus a lazy Gemini SDK
+                 chunk (ADR 0005), mounted in a shadow root
 server/          Express: app.js (token gate, /api/client-log, CSP, pino logs, /health),
                  config.js (the env parsed with Zod), index.js (listen, shutdown)
 render.yaml      the Render Blueprint (ADR 0003)
@@ -153,7 +154,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 `target-app`). Inside `agent-client/src/`:
 
 - `main.jsx` — mounts the shadow root on a plain host `<div>`, opens the bridge channel once for
-  the page's lifetime, unmounts on a non-persisted `pagehide`.
+  the page's lifetime, unmounts on a non-persisted `pagehide`. It is a module script: its URL is
+  `import.meta.url`, and the page nonce comes off the tag with that `src`.
+- `liveSdk.js` — the one `import()` of `@google/genai/web`, on Talk (or when Talk is pointed at
+  or focused), never on page load ([ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)).
 - `bridgeChannel.js` — the agent's end of the private `MessageChannel` to `sandbox/bridge.js`
   ([ADR 0001](./adr/0001-private-bridge-channel.md)).
 - `liveSession.js` — the Live socket: token fetch, connect, one-retry-per-drop backoff,
@@ -186,8 +190,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   20 files and 381 tests in agent-client, 5 files and 117 tests in `server/` (`config` and
   `clientLog` added in M8), and 33 deterministic Playwright tests in 5 specs, plus the 3 opt-in
   live ones; CLAUDE.md lists what each file covers.
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 725.7 kB,
-  179.24 kB gzip at M8 T4 (179.22 after M8 T2's `web-vitals`, 176.7 after the M7 fix wave, 175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
+- `npm run build` produces an ES module, `dist/agent-client.js`, 107.79 kB gzip on page load
+  since M9 T1, plus the Gemini SDK chunk `dist/web-<hash>.js` (74.66 kB gzip) imported on Talk
+  ([ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)). Until then it was a single
+  self-contained IIFE: 725.7 kB, 179.24 kB gzip at M8 T4 (179.22 after M8 T2's `web-vitals`, 176.7 after the M7 fix wave, 175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -449,6 +455,14 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   fallback: its failures would hit the console. `web-vitals` is pinned to 5.3.0 and only
   `onLCP` / `onINP` / `onCLS` are imported: 6.x took the bundle to 180.11 kB, past the 180 kB
   budget.
+- **The Gemini SDK loads on Talk (M9 T1, issue #20, [ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)).**
+  The bundle was 0.4 kB under its 180 kB budget, 72–75 kB of it the SDK, which only a Live
+  session uses. The widget is now an ES module (an app build with a JS entry; a
+  `<script type="module">`) whose one `import()` is the SDK, started when Talk is pointed at or
+  focused and awaited alongside the token. Page load 179.62 → 107.79 kB gzip; the chunk
+  74.66 kB. Not a hand-written Live client (option C): about the same saving, with the wire
+  protocol ours to track. A chunk that doesn't load is `fatal: 'sdk'` with Retry, not the
+  backoff. The CSP didn't change (`script-src 'self'` covers both).
 
 - **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
   Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the

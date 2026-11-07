@@ -20,13 +20,22 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   cover the case, and keep components free of bail-outs (a one-off build with
   `reactCompilerPreset({ panicThreshold: 'all_errors' })` lists them). UI elements needing a primitive (dialog, toast, dropdown, etc.) default to Radix
   (`@radix-ui/react-*`); today that is `KnowledgeModal.jsx`'s Dialog and `FailureToast.jsx`'s Toast
-  (both `1.3.1`, which share one copy of each Radix primitive). Builds to a single IIFE
-  script mounted in a shadow root. `npm test` (vitest), `npm run build`, `npm run watch`,
+  (both `1.3.1`, which share one copy of each Radix primitive). Builds to an ES module,
+  `dist/agent-client.js` (loaded by `<script type="module">`, mounted in a shadow root), plus
+  one lazy chunk, `dist/web-<hash>.js`: the Gemini SDK, imported on Talk
+  ([ADR 0005](docs/adr/0005-load-the-gemini-sdk-on-talk.md)). `vite.config.js` is an app build
+  with a JS entry, not lib mode (lib mode never minifies an ES build's whitespace). `npm test` (vitest), `npm run build`, `npm run watch`,
   `npm run lint`, `npm run typecheck`, `npm run check` (lint + typecheck + test + build).
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested. Each successful action's
     tool response carries the page after it as `page` (#25): the bridge's settled snapshot,
     held because a batch is running.
+  - `liveSdk.js` — the one `import('@google/genai/web')` (ADR 0005): loaded once, a failed
+    load forgotten so Retry imports again (`SdkLoadError`); `preloadLiveSdk()` runs when Talk
+    is pointed at or focused. `liveSession.js` awaits it in parallel with the token request; a
+    chunk that doesn't load is `failed` with `fatal: 'sdk'` (Retry, no backoff). Nothing else
+    may import the SDK as a value (`liveSdk.test.js`, `e2e/sdk.spec.js`); JSDoc `@import`
+    types are fine.
   - `useLiveAgent.js` — thin React glue: wires `liveSession` and `audioIO.js` (mic capture,
     playback, barge-in) into React state; owns teardown on unmount. Talk first checks for a
     secure context and AudioWorklet (`voiceSupportError()`), and opens no session without them.
@@ -92,9 +101,10 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     under `prefers-reduced-motion: reduce`), and the host's own `position: fixed`, `z-index` and
     `display: block`. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
     as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
-  - `clientLog.js` — the client log (spec R23): `startClientLog({ nonce, scriptUrl })`, called
+  - `clientLog.js` — the client log (spec R23): `startClientLog({ nonce, bundleBase })`, called
     once per page by `main.jsx` before the mount, listens for window `error` /
-    `unhandledrejection` thrown from this bundle's own script URL, reports LCP, INP and CLS
+    `unhandledrejection` thrown from a file under the bundle's directory (the entry and the
+    SDK chunk), reports LCP, INP and CLS
     through `web-vitals` (only those three imported, for the bundle budget), and returns the
     reporter `main.jsx` passes to `AgentApp` as `onFailure`; `useLiveAgent` calls it from
     `onStatusChange` once per `failed` (the failures `failureCount` counts). Each report is a
@@ -106,7 +116,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     report builders are pure.
     `web-vitals` is the agent-client's one runtime dependency beyond React, Radix and the
     Gemini SDK, pinned to 5.3.0: 6.x adds ~0.9 kB gzip of soft-navigation support this page
-    never uses, which the 180 kB budget couldn't take.
+    never uses (the 180 kB budget couldn't take it before ADR 0005 moved the SDK out of the
+    page load; the page-load bundle is now ~108 kB).
   - Pure helpers: `actionTools.js`, `domSnapshotContext.js`, `loopGuard.js`, `pcm.js`,
     `knowledgeStore.js`, `transcript.js`.
   - `liveModel.json` — the one Live model name, imported by `liveSession.js` and by
@@ -159,7 +170,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   page), `style-src 'self' 'unsafe-inline'` (runtime `<style>` from the shadow root and Radix),
   `connect-src` adds the Gemini `wss:`/`https:` origins (its `'self'` covers the client-log
   beacons), `frame-src 'self'`, `img-src 'self'
-  data:`; `script-src 'self'` also covers the same-origin capture worklet (no `blob:`); the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
+  data:`; `script-src 'self'` also covers the same-origin capture worklet and the module
+  bundle's lazy SDK chunk (no `blob:`); the sandbox page's one inline `<script>` is the `#ds-routes` JSON data block, which
   never runs; HSTS and `upgrade-insecure-requests` only when `NODE_ENV=production`. Any change that
   adds a resource type updates the CSP in the same commit.
 - `render.yaml` — the Render Blueprint (ADR 0003): one free Node web service built from the
@@ -216,7 +228,8 @@ also runs `tsc -p jsconfig.worklet.json` for the capture worklet (ES lib plus a 
 AudioWorkletGlobalScope shim, so no DOM names leak into it or its names into `src/`).
 agent-client's config also covers `sandbox/bridge.js` (`// @ts-check`); it excludes
 `src/__tests__/` for now. The page nonce is no longer a window global: `main.jsx` reads it off
-its own script tag's `data-ds-nonce` and passes it down as a prop. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
+its own script tag's `data-ds-nonce` (the `document.scripts` entry whose `src` is
+`import.meta.url`: a module script has no `document.currentScript`) and passes it down as a prop. No `any`, no `@ts-ignore`; a cast or `@ts-expect-error` carries a comment saying why.
 
 ## Docs map
 
@@ -269,10 +282,12 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 20 vitest files (414 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
-  card and its toast region inert while the knowledge dialog is open, restored on close),
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (423 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+  card and its toast region inert while the knowledge dialog is open, restored on close; the
+  SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
-  both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
+  both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors, the
+  SDK chunk's included,
   the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
   `sendBeacon` dropped, nothing sent once disabled or from a `token` failure on), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
@@ -282,18 +297,21 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
   oversize alert, a full-storage alert, blocked-storage alerts for Remove and the rules
   (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
-  focus, the Tab wrap both ways, Escape returning focus), `liveSession`, `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  focus, the Tab wrap both ways, Escape returning focus), `liveSdk` (one import shared, a failed one forgotten, no static
+  `@google/genai` import anywhere in `src/`), `liveSession` (incl. the SDK loading in parallel
+  with the token, and a chunk that didn't load failing at once as `sdk`), `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
   card's reason after it closes, one announcement, the keyboard walk and focus return; each
   failure reported to `onFailure` once) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (117 tests), sharing `harness.js` (`setup`, the
+  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
   capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
-  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the CSP and other headers, `/health` (and no request log line for it), the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
+  inline scripts but the `#ds-routes` block (on every sandbox URL, `<` escaped), the widget a
+  module script after `bridge.js`, the CSP and other headers, `/health` (and no request log line for it), the HTML and JSON 404s, `errorPage` escaping its arguments, the nonce cap;
   behind a trusted proxy: `X-Forwarded-Proto: https` passes the origin check, `X-Forwarded-For`
   clients get their own bucket in both limiters, and with no trusted proxy it is ignored),
   `clientLog` (`POST /api/client-log`: each report type's 204 and log line with the request
@@ -303,7 +321,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (36
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (39
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
@@ -324,6 +342,9 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   whole card, the dialog making the card inert (Chromium's accessibility tree, over CDP) and axe in
   light and dark; and at 390 px the layout-shift check — worst CLS session window ≤ 0.05 while
   the transcript grows over six turns, the newest line in view),
+  `sdk.spec.js` (3, ADR 0005: the built entry has no SDK code and both files are within the
+  spec's budgets; the page loads without the SDK chunk, a hover fetches it once, Talk connects;
+  an aborted chunk gives Can't connect with one toast and Retry, which loads it and connects),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
   `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its

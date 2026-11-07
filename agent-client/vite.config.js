@@ -17,11 +17,19 @@ export default defineConfig({
     'process.env.NODE_ENV': JSON.stringify('production'),
   },
   build: {
-    lib: {
-      entry: 'src/main.jsx',
-      name: 'AgentClient',
-      formats: ['iife'],
-      fileName: () => 'agent-client.js',
+    // An ES module, not an IIFE, so the Gemini SDK can be a chunk of its own,
+    // fetched on Talk (src/liveSdk.js, docs/adr/0005-load-the-gemini-sdk-on-talk.md).
+    // sandbox/index.html loads it with <script type="module">. An app build
+    // with a JS entry rather than lib mode: lib mode never minifies an ES
+    // build's whitespace.
+    rolldownOptions: {
+      input: 'src/main.jsx',
+      output: {
+        entryFileNames: 'agent-client.js',
+        // Hashed: a page loaded before a deploy can't pair its entry with a
+        // newer SDK chunk (it gets a 404, which liveSdk.js reports).
+        chunkFileNames: '[name]-[hash].js',
+      },
     },
     outDir: 'dist',
   },

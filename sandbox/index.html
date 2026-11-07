@@ -44,15 +44,18 @@
     </main>
     <!-- No inline script: the CSP is script-src 'self' (server/app.js). The server
          templates the page nonce into data-ds-nonce, and agent-client.js reads it off
-         its own tag (document.currentScript) while it runs. Deferred scripts keep their
-         order and run before DOMContentLoaded: bridge.js (which catches up on an iframe
-         that already loaded) before agent-client.js. -->
+         its own tag (found by import.meta.url) while it runs. agent-client.js is an ES
+         module, so it can import() the Gemini SDK chunk on Talk
+         (docs/adr/0005-load-the-gemini-sdk-on-talk.md). Module scripts are deferred,
+         and deferred and module scripts run in document order before
+         DOMContentLoaded: bridge.js (which catches up on an iframe that already
+         loaded) before agent-client.js. -->
     <!-- target-app/routes.json, templated in by the server (a JSON data block: the
          browser never runs it, so script-src 'self' holds). bridge.js reads it. -->
     <script type="application/json" id="ds-routes">
       %%DS_ROUTES%%
     </script>
     <script defer src="/sandbox/bridge.js"></script>
-    <script defer src="/agent-client/agent-client.js" data-ds-nonce="%%DS_NONCE%%"></script>
+    <script type="module" src="/agent-client/agent-client.js" data-ds-nonce="%%DS_NONCE%%"></script>
   </body>
 </html>

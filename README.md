@@ -33,7 +33,8 @@ docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle 
 target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
                  routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
-agent-client/    npm package: the React app built into a single script, mounted in a shadow root
+agent-client/    npm package: the React app built into an ES module (plus the Gemini SDK as a
+                 chunk loaded on Talk), mounted in a shadow root
 server/          npm package: mints a short-lived Gemini Live token, serves everything else
                  with a CSP and security headers (helmet), JSON request logs (pino), /health,
                  and /api/client-log for the agent-client's error and vitals beacons
@@ -50,7 +51,7 @@ cross-package scripts. `e2e/` holds the Playwright suite.
 flowchart LR
   subgraph Page["Sandbox page (server-templated, CSP, page nonce)"]
     direction LR
-    subgraph Shadow["agent-client: one IIFE in a shadow root"]
+    subgraph Shadow["agent-client: an ES module in a shadow root"]
       Card["AgentApp.jsx card<br/>Transcript, VolumeOrb,<br/>FailureToast, KnowledgeModal"] --> Hook["useLiveAgent.js"]
       Hook --> LS["liveSession.js<br/>reconnect, resumption,<br/>tool batches, loop guard"]
       Hook --> AIO["audioIO.js<br/>AudioWorklet capture,<br/>playback, barge-in"]
@@ -84,6 +85,9 @@ Decisions:
 - [ADR 0003](docs/adr/0003-hosting-on-render.md) — hosting on Render from a Blueprint.
 - [ADR 0004](docs/adr/0004-live-token-constraints.md) — the Live token is locked to the model
   only.
+- [ADR 0005](docs/adr/0005-load-the-gemini-sdk-on-talk.md) — the Gemini SDK is a chunk of its
+  own, loaded on Talk (or when Talk is pointed at or focused), not on page load: 107.8 kB gzip
+  on page load instead of 179.6.
 
 ## Run it
 
@@ -197,19 +201,20 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 5 specs, 36 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 6 specs, 39 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 20 files, 414 tests
+npm test        # vitest: 21 files, 423 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
-npm run build   # single-file IIFE bundle in agent-client/dist/, plus public/capture-worklet.js
+npm run build   # agent-client/dist/: agent-client.js (an ES module), the SDK chunk
+                # web-<hash>.js (ADR 0005), and public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 5 files, 117 tests
+npm test        # vitest + supertest: 5 files, 119 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -228,13 +233,17 @@ The suite in `agent-client/src/__tests__/`:
   during a tool batch goes out inside the next tool response (`page`), one per call of a batch; a still-attached refusal
   retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
   timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
-  on a server close; the backoff reset only after 5 s open or the first content; the two fatal
-  kinds (`config`, `token`).
+  on a server close; the backoff reset only after 5 s open or the first content; the fatal
+  kinds (`config`, `token`, and `sdk`: an SDK chunk that didn't load fails at once, with no
+  backoff, and the next connect loads it); the token requested while the SDK is still loading.
+- `liveSdk.test.js` — the SDK loader: one import shared by every caller, a failed one turned
+  into an `SdkLoadError` and forgotten so the next call imports again; no file in `src/`
+  imports `@google/genai` statically, and `liveSdk.js` is the one dynamic importer.
 - `useLiveAgent.test.jsx` — the hook and card (Testing Library): no stacked mic on a double
   Talk, plain http (or no AudioWorklet) explained with no session opened, cleanup on unmount, the button per state (a pending Cancel, End while reconnecting, Retry,
   Reload page on a rejected token, Try again and no Reload page on a `config` failure) with focus kept on it, the status line ("Can't connect" when fatal) and the mic alerts (a repeated one re-announced), any capture failure ending the session, the card a named landmark, the session's fragments coalesced into turns; the failure toast shown once per failure (not again after it closes, a new one for a new failure), the reason announced exactly once (by the toast, not a card alert), its action and Escape leaving focus on the card's button, and the Tab walk from F8.
 - `clientLog.test.js` — the client log: only the bundle's own errors and rejections reported
-  (by its script URL), with their message, source and clipped stack; a vital cut to name,
+  (by the directory it is served from, so the SDK chunk's count), with their message, source and clipped stack; a vital cut to name,
   value, rating and id; a failure's kind (`exhausted` when not fatal); one beacon per report
   with the nonce in the query and a JSON Blob, nothing without a nonce, a repeated error sent
   once, at most 10 errors and 20 reports per page, a missing or refusing `sendBeacon` dropped
@@ -272,7 +281,8 @@ The suite in `agent-client/src/__tests__/`:
   `crypto.randomUUID` (plain http), the context blob it builds.
 - `AgentApp.test.jsx` — the card in a real shadow root: it and its toast region are `inert`
   while the knowledge dialog is open (Radix's `aria-hidden` on the page never reaches into the
-  shadow root), the dialog itself isn't, and closing restores them and returns focus.
+  shadow root), the dialog itself isn't, and closing restores them and returns focus; pointing
+  at or focusing Talk starts loading the SDK, and nothing before it does.
 - `KnowledgeModal.test.jsx` — the knowledge dialog in a real shadow root: a file added, listed
   and removed (focus moves to the next Remove, or Add files), an oversize file as an alert, a
   drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
@@ -342,6 +352,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   and the knowledge button (focus ring visible), the dialog inside the viewport with the card
   inert behind it (absent from Chromium's accessibility tree, read over CDP) and back on
   Escape, and axe on the connected card in light and dark.
+- `sdk.spec.js` — the lazy SDK (ADR 0005): the built entry has no SDK code and both files are
+  within the spec's budgets; the page loads without the SDK chunk, pointing at Talk fetches it
+  once, and Talk connects (twice, one fetch); an aborted chunk ends in "Can't connect" with one
+  toast and Retry, nothing retried by itself, and Retry loads it and connects.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
@@ -407,7 +421,8 @@ Lighthouse per route in `docs/metrics/history.csv`). At the end of M7, after its
 | Lighthouse mobile on `/` (Perf / A11y / BP / SEO) | 100 / 100 / 100 / 100 (M4 started at 75 / 80) | ≥ 95 / 100 / 100 / 100 |
 | `/` mobile LCP / CLS / TBT | 0.90 s / 0 / 13 ms | ≤ 2.0 s / 0.05 / 150 ms |
 | CLS while Live, transcript growing (390 px) | 0 (was 0.151 before the M7 fix) | ≤ 0.05 |
-| `agent-client.js` gzip | 179.24 kB at M8 T4 (149.5 at M4) | ≤ 180 kB |
+| `agent-client.js` gzip, page load | 107.79 kB at M9 T1, the SDK loaded on Talk (179.62 before; 149.5 at M4) | ≤ 180 kB |
+| Gemini SDK chunk gzip, loaded on Talk | 74.66 kB at M9 T1 | ≤ 80 kB |
 | axe violations, 13 states in light and dark | 0 | 0 |
 | React commits per second while the orb animates | 0 | ~0 |
 | Live e2e: six-step task success | 4 of 5 runs | ≥ 4 of 5 |

@@ -204,6 +204,22 @@ describe('the sandbox page', () => {
     },
   );
 
+  // The widget is an ES module (docs/adr/0005-load-the-gemini-sdk-on-talk.md):
+  // only a module script can import() its SDK chunk on Talk. A module script
+  // is deferred, and runs after bridge.js, the deferred script before it.
+  it('loads the widget as a module script, after bridge.js', async () => {
+    const { app } = setup();
+    const res = await request(app).get('/').set('Host', HOST);
+
+    const tags = res.text.match(/<script\b[^>]*\bsrc="[^"]*"[^>]*>/g) ?? [];
+    expect(tags.map((tag) => /\bsrc="([^"]*)"/.exec(tag)?.[1])).toEqual([
+      '/sandbox/bridge.js',
+      '/agent-client/agent-client.js',
+    ]);
+    expect(tags[0]).toMatch(/\bdefer\b/);
+    expect(tags[1]).toMatch(/\btype="module"/);
+  });
+
   // Every page load issues a nonce (an hour-long map entry), so a flood of
   // page loads from one address is capped like token requests are.
   it('returns 429 past the per-IP page limit, and serves again once the window has passed', async () => {

@@ -1,7 +1,4 @@
-// Explicit /web subpath, not the bare package: the bare entry's "browser"
-// condition wasn't picked up by this build and pulled in the Node build
-// instead, which references `process` and crashes in the browser.
-import { GoogleGenAI, Modality } from '@google/genai/web';
+import { SdkLoadError, loadLiveSdk } from './liveSdk.js';
 import { CHANGE_EVENT, buildContextMessage } from './knowledgeStore.js';
 import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
@@ -15,6 +12,7 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
 /** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
 /** @import { ActionResult, Snapshot } from './bridgeProtocol.js' */
 /** @import { BridgeChannel } from './bridgeChannel.js' */
+/** @import { LiveSdk } from './liveSdk.js' */
 
 /**
  * @typedef {'connecting' | 'open' | 'reconnecting' | 'failed' | 'closed'} SessionStatus
@@ -23,8 +21,10 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * Why a `failed` can't be fixed by retrying on its own: `token` — this page's
  * token request is rejected (an expired nonce, a wrong origin), which a reload
  * fixes; `config` — the server has no key, or Google rejects it, which only
- * the site owner can fix, so a reload is no help.
- * @typedef {'config' | 'token'} FatalKind
+ * the site owner can fix, so a reload is no help; `sdk` — the Gemini SDK's
+ * chunk didn't load (liveSdk.js): the backoff is for the voice socket, so it
+ * isn't spent on a missing file, and Retry imports the chunk again.
+ * @typedef {'config' | 'token' | 'sdk'} FatalKind
  */
 /**
  * Sent with `reconnecting` and `failed` only. `fatal` marks a `failed` the
@@ -91,6 +91,7 @@ const FATAL_REASONS = {
   // stale page and the card turns Try again into Reload page.
   config:
     "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+  sdk: "The voice client couldn't load. Check your connection, then retry.",
 };
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
@@ -633,12 +634,14 @@ export function createLiveSession({
     // (an error, a close with no close frame, the setup timeout) says nothing
     // against the handle, and keeps it (M4 re-review).
     if (attemptResumed && !serverAnswered && handleRejected) resumeHandle = null;
-    if (error instanceof FatalTokenError) {
+    const fatal =
+      error instanceof FatalTokenError ? error.kind : error instanceof SdkLoadError ? 'sdk' : null;
+    if (fatal) {
       setStatus('failed', {
         attempt,
         maxAttempts: MAX_ATTEMPTS,
-        reason: FATAL_REASONS[error.kind],
-        fatal: error.kind,
+        reason: FATAL_REASONS[fatal],
+        fatal,
       });
       return;
     }
@@ -693,16 +696,21 @@ export function createLiveSession({
     serverAnswered = false;
     attemptResumed = false;
 
+    // The SDK chunk loads alongside the token (liveSdk.js), so a first Talk
+    // whose chunk isn't in yet waits for the slower of the two, not both.
     /** @type {string} */
     let token;
+    /** @type {LiveSdk} */
+    let sdk;
     try {
-      token = await fetchToken();
+      [token, sdk] = await Promise.all([fetchToken(), loadLiveSdk()]);
     } catch (error) {
       handleFailure(gen, error);
       return;
     }
     if (gen !== generation) return;
 
+    const { GoogleGenAI, Modality } = sdk;
     const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: 'v1alpha' } });
     attemptResumed = Boolean(resumeHandle);
     // The abandoned socket can't be closed from here (live.connect hasn't

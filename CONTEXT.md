@@ -56,6 +56,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 
 - **Live session** — one Gemini Live socket and its state (`agent-client/src/liveSession.js`).
   Its **status** is `connecting`, `open`, `reconnecting`, `failed` or `closed`.
+- **SDK chunk** — the Gemini SDK (`@google/genai/web`) as a file of its own,
+  `agent-client/dist/web-<hash>.js`, imported on Talk (or when Talk is pointed at or focused),
+  never on page load (`agent-client/src/liveSdk.js`,
+  [ADR 0005](docs/adr/0005-load-the-gemini-sdk-on-talk.md)). The **page-load bundle** is
+  `agent-client.js` alone.
 - **Token** — a short-lived, single-use Gemini Live credential the server mints per connect
   and per reconnect (`server/geminiMint.js`, locked to the one model in
   `agent-client/src/liveModel.json`; `/api/live-token` in `server/app.js`). The real API key
@@ -77,11 +82,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   dropped only when the server closes a resumed attempt before setup (a rejection), never on a
   network failure.
 - **Fatal failure** — a `failed` status the backoff doesn't retry (`fatal` in
-  `liveSession.js`'s `StatusDetails`), of one of two **kinds**: `token` — this page's token
+  `liveSession.js`'s `StatusDetails`), of one of three **kinds**: `token` — this page's token
   request is rejected (an expired nonce), so the card offers Reload page, which brings a fresh
   nonce; `config` — the server has no key or Google rejects it (`not_configured`), which a
-  reload can't fix, so the card offers Try again, which asks the server again. Either way with
-  the reason.
+  reload can't fix, so the card offers Try again, which asks the server again; `sdk` — the SDK
+  chunk didn't load, so the card offers Retry, which imports it again. Each with the reason.
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
   the next response (`liveSession.js`), so each successful call carries its own settled page.

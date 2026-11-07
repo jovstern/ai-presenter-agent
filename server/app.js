@@ -125,7 +125,7 @@ const ClientReport = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('connection'),
     // liveSession.js's FatalKind, or `exhausted`: the backoff ran out.
-    kind: z.enum(['config', 'token', 'exhausted']),
+    kind: z.enum(['config', 'token', 'sdk', 'exhausted']),
     reason: loggedText(200).optional(),
     attempt: z.number().int().min(0).max(100),
   }),
@@ -481,9 +481,10 @@ export function createApp({
     }),
   );
 
-  // Before every route: the agent-client bundle is ~620 kB raw and ~150 kB
-  // gzipped, and serving it uncompressed made it the page's LCP bottleneck (M4
-  // metrics, docs/metrics/m04.md: mobile LCP 4.26 s → 1.86 s with gzip).
+  // Before every route: the agent-client bundle is ~335 kB raw on page load
+  // (plus its ~400 kB SDK chunk on Talk, ADR 0005), and serving it uncompressed
+  // made it the page's LCP bottleneck (M4 metrics, docs/metrics/m04.md:
+  // mobile LCP 4.26 s → 1.86 s with gzip).
   app.use(compression());
 
   app.get('/health', (req, res) => {

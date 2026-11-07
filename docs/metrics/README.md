@@ -4,6 +4,10 @@ Two kinds of numbers are kept here:
 
 - **Milestone reports** (`m<NN>.md`, `history.csv`) — the observer's per-milestone run against
   the spec's budgets: Lighthouse, Core Web Vitals, bundle size, axe, gate latency, console errors.
+  Since M9 T1 the bundle is two files ([ADR 0005](../adr/0005-load-the-gemini-sdk-on-talk.md)):
+  `agent-client.js`, the page-load bundle (the `js_kb` column and the 180 kB budget), and the
+  Gemini SDK chunk `web-<hash>.js`, loaded on Talk (its own 80 kB budget). Vite's build output
+  gives both gzip sizes; `e2e/sdk.spec.js` checks both budgets on every e2e run.
   How they are measured is in `.claude/skills/metrics/SKILL.md`.
 - **App metrics** — how the voice agent itself performs against the real Gemini Live API,
   measured by the opt-in live e2e described below. The budgets are in

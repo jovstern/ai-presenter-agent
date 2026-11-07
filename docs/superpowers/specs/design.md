@@ -337,7 +337,8 @@ The kit defaults apply on `/`.
 | TBT | ≤ 150 ms |
 | axe violations | 0 |
 | Console errors in e2e | 0 |
-| `agent-client.js` | ≤ 180 kB gzip (162.15 after M6). Raised from the kit's 150 to 165 by the user at approval (2026-10-28), then to 180 on 2026-11-05 (option A of the M6 bundle breakdown, `docs/metrics/m06.md`): the Gemini SDK is 74 kB of the bundle, and M7 adds a toast, an orb and web-vitals to an IIFE build that can't code-split |
+| `agent-client.js`, the page-load bundle | ≤ 180 kB gzip: 107.79 since M9 T1 (179.62 before; 162.15 after M6). Raised from the kit's 150 to 165 by the user at approval (2026-10-28), then to 180 on 2026-11-05 (option A of the M6 bundle breakdown, `docs/metrics/m06.md`). In M9 (issue #20) the Gemini SDK moved out of the page load into a chunk imported on Talk ([ADR 0005](../../adr/0005-load-the-gemini-sdk-on-talk.md)): the widget is an ES module now, not an IIFE, and the budget is kept as headroom |
+| `web-<hash>.js`, the Gemini SDK chunk, loaded on Talk (or on pointing at / focusing it) | ≤ 80 kB gzip (74.66 at M9 T1); its download sits inside the connect budget below. `e2e/sdk.spec.js` checks both rows on every build |
 | `/api/live-token` p95, warm local, excluding the Gemini mint call | ≤ 50 ms for the gate rejections |
 
 App metrics, from the live e2e, averaged over 5 runs:
