@@ -2,13 +2,42 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { AgentApp } from '../AgentApp.jsx';
+import { startCapture, voiceSupportError } from '../audioIO.js';
+import { defined, elementOf } from './defined.js';
+
+/**
+ * @import { Mock } from 'vitest'
+ * @import { LiveSessionOptions, SessionStatus, StatusDetails } from '../liveSession.js'
+ */
+/**
+ * @typedef {{
+ *   options: LiveSessionOptions,
+ *   connect: Mock<() => Promise<void>>,
+ *   disconnect: Mock<() => void>,
+ *   dispose: Mock<() => void>,
+ *   sendAudioFrame: Mock<(base64Frame: string) => void>,
+ * }} FakeSession
+ * @typedef {{ ready: Promise<void>, stop: Mock<() => void>, getLevel: () => number }} FakeCapture
+ * @typedef {{
+ *   enqueue: Mock<(float32: Float32Array<ArrayBuffer>) => void>,
+ *   interrupt: Mock<() => void>,
+ *   close: Mock<() => void>,
+ *   getLevel: () => number,
+ * }} FakePlayer
+ * @typedef {{ sessions: FakeSession[], captures: FakeCapture[], players: FakePlayer[], events: string[] }} Fakes
+ */
 
 // Every createLiveSession / startCapture / createPlayer call is recorded with
 // an ordered event log, so tests can assert what happened before what.
-const fakes = vi.hoisted(() => ({ sessions: [], captures: [], players: [], events: [] }));
+const fakes = vi.hoisted(() => {
+  /** @type {Fakes} */
+  const recorded = { sessions: [], captures: [], players: [], events: [] };
+  return recorded;
+});
 
 vi.mock('../liveSession.js', () => ({
-  createLiveSession: vi.fn((options) => {
+  createLiveSession: vi.fn((/** @type {LiveSessionOptions} */ options) => {
+    /** @type {FakeSession} */
     const session = {
       options,
       connect: vi.fn(async () => {
@@ -28,9 +57,12 @@ vi.mock('../audioIO.js', () => ({
   startCapture: vi.fn(() => {
     const n = fakes.captures.length;
     fakes.events.push(`startCapture#${n}`);
+    /** @type {FakeCapture} */
     const capture = {
       ready: Promise.resolve(),
-      stop: vi.fn(() => fakes.events.push(`capture#${n}.stop`)),
+      stop: vi.fn(() => {
+        fakes.events.push(`capture#${n}.stop`);
+      }),
       getLevel: () => 0,
     };
     fakes.captures.push(capture);
@@ -38,10 +70,13 @@ vi.mock('../audioIO.js', () => ({
   }),
   createPlayer: vi.fn(() => {
     const n = fakes.players.length;
+    /** @type {FakePlayer} */
     const player = {
       enqueue: vi.fn(),
       interrupt: vi.fn(),
-      close: vi.fn(() => fakes.events.push(`player#${n}.close`)),
+      close: vi.fn(() => {
+        fakes.events.push(`player#${n}.close`);
+      }),
       getLevel: () => 0,
     };
     fakes.players.push(player);
@@ -62,7 +97,12 @@ function fakeBridge() {
 function renderApp(bridge = fakeBridge()) {
   const utils = render(
     <StrictMode>
-      <AgentApp bridge={bridge} nonce="page-nonce" workletUrl="/agent-client/capture-worklet.js" />
+      <AgentApp
+        bridge={bridge}
+        nonce="page-nonce"
+        workletUrl="/agent-client/capture-worklet.js"
+        portalContainer={document.body}
+      />
     </StrictMode>,
   );
   return { bridge, ...utils };
@@ -70,11 +110,19 @@ function renderApp(bridge = fakeBridge()) {
 
 // The card's own controls, by the spec's names (Screens): the failure toast
 // renders outside the card, in its own region, and may repeat a label.
-const TALK = 'Talk to the presenter';
+const TALK = 'Talk to the AI Presenter';
 const card = () => screen.getByRole('complementary', { name: 'AI presenter' });
-const cardButton = (name) => within(card()).getByRole('button', { name });
+/** @param {string | RegExp} name */
+const cardButton = (name) => {
+  const button = within(card()).getByRole('button', { name });
+  if (!(button instanceof HTMLButtonElement)) throw new Error(`${name} is not a <button>`);
+  return button;
+};
 const statusLine = () => within(card()).getByRole('status');
+// The volume orb: decorative (aria-hidden), so found by its class.
+const orb = () => elementOf(card().querySelector('.volume-orb'), HTMLElement);
 
+/** @param {string | RegExp} name */
 async function click(name) {
   await act(async () => {
     fireEvent.click(cardButton(name));
@@ -85,9 +133,24 @@ async function click(name) {
 const toasts = () =>
   within(screen.getByRole('region', { name: 'Notifications (F8)' })).queryAllByRole('listitem');
 
+/**
+ * @param {SessionStatus} status
+ * @param {StatusDetails} [details]
+ */
 function emitStatus(status, details) {
-  const session = fakes.sessions.at(-1);
-  act(() => session.options.onStatusChange(status, details));
+  const session = lastSession();
+  act(() => defined(session.options.onStatusChange, 'onStatusChange')(status, details));
+}
+
+const lastSession = () => defined(fakes.sessions.at(-1), 'a session');
+
+// The first session's transcript callbacks, which useLiveAgent always passes.
+function transcriptHandlers() {
+  const { onTranscript, onTurnEnd } = fakes.sessions[0].options;
+  return {
+    onTranscript: defined(onTranscript, 'onTranscript'),
+    onTurnEnd: defined(onTurnEnd, 'onTurnEnd'),
+  };
 }
 
 beforeEach(() => {
@@ -103,7 +166,7 @@ afterEach(() => {
 });
 
 describe('AgentApp + useLiveAgent', () => {
-  it('starts idle with an enabled Talk to the presenter button', () => {
+  it('starts idle with an enabled Talk to the AI Presenter button', () => {
     renderApp();
     expect(cardButton(TALK).disabled).toBe(false);
   });
@@ -115,7 +178,6 @@ describe('AgentApp + useLiveAgent', () => {
   });
 
   it('hands the worklet URL from main.jsx to the mic capture', async () => {
-    const { startCapture } = await import('../audioIO.js');
     renderApp();
     await click(TALK);
     expect(startCapture).toHaveBeenLastCalledWith(
@@ -124,8 +186,7 @@ describe('AgentApp + useLiveAgent', () => {
   });
 
   it('over plain http, says voice needs https and opens no session', async () => {
-    const { voiceSupportError } = await import('../audioIO.js');
-    voiceSupportError.mockReturnValueOnce(
+    vi.mocked(voiceSupportError).mockReturnValueOnce(
       Object.assign(new Error('insecure'), { name: 'InsecureContextError' }),
     );
     renderApp();
@@ -141,8 +202,7 @@ describe('AgentApp + useLiveAgent', () => {
   });
 
   it('without AudioWorklet, names a browser that can capture voice', async () => {
-    const { voiceSupportError } = await import('../audioIO.js');
-    voiceSupportError.mockReturnValueOnce(
+    vi.mocked(voiceSupportError).mockReturnValueOnce(
       Object.assign(new Error('no worklet'), { name: 'AudioUnsupportedError' }),
     );
     renderApp();
@@ -229,6 +289,7 @@ describe('AgentApp + useLiveAgent', () => {
           bridge={fakeBridge()}
           nonce="page-nonce"
           workletUrl="/agent-client/capture-worklet.js"
+          portalContainer={document.body}
           onFailure={onFailure}
         />
       </StrictMode>,
@@ -265,7 +326,10 @@ describe('AgentApp + useLiveAgent', () => {
 
     const button = cardButton('End');
     expect(button.disabled).toBe(false);
+    expect(button.dataset.variant).toBe('secondary'); // outline, the stop action
     expect(statusLine().textContent).toBe('Reconnecting (attempt 2 of 6)…');
+    // The orb pulses in CSS while reconnecting (VolumeOrb.jsx).
+    expect(orb().dataset.reconnecting).toBe('true');
     // Reconnecting keeps the mic: the session will resume onto it.
     expect(fakes.captures[0].stop).not.toHaveBeenCalled();
 
@@ -343,7 +407,8 @@ describe('AgentApp + useLiveAgent', () => {
     button.focus();
     await click(TALK);
 
-    for (const [status, details, label] of [
+    /** @type {[SessionStatus, StatusDetails | undefined, string][]} */
+    const steps = [
       ['connecting', undefined, 'Cancel'],
       ['reconnecting', { attempt: 1, maxAttempts: 6 }, 'End'],
       [
@@ -351,7 +416,8 @@ describe('AgentApp + useLiveAgent', () => {
         { attempt: 6, maxAttempts: 6, reason: 'Could not reconnect after 6 attempts.' },
         'Retry',
       ],
-    ]) {
+    ];
+    for (const [status, details, label] of steps) {
       emitStatus(status, details);
       expect(document.activeElement).toBe(button);
       expect(button.textContent).toBe(label);
@@ -360,18 +426,20 @@ describe('AgentApp + useLiveAgent', () => {
   });
 
   it('ends the session when the microphone is blocked, so the guidance to press Talk is true', async () => {
-    const { startCapture } = await import('../audioIO.js');
     const stop = vi.fn();
     // getUserMedia rejects after connect() has started, as in a real browser.
-    startCapture.mockImplementationOnce(({ onError }) => {
+    vi.mocked(startCapture).mockImplementationOnce(({ onError }) => {
       const ready = Promise.resolve().then(() =>
-        onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
+        defined(
+          onError,
+          'onError',
+        )(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
       );
-      return { ready, stop };
+      return { ready, stop, getLevel: () => 0 };
     });
     renderApp();
     await click(TALK);
-    const session = fakes.sessions.at(-1);
+    const session = lastSession();
     await act(async () => {});
 
     expect(session.disconnect).toHaveBeenCalled();
@@ -379,7 +447,7 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('closed');
     expect(cardButton(TALK)).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
+      'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.',
     );
   });
 
@@ -390,19 +458,19 @@ describe('AgentApp + useLiveAgent', () => {
     [
       'the worklet failing to load',
       Object.assign(new Error("Unable to load a worklet's module."), { name: 'WorkletLoadError' }),
-      "Voice couldn't start. Reload the page, then press Talk to the presenter.",
+      "Voice couldn't start. Reload the page, then press Talk to the AI Presenter.",
     ],
     [
       'the browser never starting audio',
       Object.assign(new Error('The browser did not start audio in time.'), {
         name: 'AudioResumeTimeoutError',
       }),
-      "Voice couldn't start: the browser kept audio paused. Press Talk to the presenter to try again.",
+      "Voice couldn't start: the browser kept audio paused. Press Talk to the AI Presenter to try again.",
     ],
     [
       'no microphone',
       Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
-      'No microphone found. Connect one, then press Talk to the presenter.',
+      'No microphone found. Connect one, then press Talk to the AI Presenter.',
     ],
     [
       'the microphone busy',
@@ -410,15 +478,14 @@ describe('AgentApp + useLiveAgent', () => {
       'Microphone unavailable: Could not start audio source',
     ],
   ])('ends the session when capture fails with %s', async (_name, error, text) => {
-    const { startCapture } = await import('../audioIO.js');
     const stop = vi.fn();
-    startCapture.mockImplementationOnce(({ onError }) => {
-      const ready = Promise.resolve().then(() => onError(error));
-      return { ready, stop };
+    vi.mocked(startCapture).mockImplementationOnce(({ onError }) => {
+      const ready = Promise.resolve().then(() => defined(onError, 'onError')(error));
+      return { ready, stop, getLevel: () => 0 };
     });
     renderApp();
     await click(TALK);
-    const session = fakes.sessions.at(-1);
+    const session = lastSession();
     await act(async () => {});
 
     expect(session.disconnect).toHaveBeenCalled();
@@ -429,13 +496,16 @@ describe('AgentApp + useLiveAgent', () => {
   });
 
   it('re-announces an identical microphone error after Talk: the alert is a new node', async () => {
-    const { startCapture } = await import('../audioIO.js');
     const blocked = () =>
-      startCapture.mockImplementationOnce(({ onError }) => ({
+      vi.mocked(startCapture).mockImplementationOnce(({ onError }) => ({
         ready: Promise.resolve().then(() =>
-          onError(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
+          defined(
+            onError,
+            'onError',
+          )(Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' })),
         ),
         stop: vi.fn(),
+        getLevel: () => 0,
       }));
     blocked();
     renderApp();
@@ -455,7 +525,7 @@ describe('AgentApp + useLiveAgent', () => {
   it('is a landmark named "AI presenter", so its transcript is inside a region', async () => {
     renderApp();
     await click(TALK);
-    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    act(() => transcriptHandlers().onTranscript({ role: 'agent', text: 'Hello!' }));
     expect(within(card()).getByRole('region', { name: 'Transcript' }).textContent).toBe(
       'Presenter: Hello!',
     );
@@ -464,7 +534,7 @@ describe('AgentApp + useLiveAgent', () => {
   it("coalesces the session's fragments into turns, spacing a turn the same speaker continues", async () => {
     renderApp();
     await click(TALK);
-    const { onTranscript, onTurnEnd } = fakes.sessions[0].options;
+    const { onTranscript, onTurnEnd } = transcriptHandlers();
     act(() => {
       onTranscript({ role: 'agent', text: 'Hello' });
       onTranscript({ role: 'agent', text: ' there!' });
@@ -485,7 +555,7 @@ describe('AgentApp + useLiveAgent', () => {
     expect(screen.queryByRole('region', { name: 'Transcript' })).toBeNull();
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
 
-    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    act(() => transcriptHandlers().onTranscript({ role: 'agent', text: 'Hello!' }));
     expect(screen.getByRole('region', { name: 'Transcript' }).textContent).toBe(
       'Presenter: Hello!',
     );
@@ -507,6 +577,8 @@ describe('AgentApp + useLiveAgent', () => {
     await click(TALK);
     emitStatus('open');
     expect(statusLine().textContent).toBe('Live');
+    expect(cardButton('End').dataset.variant).toBe('secondary');
+    expect(orb().hasAttribute('data-reconnecting')).toBe(false);
     await click('End');
     expect(fakes.sessions[0].disconnect).toHaveBeenCalled();
     expect(fakes.captures[0].stop).toHaveBeenCalled();
@@ -525,6 +597,7 @@ describe('the failure toast', () => {
 
   // Every live region whose text includes `text`: role alert or status, or an
   // aria-live other than off.
+  /** @param {string} text */
   function liveRegionsWith(text) {
     return [...document.querySelectorAll('[role="alert"], [role="status"], [aria-live]')].filter(
       (node) => node.getAttribute('aria-live') !== 'off' && node.textContent.includes(text),
@@ -613,7 +686,7 @@ describe('the failure toast', () => {
     });
     expect(toasts()).toHaveLength(0);
 
-    act(() => fakes.sessions[0].options.onTranscript({ role: 'agent', text: 'Hello!' }));
+    act(() => transcriptHandlers().onTranscript({ role: 'agent', text: 'Hello!' }));
     expect(toasts()).toHaveLength(0);
     expect(statusLine().textContent).toBe('Connection lost');
   });
@@ -676,13 +749,16 @@ describe('the failure toast', () => {
     fireEvent.keyDown(document, { key: 'F8', code: 'F8' });
     expect(document.activeElement).toBe(viewport);
     for (const next of [toast, dismiss, button]) {
-      fireEvent.keyDown(document.activeElement, { key: 'Tab' });
+      fireEvent.keyDown(defined(document.activeElement, 'the focus'), { key: 'Tab' });
       expect(document.activeElement).toBe(next);
     }
 
     dismiss.focus();
     for (const previous of [toast, button]) {
-      fireEvent.keyDown(document.activeElement, { key: 'Tab', shiftKey: true });
+      fireEvent.keyDown(defined(document.activeElement, 'the focus'), {
+        key: 'Tab',
+        shiftKey: true,
+      });
       expect(document.activeElement).toBe(previous);
     }
     expect(toasts()).toHaveLength(1);

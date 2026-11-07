@@ -50,12 +50,14 @@ const clip = (text, max) => text.slice(0, max);
 /**
  * A report for a window `error` event, or null when the error isn't from
  * this bundle: the host page and its other scripts are not ours to report.
+ * The bundle is its entry and the SDK chunk it loads on Talk (liveSdk.js),
+ * both served from one directory, so an error counts by its file's prefix.
  * @param {ErrorEvent} event
- * @param {string} scriptUrl This bundle's URL (main.jsx).
+ * @param {string} bundleBase The directory URL the bundle is served from (main.jsx).
  * @returns {ErrorReport | null}
  */
-export function errorEventReport(event, scriptUrl) {
-  if (!scriptUrl || event.filename !== scriptUrl) return null;
+export function errorEventReport(event, bundleBase) {
+  if (!bundleBase || !event.filename?.startsWith(bundleBase)) return null;
   const { error } = event;
   /** @type {ErrorReport} */
   const report = {
@@ -69,13 +71,13 @@ export function errorEventReport(event, scriptUrl) {
 
 /**
  * A report for an `unhandledrejection`, or null unless the reason is an
- * Error thrown from this bundle (its stack names the bundle's URL).
+ * Error thrown from this bundle (its stack names one of the bundle's files).
  * @param {unknown} reason
- * @param {string} scriptUrl
+ * @param {string} bundleBase
  * @returns {ErrorReport | null}
  */
-export function rejectionReport(reason, scriptUrl) {
-  if (!scriptUrl || !(reason instanceof Error) || !reason.stack?.includes(scriptUrl)) return null;
+export function rejectionReport(reason, bundleBase) {
+  if (!bundleBase || !(reason instanceof Error) || !reason.stack?.includes(bundleBase)) return null;
   return {
     type: 'error',
     message: clip(`Unhandled rejection: ${String(reason)}`, MESSAGE_MAX),
@@ -152,18 +154,18 @@ export function createClientLog({ nonce, send = sendBeacon }) {
 /**
  * Starts the client log for this page: the error listeners and the vitals.
  * Called once, by main.jsx.
- * @param {{ nonce: string, scriptUrl: string, send?: SendReport }} options
+ * @param {{ nonce: string, bundleBase: string, send?: SendReport }} options
  * @returns {(details: StatusDetails) => void} Reports one `failed` connection; a
  *   `token` failure (the server refused the page's token request) is not sent and stops the log.
  */
-export function startClientLog({ nonce, scriptUrl, send }) {
+export function startClientLog({ nonce, bundleBase, send }) {
   const { report, disable } = createClientLog({ nonce, send });
   window.addEventListener('error', (event) => {
-    const errorReport = errorEventReport(event, scriptUrl);
+    const errorReport = errorEventReport(event, bundleBase);
     if (errorReport) report(errorReport);
   });
   window.addEventListener('unhandledrejection', (event) => {
-    const errorReport = rejectionReport(event.reason, scriptUrl);
+    const errorReport = rejectionReport(event.reason, bundleBase);
     if (errorReport) report(errorReport);
   });
   /** @param {LCPMetric | INPMetric | CLSMetric} metric */

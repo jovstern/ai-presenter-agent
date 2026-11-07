@@ -1,7 +1,4 @@
-// Explicit /web subpath, not the bare package: the bare entry's "browser"
-// condition wasn't picked up by this build and pulled in the Node build
-// instead, which references `process` and crashes in the browser.
-import { GoogleGenAI, Modality } from '@google/genai/web';
+import { SdkLoadError, loadLiveSdk } from './liveSdk.js';
 import { CHANGE_EVENT, buildContextMessage } from './knowledgeStore.js';
 import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
@@ -15,6 +12,7 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
 /** @import { FunctionCall, LiveServerMessage, Session } from '@google/genai/web' */
 /** @import { ActionResult, Snapshot } from './bridgeProtocol.js' */
 /** @import { BridgeChannel } from './bridgeChannel.js' */
+/** @import { LiveSdk } from './liveSdk.js' */
 
 /**
  * @typedef {'connecting' | 'open' | 'reconnecting' | 'failed' | 'closed'} SessionStatus
@@ -23,8 +21,10 @@ import LIVE_MODEL from './liveModel.json' with { type: 'json' };
  * Why a `failed` can't be fixed by retrying on its own: `token` — this page's
  * token request is rejected (an expired nonce, a wrong origin), which a reload
  * fixes; `config` — the server has no key, or Google rejects it, which only
- * the site owner can fix, so a reload is no help.
- * @typedef {'config' | 'token'} FatalKind
+ * the site owner can fix, so a reload is no help; `sdk` — the Gemini SDK's
+ * chunk didn't load (liveSdk.js): the backoff is for the voice socket, so it
+ * isn't spent on a missing file, and Retry imports the chunk again.
+ * @typedef {'config' | 'token' | 'sdk'} FatalKind
  */
 /**
  * Sent with `reconnecting` and `failed` only. `fatal` marks a `failed` the
@@ -91,6 +91,7 @@ const FATAL_REASONS = {
   // stale page and the card turns Try again into Reload page.
   config:
     "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
+  sdk: "The voice client couldn't load. Check your connection, then retry or reload the page.",
 };
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 
@@ -153,13 +154,22 @@ const SYSTEM_INSTRUCTION =
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
+// The agent's one voice (issue #29): unset, it is the server's default, so
+// nothing in the session says it stays the same. Kore is the voice Google's
+// Live API guide sets in its own example (speechConfig.voiceConfig.
+// prebuiltVoiceConfig.voiceName; native audio models take any of the TTS
+// voices), checked in the live e2e (docs/metrics/README.md).
+export const VOICE_NAME = 'Kore';
+
 // The error a refused action answers with. A loop (loopGuard.check) is the
 // same action on the same page, or a cycle of two or three different
 // actions, so one action repeated while it moves the page on never gets it;
-// past the request's budget (loopGuard.spendAction) the model is told to
-// check in, not that it repeated.
+// past the request's budget (loopGuard.spendAction) the model is told the
+// count, not that it repeated. Both end the same way (#28): stop, say what was
+// done, ask the user. A repeat the user really asked for then costs one
+// question; "try something different" sent the model off on its own instead.
 const LOOP_REFUSAL =
-  'This action has repeated too many times, alone or in a cycle with your last few — try something different.';
+  'This repeats your last few actions (the same action on the same page, or a cycle with the ones before it), so it was not done. Stop here, tell the user what you have done so far, and ask the user whether to go on.';
 const BUDGET_REFUSAL = `That is ${ACTION_BUDGET} actions since the user last spoke. Stop here, tell the user what you have done so far, and ask the user whether to go on.`;
 
 // Sent once per utterance-loop episode (loopGuard.checkUtterance).
@@ -633,12 +643,14 @@ export function createLiveSession({
     // (an error, a close with no close frame, the setup timeout) says nothing
     // against the handle, and keeps it (M4 re-review).
     if (attemptResumed && !serverAnswered && handleRejected) resumeHandle = null;
-    if (error instanceof FatalTokenError) {
+    const fatal =
+      error instanceof FatalTokenError ? error.kind : error instanceof SdkLoadError ? 'sdk' : null;
+    if (fatal) {
       setStatus('failed', {
         attempt,
         maxAttempts: MAX_ATTEMPTS,
-        reason: FATAL_REASONS[error.kind],
-        fatal: error.kind,
+        reason: FATAL_REASONS[fatal],
+        fatal,
       });
       return;
     }
@@ -693,16 +705,21 @@ export function createLiveSession({
     serverAnswered = false;
     attemptResumed = false;
 
+    // The SDK chunk loads alongside the token (liveSdk.js), so a first Talk
+    // whose chunk isn't in yet waits for the slower of the two, not both.
     /** @type {string} */
     let token;
+    /** @type {LiveSdk} */
+    let sdk;
     try {
-      token = await fetchToken();
+      [token, sdk] = await Promise.all([fetchToken(), loadLiveSdk()]);
     } catch (error) {
       handleFailure(gen, error);
       return;
     }
     if (gen !== generation) return;
 
+    const { GoogleGenAI, Modality, Behavior } = sdk;
     const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: 'v1alpha' } });
     attemptResumed = Boolean(resumeHandle);
     // The abandoned socket can't be closed from here (live.connect hasn't
@@ -745,9 +762,23 @@ export function createLiveSession({
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
           inputAudioTranscription: {},
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_NAME } } },
           systemInstruction: SYSTEM_INSTRUCTION,
           sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
-          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+          // BLOCKING (issue #29): the model waits for each action's result
+          // before it goes on, which the act → observe → narrate loop needs.
+          // The Live API's documented default on gemini-3.8-live, but the
+          // declaration's own default is "keep the current behavior", so it is
+          // said, not assumed. A blocking call's response takes no
+          // `scheduling` (the SDK ignores it for anything but NON_BLOCKING).
+          tools: [
+            {
+              functionDeclarations: TOOL_DECLARATIONS.map((declaration) => ({
+                ...declaration,
+                behavior: Behavior.BLOCKING,
+              })),
+            },
+          ],
         },
       });
 

@@ -8,14 +8,17 @@
 /** @import { Snapshot, SnapshotNode } from './bridgeProtocol.js' */
 
 /**
- * What to tell the model about one snapshot.
- * @typedef {{ type: 'keyframe', nodes: SnapshotNode[] }
+ * What to tell the model about one snapshot. A keyframe's `omitted` is the
+ * bridge's count of elements left out on a page over its cap (0 otherwise).
+ * @typedef {{ type: 'keyframe', nodes: SnapshotNode[], omitted: number }
  *   | { type: 'delta', changed: SnapshotNode[], removed: string[] }} SnapshotDecision
  */
 
-// Kept at 0.6 in M6 T5: a delta that covers 60 % of the nodes costs about as
-// much as the keyframe that also resets the model's view. The target app's
-// deltas are 1–2 of 8 nodes and never reach it (docs/metrics/m06.md).
+// Kept at 0.6 in M6 T5 and M9 T6: a delta that covers 60 % of the nodes costs
+// about as much as the keyframe that also resets the model's view. On the
+// Orders page (issue #22) a tick, a ship or a fill changes 1–3 of 30 nodes
+// (0.03–0.1), and ticking then shipping five rows 6 (0.2); only a scroll goes
+// past it (docs/metrics/README.md).
 const FULL_REFRESH_RATIO = 0.6;
 
 export function createDomSnapshotContext() {
@@ -32,15 +35,22 @@ export function createDomSnapshotContext() {
    * @param {Snapshot} snapshot As broadcast by bridge.js.
    * @returns {SnapshotDecision}
    */
-  function decide({ full, changed, removed }) {
+  function decide({ full, changed, removed, omitted = 0 }) {
     const totalDelta = changed.length + removed.length;
     const deltaCoversMost = full.length > 0 && totalDelta / full.length >= FULL_REFRESH_RATIO;
-    const useKeyframe = !hasSentAny || forceKeyframe || deltaCoversMost;
+    // On a page over the bridge's cap, a node leaves the snapshot when a
+    // scroll moves it away, not only when the page drops it: a delta's
+    // `removed` would tell the model it is gone. A keyframe says what is in
+    // view, and that more exists.
+    const scrolledOut = omitted > 0 && removed.length > 0;
+    const useKeyframe = !hasSentAny || forceKeyframe || deltaCoversMost || scrolledOut;
 
     hasSentAny = true;
     forceKeyframe = false;
 
-    return useKeyframe ? { type: 'keyframe', nodes: full } : { type: 'delta', changed, removed };
+    return useKeyframe
+      ? { type: 'keyframe', nodes: full, omitted }
+      : { type: 'delta', changed, removed };
   }
 
   return { decide, markNavigated };
@@ -49,7 +59,9 @@ export function createDomSnapshotContext() {
 /** @param {SnapshotDecision} decision */
 export function formatSnapshotMessage(decision) {
   if (decision.type === 'keyframe') {
-    return `Page snapshot (full):\n${JSON.stringify(decision.nodes)}`;
+    const snapshot = `Page snapshot (full):\n${JSON.stringify(decision.nodes)}`;
+    if (decision.omitted === 0) return snapshot;
+    return `${snapshot}\nThe page has ${decision.omitted} more elements not listed: off screen or hidden. To reach one off screen, scroll to the listed element nearest it (the first or the last), then look again.`;
   }
   return `Page snapshot (delta) — changed:\n${JSON.stringify(decision.changed)}\nremoved:\n${JSON.stringify(decision.removed)}`;
 }

@@ -678,6 +678,42 @@ without the deploy; this task moved to #23, done from `master` after the merge.*
 
 *(small, 6 min)*
 
+
+---
+
+## M9 — Wrap-up (one PR; branch `m9-wrap-up`)
+
+The user's call (2026-11-07): close every open issue in one PR without stopping for approval,
+except going live. **#23 (go live on Render) is the last task of the project and is not
+started until the user asks for it by name.** #19's real-browser half needs the deployed site
+and a real mic, so it moves with #23.
+
+**Demo flow:** the agent counts to 10 with no doubled answer; the card's End button is outline;
+the knowledge dialog fades in; the orb pulses while reconnecting.
+
+**T1 — Bundle headroom (#20).** The user delegated the architecture choice. Load the Gemini SDK
+only when Talk is pressed (option D), or the cheapest correct alternative the measurements
+favour; an ADR records it. Page-load bundle well under budget; first-Talk connect stays inside
+its budget. *(large, 25 min)*
+
+**T2 — The doubled answer (#29).** Tool `behavior` / response `scheduling` and a pinned voice,
+measured in live runs with the agent's transcripts recorded. *(large, 25 min)*
+
+**T3 — Loop guard: an explicit two-round request (#28).** *(small, 6 min)*
+
+**T4 — Widget polish (#17, #18) and the button label.** Dialog motion, an orb pulse while
+reconnecting, an outline End button, counter colours, clamped file names; the user's
+"Talk to the AI Presenter" label, with tests and docs. *(medium, 12 min)*
+
+**T5 — Test hygiene (#21, #26).** Typecheck `src/__tests__/`; the 1 MB pcm test no longer
+times out under load. *(medium, 12 min)*
+
+**T6 — Snapshot knobs on a denser page (#22) and the cross-browser capture half of #19
+that runs locally** (WebKit's sink node pulled through a muted output; Firefox and WebKit
+checked with Playwright where a fake mic exists). *(large, 20 min)*
+
+**T7 (last; only when the user asks) — Go live (#23, the rest of #19).**
+
 ---
 
 ## Time estimate
@@ -709,7 +745,8 @@ What pushes it to the worst case:
 | M5 | ~150 min (~175 re-scaled) | ~130 min (0.87×) | T1–T4 ran under estimate; T5's live runs took the planned ~45 min; two fix-wave rounds. A ~3 h usage-limit pause isn't counted. M4+M5 together: 257 vs 260 min, so the remaining estimates stay as written (M6 ~130, M7 ~100, M8 ~70). |
 | M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min (~105 re-scaled) | ~150 min (1.43×) | The React Compiler had never run (T2b, a user ruling); Radix focus inside the shadow root needed our own Tab handling in the toast and the dialog; the UI review's Must fix (sliced transcript lines) and the observer's CLS miss led to a 7-commit fix wave and two more rounds. Usage-limit pauses aren't counted. M4–M7 together: ~557 vs ~495 min (1.13×), so M8 ~80. |
-| M8 | ~70 min | | |
+| M8 | ~70 min (~80 re-scaled) | ~75 min without T3 (1.07×, 0.94× re-scaled) | T1, T2 and T4 ran to size; one review fix wave and a doc-only second round. T3 (go live) was deferred to #23 by the user's call, so its ~15 min isn't counted. M4–M8 together: ~632 vs ~545 min as first planned without T3 (1.16×). |
+| M9 | ~130 min (100 tasks + ~30 overhead) | ~245 min (1.9×) | T2's live runs took ~80 min alone (the host audio service stalled mid-way; runs 56–62 discarded) for a cause that never reproduced; T5b fixed 767 type errors; T6 added a page and a snapshot policy rather than only measuring; the first review round found 2 UI Must fixes and a CLS miss on the new page, then a second fix round (focus ring under the fade, the alert behind the footer). #23 (go live) not counted. |
 
 ### Calibration
 
@@ -721,8 +758,9 @@ Estimated (as first planned) vs actual, agent time, usage-limit pauses not count
 | M5 quality baseline | tooling, tests, CI, live e2e | ~150 min | ~130 min | 0.87× |
 | M6 hardening + tuning | robustness + live-API tuning | ~130 min | ~150 min | 1.15× |
 | M7 presentable widget | UI-heavy | ~100 min | ~150 min | 1.50× |
-| M8 deploy + close | deploy, docs | ~70 min | | |
+| M8 deploy + close | deploy, docs (T3 deferred to #23) | ~55 min without T3 | ~75 min | 1.36× |
 | **M4–M7** | | **~490 min** | **~557 min** | **1.14×** |
+| **M4–M8** | | **~545 min** | **~632 min** | **1.16×** |
 
 The task sizes held: where a milestone ran over, it was the end-of-milestone overhead (reviews,
 fix waves, extra review rounds) or a task of a kind the calibration has no row for. M5, the

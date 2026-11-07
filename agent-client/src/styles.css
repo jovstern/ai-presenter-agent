@@ -55,9 +55,13 @@
   /* Layout. The breakpoint (400px) is repeated in the media query below:
      custom properties can't be used in a media condition. */
   --gutter: var(--space-4);
-  --card-width: 344px; /* "Talk to the presenter" on one line, with room for wider system fonts */
+  /* "Talk to the AI Presenter" on one line, with room for wider system fonts:
+     352 px (344 until M9) gives the label at least the room it has on a 380 px
+     phone. */
+  --card-width: 352px;
   --dialog-width: 360px;
   --control-height: 44px;
+  --orb-size: var(--control-height); /* decorative, so it may shrink below the hit area */
   --transcript-height: 192px; /* 8 lines of transcript text */
 
   /* Shape. */
@@ -72,6 +76,7 @@
   --duration-fast: 150ms;
   --duration-base: 200ms;
   --duration-spin: 900ms;
+  --duration-pulse: 1600ms; /* the orb's slow breath while reconnecting */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
 
   /* Colour, light theme (contrast on --color-surface). */
@@ -85,6 +90,7 @@
   --color-accent-hover: #4338ca;
   --color-on-accent: #ffffff; /* on accent 6.3:1, on hover 7.9:1 */
   --color-danger: #b3261e; /* 6.5:1 */
+  --color-warning: #b45309; /* 5.0:1 */
   --color-focus: var(--color-accent);
   --color-overlay: rgb(24 24 27 / 0.5);
   --shadow-card: 0 1px 2px rgb(24 24 27 / 0.06), 0 8px 24px rgb(24 24 27 / 0.12);
@@ -104,13 +110,14 @@
     --color-on-accent: #18181b; /* on accent 5.9:1, on hover 8.9:1 */
     /* The light theme's #b3261e is 2.7:1 here, so dark gets its own red. */
     --color-danger: #f87171; /* 6.4:1 */
+    --color-warning: #fbbf24; /* 10.6:1 */
     --color-overlay: rgb(0 0 0 / 0.6);
     --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px rgb(0 0 0 / 0.5);
   }
 }
 
 /* Phones: the card spans the width, a gutter each side (spec Screens). */
-@media (max-width: 400px) {
+@media (width <= 400px) {
   :host {
     left: var(--gutter);
     width: auto;
@@ -118,7 +125,8 @@
 }
 
 /* No motion at all under reduced motion: the durations collapse to zero, and
-   anything not written with the tokens is stopped too. */
+   anything not written with the tokens is stopped too (the orb's pulse, the
+   dialog's enter and exit: with no animation, Radix unmounts it at once). */
 @media (prefers-reduced-motion: reduce) {
   :host {
     --duration-fast: 0ms;
@@ -201,7 +209,7 @@ button:active {
 .agent-app {
   position: relative; /* holds the empty transcript region */
   display: grid;
-  grid-template-columns: var(--control-height) minmax(0, 1fr) auto;
+  grid-template-columns: var(--orb-size) minmax(0, 1fr) auto;
   align-items: center;
   column-gap: var(--space-2);
   row-gap: var(--space-1);
@@ -230,8 +238,8 @@ button:active {
   --orb-core: var(--color-border-strong);
   position: relative;
   flex: none;
-  width: var(--control-height);
-  height: var(--control-height);
+  width: var(--orb-size);
+  height: var(--orb-size);
   /* The core: a 40%-radius dot (about 18 px), drawn without another layer. */
   background: radial-gradient(circle closest-side, var(--orb-core) 40%, transparent 42%);
 }
@@ -268,8 +276,26 @@ button:active {
   transform: scale(calc(0.6 + var(--mic-level, 0) * 0.4));
 }
 
+/* Reconnecting: no audio, so no loop; the halo breathes slowly instead, to
+   show something is still happening (transform and opacity only). Reduced
+   motion stops it, and the orb sits still, as the status line says why. */
+.volume-orb[data-reconnecting]::before {
+  animation: orb-pulse var(--duration-pulse) ease-in-out infinite alternate;
+}
+
+@keyframes orb-pulse {
+  from {
+    opacity: 0.12;
+    transform: scale(0.55);
+  }
+  to {
+    opacity: 0.3;
+    transform: scale(0.9);
+  }
+}
+
 /* The one primary action takes the row; the knowledge button sits beside it.
-   Its label never wraps ("Talk to the presenter" fits at 320 px, below). */
+   Its label never wraps ("Talk to the AI Presenter" fits at 320 px, below). */
 .agent-app__primary {
   margin-bottom: var(--space-1);
   white-space: nowrap;
@@ -281,6 +307,19 @@ button:active {
 .agent-app__primary:hover {
   border-color: var(--color-accent-hover);
   background: var(--color-accent-hover);
+}
+
+/* End, the stop action, in outline: the accent edge and text on the surface,
+   so it reads apart from Talk and Retry (accent on surface 6.3:1 light,
+   5.9:1 dark; on the hover fill 5.7:1 and 5.0:1). */
+.agent-app__primary[data-variant='secondary'] {
+  border-color: var(--color-accent);
+  background: var(--color-surface);
+  color: var(--color-accent);
+}
+
+.agent-app__primary[data-variant='secondary']:hover {
+  background: var(--color-surface-raised);
 }
 
 /* Connecting: a ring spins before the label (Cancel). Under reduced motion it
@@ -318,16 +357,33 @@ button:active {
   border-style: dashed;
 }
 
-/* The narrowest phones (320 px): a tighter card, so the primary button keeps
-   "Talk to the presenter" on one line beside the orb and the knowledge button. */
-@media (max-width: 340px) {
+/* Narrow phones (below 380 px): a tighter card, so the primary button keeps
+   "Talk to the AI Presenter" on one line, inside its border, beside the orb and
+   the knowledge button: a smaller orb (decoration, not a control, so no 44 px
+   hit area to keep), half gaps and tighter padding. Without it the label had
+   7 px to spare at 380 px and none at 360 px; with it, 39 px at 360 px and
+   20 px at 341 px in system-ui, room for a wider system font. */
+@media (width < 380px) {
+  :host {
+    --orb-size: 32px;
+  }
+
   .agent-app {
+    column-gap: var(--space-1);
     padding: var(--space-3);
   }
 
   .agent-app__primary,
   .agent-app__knowledge-btn {
     padding: 0 var(--space-2);
+  }
+}
+
+/* The narrowest phones (320 px) also take a half gutter: there the label has
+   15 px to spare. A 360 px phone keeps the 16 px gutter (spec Screens). */
+@media (width <= 340px) {
+  :host {
+    --gutter: var(--space-2);
   }
 }
 
@@ -452,6 +508,49 @@ button:active {
 }
 
 /*
+ * Enter and exit: the overlay fades; the dialog fades and rises a little on
+ * open, and fades on close, a touch faster. Radix's Presence keeps the
+ * closing dialog mounted until its animation ends (its animationend reaches
+ * the node in the shadow root as well), and reduced motion's `animation:
+ * none` lets it unmount at once. `translate` composes with the centring
+ * transform, so the keyframes needn't repeat it.
+ */
+.knowledge-modal__overlay[data-state='open'] {
+  animation: fade-in var(--duration-base) var(--ease-out);
+}
+
+.knowledge-modal__overlay[data-state='closed'] {
+  animation: fade-out var(--duration-fast) var(--ease-out) forwards;
+}
+
+.knowledge-modal__content[data-state='open'] {
+  animation: dialog-in var(--duration-base) var(--ease-out);
+}
+
+.knowledge-modal__content[data-state='closed'] {
+  animation: fade-out var(--duration-fast) var(--ease-out) forwards;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--space-2);
+  }
+}
+
+/*
  * Anchored by its top edge, not centred: adding a file or an error grows it
  * downward instead of moving the title and the field being used. dvh follows
  * a phone's collapsing browser bars; the vh line before it is the fallback.
@@ -467,6 +566,12 @@ button:active {
   max-height: 84dvh;
   padding: var(--space-5) var(--space-5) 0;
   overflow-y: auto;
+  /* Scrolling something into view (the over-limit alert) stops above the
+     sticky footer, not under it: the footer's height (its border, padding and
+     the Close button) plus a gap. */
+  scroll-padding-bottom: calc(
+    var(--border-width) + var(--space-3) + var(--control-height) + var(--space-5) + var(--space-2)
+  );
   transform: translateX(-50%);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-card);
@@ -541,16 +646,19 @@ button:active {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  overflow-wrap: anywhere;
 }
 
 .knowledge-modal__files li + li {
   margin-top: var(--space-1);
 }
 
+/* One line, an ellipsis where it's cut; the title holds the whole name. */
 .knowledge-modal__file-name {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .knowledge-modal__file-size {
@@ -604,8 +712,13 @@ button:active {
   text-align: end;
 }
 
-/* Over the limit: the danger colour, and the alert below says it in words. */
-.knowledge-modal__content .knowledge-modal__counter[data-over] {
+/* Near the limit, the warning colour (the polite region says it in words);
+   over it, the danger colour (and the alert below). */
+.knowledge-modal__content .knowledge-modal__counter[data-limit='near'] {
+  color: var(--color-warning);
+}
+
+.knowledge-modal__content .knowledge-modal__counter[data-limit='over'] {
   color: var(--color-danger);
 }
 

@@ -4,6 +4,10 @@ Two kinds of numbers are kept here:
 
 - **Milestone reports** (`m<NN>.md`, `history.csv`) — the observer's per-milestone run against
   the spec's budgets: Lighthouse, Core Web Vitals, bundle size, axe, gate latency, console errors.
+  Since M9 T1 the bundle is two files ([ADR 0005](../adr/0005-load-the-gemini-sdk-on-talk.md)):
+  `agent-client.js`, the page-load bundle (the `js_kb` column and the 180 kB budget), and the
+  Gemini SDK chunk `web-<hash>.js`, loaded on Talk (its own 80 kB budget). Vite's build output
+  gives both gzip sizes; `e2e/sdk.spec.js` checks both budgets on every e2e run.
   How they are measured is in `.claude/skills/metrics/SKILL.md`.
 - **App metrics** — how the voice agent itself performs against the real Gemini Live API,
   measured by the opt-in live e2e described below. The budgets are in
@@ -42,7 +46,7 @@ not made cross-platform because `say` is macOS-only anyway.
   scenario fails at "Live", because the card shows the `not_configured` alert.
 - **Port:** 3972 (the deterministic suite uses 3971, `npm run dev` 3000). A server already on
   the port fails the run instead of being reused.
-- **One at a time:** `workers: 1`. The three scenarios share one key and one per-IP token rate
+- **One at a time:** `workers: 1`. The four scenarios share one key and one per-IP token rate
   limit, and the timings are cleaner on an unloaded machine.
 - **No retries, no traces:** a failure is a data point for the pass rate. Traces are off in
   live mode because they would record the minted token (the token response and the Live socket
@@ -57,17 +61,36 @@ not made cross-platform because `say` is macOS-only anyway.
 
 ### Scenarios
 
-Each WAV is its own Playwright project (`live-greeting`, `live-task`, `live-reconnect`), because
-the fake-capture file is a browser launch flag.
+Each WAV is its own Playwright project (`live-greeting`, `live-task`, `live-act`,
+`live-orders`, `live-reconnect`), because the fake-capture file is a browser launch flag.
 
 | Scenario | Prompt (`make-prompts.sh`) | Passes when |
 |---|---|---|
 | `greeting` | "Hi!" at 4 s | Live within 15 s, then the first agent audio (`ds:first-audio`) and an agent transcript line |
 | `task` | at 6 s: "Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save." | within 150 s: the save confirmation is visible, the Settings heading is shown, the toggle is checked, the Plan select is `pro` (a `fill`), and the counter went exactly `1`, `2` |
+| `act` | at 6 s: "Please increment the counter to three." (issue #29: a spoken request that makes the agent act, then its answer) | the counter goes `1`, `2`, `3` within 60 s, the agent's answer completes, and it is listened to for 10 s more |
+| `orders` | at 6 s: "Go to the Orders page and tick the third order." (issue #22: the dense page, past the snapshot cap) | order 1003's checkbox is checked within 60 s; once the agent's answer completes and 10 s more have passed, the Orders heading is shown and exactly one order is selected |
 | `reconnect` | at 12 s: "Which page are we on right now, and what is the code name of this demo?" | a knowledge file naming the code name (Pelican) is seeded in `localStorage` first. After the first audio, the test closes the page side of the real Gemini socket (a `routeWebSocket` pass-through); the card shows `Reconnecting…`, then Live, `ds:reconnected` is marked, and the agent answers the follow-up. Whether the answer names Pelican is recorded (`recalledKnowledge`), not asserted |
 
 Until M6 T5 the task had five steps (no Plan) and the follow-up asked only for the page, with
-no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts.
+no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts. The `act` scenario
+and the socket tap below arrived in M9 T2 (issue #29), from run 51 on; the `orders` scenario in
+M9 T6 (issue #22), from run 69 on.
+
+### The socket tap (M9 T2)
+
+Every scenario routes the real Gemini socket through a pass-through (`tapLive` in
+`e2e/live.spec.js`) that records each non-audio message both ways: the page's setup, client
+turns (classified as `snapshot`, `knowledge`, `greeting`, `corrective` or `text`) and tool
+responses; Gemini's transcriptions, `turnComplete`, `generationComplete`, `interrupted` and
+tool calls (`e2e/liveTurns.js`). Audio is skipped, and the token, which is in the socket's URL,
+is never recorded. From the events, the agent's speech is cut into **turns**: the text between
+two boundaries (`turnComplete`, `interrupted`, a tool call, or a drop). A **doubled answer** is
+a sentence of four words or more that the agent says again in the next turn, or twice in one
+turn; two turns that each end in a tool call are narration of a repeated action ("Incrementing
+the counter again."), not a double. The greeting, task and act scenarios end by waiting for the
+agent's turn after its last tool response to complete, then listening 10 s more
+(`SETTLE_MS`), so a repeat after the answer is caught.
 
 ### Timing marks
 
@@ -117,6 +140,15 @@ each test's `live-metrics` attachment):
             "reconnectAttempts": 1,            // reconnect scenario only: sockets after the drop
             "resumed": true,                   // reconnect scenario only: the last one resumed
             "recalledKnowledge": true,         // reconnect scenario only: the answer named Pelican
+            "agentTurns": [                    // the agent's speech per turn (the socket tap)
+              { "text": "I have incremented the counter to three.",
+                "after": "toolResponse",       // what the page last sent (or `user`) before it
+                "end": "turnComplete",         // or interrupted / toolCall / open (a drop)
+                "userBefore": false }          // the user spoke since the agent's last turn
+            ],
+            "doubledTurns": 0,                 // how many doubled answers (issue #29)
+            "doubles": [],                     // each: { "text", "userBetween" }
+            "events": ["3294 0 in outputTranscription Hello! How can I "], // ms, socket, dir, kind, text or names
             "transcript": ["agent: …", "user: …"] // failed tests only, one line per turn
           }
         }
@@ -132,6 +164,109 @@ worst per metric, pass rate per scenario) in the milestone report.
 
 The latest numbers are in `m06.md` (M6 T5: six-step task 8 of 10, reconnect worst 2.89 s,
 keyframe ≤ 855 B, fill ≤ 3 ms). The M5 baseline below is kept for history.
+
+## M9 T6: the snapshot cap on a dense page (issue #22, 2026-11-07)
+
+The target app's third page, Orders (`target-app/orders.html`), has 139 `data-testid`
+elements: nav, heading, a selected count and Ship selected, 60 rows of a checkbox and a Ship
+button, and an eleven-field New order form. Measured deterministically through the real bridge
+in Chromium (1280 × 720, the frame filling the window), each snapshot decided by
+`domSnapshotContext.js` as the agent would; `e2e/bridge.spec.js` asserts the shape of it on
+every e2e run. Sizes are the whole message, UTF-8.
+
+**Truncation.** Before T6 the 30-node cap kept the first 30 in page order: nav, heading, the
+toolbar and orders 1001–1012. Scrolling changed nothing, so orders 1013–1060 and the whole form
+were never in a snapshot, and the model can't use a selector it wasn't given. Since T6 a page
+over the cap keeps the 30 nodes nearest the viewport (on screen first, then by distance,
+unrendered last), in page order, and says how many it left out (`omitted`: 109 here); a scroll
+sends a new snapshot, and any removal on such a page is a keyframe.
+
+| Step | Sent as | Bytes | changed / removed of 30 | Ratio |
+|---|---|---|---|---|
+| Load (top of the page) | keyframe | 3,563 | — | — |
+| Tick order 1003 (checkbox, count, Ship selected) | delta | 382 | 3 / 0 | 0.10 |
+| Tick order 1004 | delta | 283 | 2 / 0 | 0.07 |
+| Ship order 1005 | delta | 284 | 2 / 0 | 0.07 |
+| Ship selected (two ticked rows) | delta | 727 | 6 / 0 | 0.20 |
+| Scroll to the form's Customer field | keyframe | 3,698 | 30 / 30 | 2.00 |
+| Fill Customer | delta | 164 | 1 / 0 | 0.03 |
+| Fill Country (a select, 8 options) | delta | 261 | 1 / 0 | 0.03 |
+| Scroll to Create order (4 nodes swapped) | keyframe | 3,669 | 4 / 4 | 0.27 |
+| Fill Notes, Street, City, Email to 60+ characters | delta each | 209–214 | 1 / 0 | 0.03 |
+| The form full, as a keyframe would be | (keyframe) | **3,960** | — | — |
+| Scroll back to order 1030 | keyframe | 3,729 | 30 / 30 | 2.00 |
+
+A node is 80–133 B (median 103 B). A keyframe on a page over the cap carries a 165 B line
+saying how many elements are not listed and to scroll to the nearest listed one.
+
+**Ruling.**
+- **`MAX_SNAPSHOT_NODES` stays 30.** Keyframes are 3.56–3.73 kB in use and 3.96 kB at worst
+  (every text field filled past the 60-character cut), inside the 4 kB budget; 40 nodes would be
+  ~4.4 kB. A node count can't guarantee the budget (a select's options can add ~1.2 kB on
+  their own; see `m06.md`); a byte cap is the change to make if a target page ever needs it.
+- **What the cap keeps changed**: the nodes nearest the viewport, not the first in the page.
+  What the viewer is looking at is what they ask about, and the model reaches the rest by
+  scrolling (the count tells it there is more).
+- **`FULL_REFRESH_RATIO` stays 0.6.** The page's typical actions are deltas of 0.03–0.2 of the
+  page (0.16–0.73 kB against a 3.6 kB keyframe). Only a scroll swaps most of the snapshot, and
+  on a page over the cap any removal is a keyframe anyway: a delta's `removed` would tell the
+  model a row that only scrolled out of view was gone. That rule, not the ratio, made the
+  0.27 scroll a keyframe.
+- **The `scroll` action is instant now.** Its result waits for the page to settle, and on this
+  page the snapshot depends on the scroll position: a smooth scroll held the reply 0.7–1 s, past
+  the spec's 300 ms round trip. Instant, every scroll above answered in 102–107 ms.
+
+**Live run** (run 69, one run, 5 of 5 scenarios passed): the new `orders` scenario navigated
+(127 ms) and ticked order 1003 (105 ms), and only it, in 24.6 s; its keyframes were 862 B (Home)
+and 3,563 B (Orders); the agent's turns were "I'll tick the third order." and "The third order
+has been selected.", no doubled answer, no loop trip. The other four: greeting, the six-step
+task (41.7 s, every tool call successful), act (the counter 1, 2, 3) and reconnect (1.09 s,
+resumed, Pelican recalled) all passed; connect → `open` 1.47–2.23 s, connect → first audio
+2.11–2.79 s. The Home and Settings keyframes grew from 777 / 855 B to 862 / 940 B with the
+Orders link in their nav.
+
+### WebKit and Firefox capture probe (issue #19, M9 T6)
+
+The capture node now has one silent output wired to the destination through a gain of 0, so
+WebKit pulls it. A scratch Playwright config (not in the repo; CI stays Chromium) ran the real
+page against the fake Live socket in Playwright's WebKit and Firefox (157) builds, plus the bare
+capture graph with 0 and 1 outputs:
+
+| | Page and worklet load under the CSP | Talk → Live | `AudioContext` clock in 3 s | Frames |
+|---|---|---|---|---|
+| Chromium, `--disable-audio-output` (as the e2e) | yes, no errors | yes | 3.01 s | 12.3/s, 2560 B, both graphs |
+| Chromium on the host's audio device | yes | — | 0.01 s | 0 |
+| WebKit (mock mic; the clock checked headed too) | yes, no errors | yes | 0 (`running`) | 0, both graphs, an oscillator too |
+| Firefox (fake mic prefs; also the null audio backend) | yes (`addModule` resolves) | yes | `resume()` never settles | 0 |
+
+Chromium on the same host audio device stalls too, so the host's audio service was stuck (as in
+M9 T2), and neither WebKit nor Firefox has a fake output device flag to get round it. Whether
+WebKit pulls the node, and Firefox's frame rate at 44.1 and 48 kHz, wait for the real-mic check
+on the deployed site (#23).
+
+## M9 T2: doubled answers (issue #29, 2026-11-07)
+
+Before: runs 51–55 and 63–64 (1-based; current code with the socket tap, 7 runs). After: runs
+65–68 (`Behavior.BLOCKING` on every declaration and the voice pinned, 4 runs). Runs 56–62 are
+left out: the host's audio service had stalled (an `AudioContext`'s clock moved 5 ms in 500 ms),
+so the fake mic sent nothing and the agent never heard a prompt, on either code. Since then the
+Playwright config passes `--disable-audio-output`, so Chromium renders to a fake output on its
+own clock and the voice tests no longer depend on the host's audio device.
+
+| Metric | Before | After |
+|---|---|---|
+| Doubled answers | 1 in 28 scenarios (greeting, after a barge-in) | 0 in 16 |
+| Task (six steps) | 7 of 7 | 4 of 4 |
+| Act ("increment the counter to three") | 6 of 7 (one stall: no answer after the third click) | 4 of 4 |
+| Greeting, reconnect | 7 of 7, 7 of 7 | 4 of 4, 4 of 4 |
+| Connect → `open`, median / worst | 1.53 s / 2.31 s | 1.47 s / 1.62 s |
+| Connect → first audio, median / worst | 2.16 s / 3.06 s | 2.09 s / 2.46 s |
+| Tool round trip, click, median (n) | 103 ms (49) | 102 ms (28) |
+| Task duration, median | 37.3 s | 35.7 s |
+| Reconnect, median / worst | 1.64 s / 2.46 s | 1.01 s / 2.34 s |
+
+The click's round trip includes the bridge's settling since #25 (100 ms of quiet), hence ~100 ms
+rather than M5's 1.5 ms. Analysis: handoff §4, "Doubled answers".
 
 ## M5 T5 baseline (2026-10-29, 11 runs)
 

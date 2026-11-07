@@ -10,6 +10,14 @@ nav a {
   margin-right: 12px;
 }
 
+/* The presenter card floats over the bottom of the frame (about 311 px tall
+   while a session is open, plus its gutter), so every page leaves that much
+   room below its last control: scrolled to the end, it sits clear of the
+   card. */
+main {
+  padding-bottom: 360px;
+}
+
 /* Controls take the page's font (browsers default them to a smaller system
    one), so the original controls and the M6 ones (Notes, Plan) match. */
 button,
@@ -98,4 +106,183 @@ button:hover {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+}
+
+/* The page the viewer is on (aria-current), told by more than colour. */
+nav a[aria-current='page'] {
+  font-weight: 600;
+  text-decoration-thickness: 2px;
+}
+
+/* The Orders page: a table needs more room than the other pages' 480 px. */
+body.wide {
+  max-width: 720px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Disabled reads as unavailable at a glance, not only by its grey text: a
+   dashed edge and no fill, against an enabled button's solid edge and grey
+   fill. */
+button:disabled {
+  /* 7:1 on white. */
+  color: #595959;
+  background: #fff;
+  border-style: dashed;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: #fff;
+}
+
+/* A touch screen gets a 44 px tall target on every button and field (a
+   min-height, so a taller textarea keeps its height). A checkbox keeps its
+   size: its label is the 44 px target. */
+@media (pointer: coarse) {
+  button,
+  input:not([type='checkbox'], [type='radio']),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+}
+
+/* A narrow screen scrolls the table, not the page. Positioned, so the
+   visually hidden column names are clipped with it rather than widening the
+   page. */
+.table-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+
+/* More columns to the right (orders.js sets the class until the table is
+   scrolled to its end): the right edge fades out. A mask, so nothing moves. */
+.table-scroll--more {
+  mask-image: linear-gradient(to left, transparent, #000 40px);
+}
+
+/* Focused from the keyboard, the fade gives way: a mask clips to the border
+   box, and the focus ring is drawn outside it. */
+.table-scroll--more:focus-visible {
+  mask-image: none;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #d9d9d9;
+  white-space: nowrap;
+}
+
+thead th {
+  font-weight: 600;
+}
+
+tbody th {
+  font-weight: normal;
+}
+
+.numeric {
+  text-align: right;
+}
+
+td input[type='checkbox'],
+.check input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+/* A selected order, told by its tint as well as its ticked box (the text
+   stays at 15:1 on it). */
+tbody tr:has(input:checked) {
+  background: #e8f0fe;
+}
+
+/* The checkbox's label fills its cell, so the whole 44 x 44 px cell ticks it. */
+td.select {
+  padding: 0;
+}
+
+td.select label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* A shipped order's checkbox (always unticked): the browser's own disabled
+   box is a faint ~1.3:1 outline. Drawn here instead, a mid-grey edge (4.5:1
+   on white) on a grey fill: plainly there, and plainly off. */
+td.select input:disabled {
+  appearance: none;
+  box-sizing: border-box;
+  border: 1px solid #767676;
+  border-radius: 3px;
+  background: #e6e6e6;
+}
+
+td.select label:has(input:disabled) {
+  cursor: not-allowed;
+}
+
+/* A phone: tighter cells, so more of the table fits before it scrolls. */
+@media (max-width: 479px) {
+  th,
+  td {
+    padding: 6px 4px;
+  }
+}
+
+/* A checkbox and its text on one row, the whole row a 44 px tall target. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* A form reads best at the other pages' width, not the table's. */
+.order-form {
+  max-width: 480px;
+}
+
+/* Required, shown by an asterisk the field's name leaves out (`/ ''`): the
+   input's `required` already says it to assistive technology, and the
+   bridge's snapshot reads the label's text, which stays the bare name. */
+.field label.required::after {
+  content: ' *' / '';
+}
+
+.form-note {
+  color: #595959;
+  font-size: 0.875rem;
+}
+
+.order-form .field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #767676;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.order-confirmation {
+  color: #1a7a1a;
 }

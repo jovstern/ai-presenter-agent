@@ -29,6 +29,12 @@ prompt() {
 prompt greeting '[[slnc 4000]] Hi! [[slnc 60000]]'
 # Six steps since M6 T5: a fill (the Plan select) so its round trip is measured.
 prompt task '[[slnc 6000]] Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save. [[slnc 60000]]'
+# One request that makes the agent act, then its answer: issue #29's report
+# (a doubled answer after the user spoke).
+prompt act '[[slnc 6000]] Please increment the counter to three. [[slnc 60000]]'
+# The denser Orders page (issue #22): a navigate, then a row the snapshot cap
+# must keep in view.
+prompt orders '[[slnc 6000]] Go to the Orders page and tick the third order. [[slnc 60000]]'
 # The code name is in the knowledge file live.spec.js seeds: answering it after
 # the forced drop shows whether the resumed session still has its knowledge.
 prompt followup '[[slnc 12000]] Which page are we on right now, and what is the code name of this demo? [[slnc 60000]]'

@@ -143,7 +143,8 @@ docs/            this doc, the spec, sandbox-simulation, code-review-notes, adr/
 target-app/      2 static pages (Home, Settings) + their scripts (home.js, settings.js), data-testids,
                  routes.json (the one route list: the bridge and navigate's enum both read it)
 sandbox/         iframe host page + bridge.js (channel handshake, action library, DOM snapshot)
-agent-client/    React 19 app (React Compiler on), built to a single script, mounted in a shadow root
+agent-client/    React 19 app (React Compiler on), built to an ES module plus a lazy Gemini SDK
+                 chunk (ADR 0005), mounted in a shadow root
 server/          Express: app.js (token gate, /api/client-log, CSP, pino logs, /health),
                  config.js (the env parsed with Zod), index.js (listen, shutdown)
 render.yaml      the Render Blueprint (ADR 0003)
@@ -153,7 +154,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 `target-app`). Inside `agent-client/src/`:
 
 - `main.jsx` — mounts the shadow root on a plain host `<div>`, opens the bridge channel once for
-  the page's lifetime, unmounts on a non-persisted `pagehide`.
+  the page's lifetime, unmounts on a non-persisted `pagehide`. It is a module script: its URL is
+  `import.meta.url`, and the page nonce comes off the tag with that `src`.
+- `liveSdk.js` — the one `import()` of `@google/genai/web`, on Talk (or when Talk is pointed at
+  or focused), never on page load ([ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)).
 - `bridgeChannel.js` — the agent's end of the private `MessageChannel` to `sandbox/bridge.js`
   ([ADR 0001](./adr/0001-private-bridge-channel.md)).
 - `liveSession.js` — the Live socket: token fetch, connect, one-retry-per-drop backoff,
@@ -161,7 +165,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
-- `AgentApp.jsx` — the card (the volume orb, one Talk to the presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
+- `AgentApp.jsx` — the card (the volume orb, one Talk to the AI Presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
   failure's reason, mic alerts, transcript, the knowledge button with its document icon); `FailureToast.jsx` — the Radix
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
   `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
@@ -186,8 +190,10 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   20 files and 381 tests in agent-client, 5 files and 117 tests in `server/` (`config` and
   `clientLog` added in M8), and 33 deterministic Playwright tests in 5 specs, plus the 3 opt-in
   live ones; CLAUDE.md lists what each file covers.
-- `npm run build` produces a single self-contained IIFE, `dist/agent-client.js`: 725.7 kB,
-  179.24 kB gzip at M8 T4 (179.22 after M8 T2's `web-vitals`, 176.7 after the M7 fix wave, 175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
+- `npm run build` produces an ES module, `dist/agent-client.js`, 107.79 kB gzip on page load
+  since M9 T1, plus the Gemini SDK chunk `dist/web-<hash>.js` (74.66 kB gzip) imported on Talk
+  ([ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)). Until then it was a single
+  self-contained IIFE: 725.7 kB, 179.24 kB gzip at M8 T4 (179.22 after M8 T2's `web-vitals`, 176.7 after the M7 fix wave, 175.4 after M7 T5, 174.3 after T4's toast, 166.2 after T3) (budget ≤ 180 kB gzip, spec Budgets), served gzipped by the server since the M4 fix wave (React 19 + the React Compiler + `@google/genai/web` + Radix Dialog and Toast), with no
   build errors.
 - Migrated from Hono to Express (2026-09-15) — the server boots on Express, and every static
   route (`/sandbox/`, `/target-app/index.html`, `/target-app/settings.html`, `/sandbox/bridge.js`,
@@ -296,6 +302,20 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   token (ADR 0004). The same check covered every other field `liveSession.js` reads
   (`message.data`, transcriptions, `interrupted`, `turnComplete`, `toolCall.functionCalls`,
   `setupComplete`) and the three send signatures (code-review-notes M8, L10).
+- **Tool `behavior` and the voice (M9 T2, issue #29), checked against `@google/genai` 2.32.0's
+  types and Google's Live API guide (aistudio.google.com/docs/live-api/tools and
+  /capabilities, 2026-11-07).** The guide says function calling on `gemini-3.8-live` is
+  sequential by default and supports both synchronous and asynchronous calls
+  (`behavior: NON_BLOCKING` opts in; `gemini-3.8-live-extended-thinking` is async only,
+  `gemini-3.1-flash-live-preview` sync only). The SDK's `FunctionDeclaration.behavior` doc
+  says an unset one "keeps the current function call behavior", so `liveSession.js` now sends
+  `Behavior.BLOCKING` on every declaration rather than rely on the default. The issue's lead
+  (non-blocking by default on 3.8) is not what the guide says. `FunctionResponse.scheduling`
+  (`SILENT` / `WHEN_IDLE` / `INTERRUPT`) is "only applicable to NON_BLOCKING function calls, is
+  ignored otherwise", so tool responses carry none. The voice is pinned with
+  `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (`VOICE_NAME`, `Kore`, the voice in
+  the guide's own example; native audio models take any of the 30 TTS voices). Both were
+  accepted by the real API in four live e2e runs (16 scenarios) under the model-locked token.
 - **A resumed reconnect resends the DOM keyframe but not the knowledge context — reversed in
   M6 T5 (code-review-notes M9).** Until then both were resent on every (re)connect, "deliberately":
   a reconnect couldn't trust that a resumed session's history was intact. The live e2e now
@@ -324,21 +344,45 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   context after `addModule` (M6 fix wave): it is created after awaits, outside the click's user
   activation, and Safari starts such a context suspended. Not verified: Firefox and Safari (the
   e2e is Chromium only). Manual checks for them, with a real mic:
-  - **Safari / WebKit:** the capture node has **0 outputs** (a sink), and WebKit has been known
+  - **Safari / WebKit:** the capture node had **0 outputs** (a sink), and WebKit has been known
     not to pull a node that isn't connected toward the destination, so `process()` might never
-    run. Check that a user transcript line appears after speaking; if not, give the node one
-    output and connect it through a muted `GainNode` to the destination.
+    run. Fixed ahead of the check (M9 T6, #19): the node has one output, which the worklet fills
+    with silence, connected through a `GainNode` at gain 0 to the destination
+    (`audioIO.test.js`, `captureWorklet.test.js`; Chromium's `e2e/audio.spec.js` and the live e2e
+    still pass). Still to check on the deployed site with a real mic (#23): that a user
+    transcript line appears after speaking. A local Playwright probe couldn't settle it: on the
+    development Mac, WebKit's `AudioContext` reports `running` but its clock stays at 0 (no node
+    renders, sink or not, even an oscillator), and Chromium on the same host audio device
+    advances 0.01 s in 3 s, so the host's audio service is stalled (as in M9 T2); the page, the
+    worklet's load under the CSP and Talk → Live worked, with no error.
   - **Firefox:** the AudioContext runs at the device rate on purpose (Firefox refuses to connect
     a mic to a context at another rate). Check on a 44.1 kHz device (many USB headsets) and a
     48 kHz one that the agent hears you and the frames are 2560 bytes at ~12.5/s (DevTools →
-    Network → WS).
+    Network → WS). The local Playwright probe (M9 T6) got as far as the worklet loading under
+    the CSP (`addModule` resolves) and Talk → Live; `resume()` never settled on this host, with
+    or without a click and with Firefox's null audio backend, so no frame was measured.
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
-- **DOM snapshot payload size is measured on the mock target app only** (M6 T5, the `ds:keyframe`
-  mark): 8 nodes per page, keyframes 777–855 B, about 100 B a node, so the 30-node cap
-  (`MAX_SNAPSHOT_NODES` in `bridge.js`) comes to roughly 3–3.5 kB, inside the 4 kB budget. The cap
-  and the 0.6 full-refresh ratio were kept, but these pages never reach the cap or a large delta,
-  so neither is stressed. A real, larger page is the test that's still missing.
+- **DOM snapshot payload size is measured on the mock target app only, now with a dense page**
+  (M9 T6, issue #22). The Orders page (`target-app/orders.html`: 60 rows of a checkbox and a
+  Ship button, an eleven-field form, 139 `data-testid`s) reaches the 30-node cap
+  (`MAX_SNAPSHOT_NODES` in `bridge.js`): keyframes of 3.56–3.73 kB in use, 3.96 kB at worst with
+  every text field filled to 60+ characters, ~103 B a node, so the cap stays at 30 (40 would be
+  ~4.4 kB). Before T6 the cap kept the first 30 in page order, so rows 13–60 and the whole form
+  could never be seen, whatever was scrolled; it now keeps the 30 nearest the viewport and the
+  model is told how many it left out. Deltas for a tick, a ship or a fill are 0.16–0.73 kB
+  (0.03–0.2 of the page), so the 0.6 ratio stays. Still not verified: a page whose 30 visible
+  nodes carry long selects (a select's options can add ~1.2 kB on their own, so the budget is
+  not guaranteed by a node count), and a real site rather than the mock
+  (`docs/metrics/README.md` § M9 T6).
+- **Does an unsolicited snapshot interrupt the Live model?** A change nobody asked for (the
+  viewer's click or scroll, async page JS) goes to the session as client content
+  (`sendClientContent`, `turnComplete: false`) while the model may be speaking or between tool
+  calls. Whether Gemini Live treats that as an interruption, or only as context for its next
+  turn, has not been measured. The M9 fix wave narrowed the exposure: `bridge.js` no longer
+  posts a debounced snapshot that changes nothing (a scroll on a page over the cap that keeps
+  the same 30 nodes used to send an empty delta). A live e2e that scrolls the frame while the
+  agent talks, listening for a cut-off turn, would answer it.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
   `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
   T1, the client log (`/api/client-log`, `clientLog.js`) in M8 T2, checked locally only; the
@@ -449,7 +493,33 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   fallback: its failures would hit the console. `web-vitals` is pinned to 5.3.0 and only
   `onLCP` / `onINP` / `onCLS` are imported: 6.x took the bundle to 180.11 kB, past the 180 kB
   budget.
+- **The Gemini SDK loads on Talk (M9 T1, issue #20, [ADR 0005](./adr/0005-load-the-gemini-sdk-on-talk.md)).**
+  The bundle was 0.4 kB under its 180 kB budget, 72–75 kB of it the SDK, which only a Live
+  session uses. The widget is now an ES module (an app build with a JS entry; a
+  `<script type="module">`) whose one `import()` is the SDK, started when Talk is pointed at or
+  focused and awaited alongside the token. Page load 179.62 → 107.79 kB gzip; the chunk
+  74.66 kB. Not a hand-written Live client (option C): about the same saving, with the wire
+  protocol ours to track. A chunk that doesn't load is `fatal: 'sdk'` with Retry, not the
+  backoff. The CSP didn't change (`script-src 'self'` covers both).
 
+- **Doubled answers (M9 T2, issue #29): blocking declarations and a pinned voice; the live e2e
+  now counts doubles.** The live e2e taps the Live socket (`e2e/liveTurns.js`), records the
+  agent's speech per turn and counts a doubled answer (a sentence of 4+ words said again in the
+  next turn, or twice in one turn), with a new `act` scenario close to the report ("Please
+  increment the counter to three") and a 10 s listen after each answer. Before (7 runs, 28
+  scenarios): one double, in the greeting scenario, after the user's "Hi!" barged into the
+  greeting: the interrupted greeting's sentence ("I am your voice-controlled presenter agent")
+  was said again in the reply. No double followed a tool response: every turn after one either
+  ended in the next call or was the final answer, once. After (4 runs, 16 scenarios): no double;
+  every scenario passed; connect, first audio and tool round trips unchanged (medians 1.47 s,
+  2.09 s, click 102 ms). So the change pins what the guide documents rather than fixing a
+  reproduced cause. The best evidence for the report is a barge-in: the user's speech (or the
+  agent's own voice reaching the mic from the speakers) interrupts an answer, and the next
+  generation says it again, in a fresh take that can sound different. The client cannot play
+  two streams at once (one player, one queue; `interrupted` stops it) or show a fragment twice.
+  Not verified: echo on real speakers (the e2e's fake mic has none). One after-run greeting
+  reply ran on into a spoken Python listing (run 67 in `.metrics/live.json`): a model glitch,
+  once in 16, not a double; worth watching.
 - **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
   Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the
   4 kB budget), `FULL_REFRESH_RATIO` 0.6, and the loop-guard thresholds (no trip in 14 runs).
@@ -540,7 +610,7 @@ failure notice (M7 T4, R20).
 Connection status (v1 gap #6) lives in the card (`AgentApp.jsx`): a status line
 (`role="status"`: Not connected / Connecting… / Live / Reconnecting (attempt n of 6)… /
 Connection lost, or Can't connect for a fatal failure) and one primary button whose job follows
-the status and is never disabled, so focus stays on it (Talk to the presenter; a pending Cancel
+the status and is never disabled, so focus stays on it (Talk to the AI Presenter; a pending Cancel
 while connecting; End while live or reconnecting, so the viewer can hang up during the backoff;
 Retry on `failed`, Reload page when the page's token is rejected, or Try again when the server
 isn't configured — a reload can't fix that, M6 T6). On `failed` the reason shows under the status

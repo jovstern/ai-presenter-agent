@@ -102,8 +102,13 @@ class CaptureProcessor extends AudioWorkletProcessor {
     }
   }
 
-  /** @param {Float32Array[][]} inputs */
-  process(inputs) {
+  /**
+   * @param {Float32Array[][]} inputs
+   * @param {Float32Array[][]} outputs One mono output, there only so WebKit
+   *   pulls this node (audioIO.js wires it to a gain of 0): always silence.
+   */
+  process(inputs, outputs) {
+    for (const channel of outputs[0] ?? []) channel.fill(0);
     // Mono: the first channel of the first input. No input yet (the source
     // isn't connected, or the track ended) is a quantum with no channels.
     const channel = inputs[0]?.[0];

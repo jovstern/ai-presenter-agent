@@ -40,7 +40,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await page.goto('/');
   await expect(status).toHaveText('Not connected');
 
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(button('End')).toBeVisible();
   expect(token.count).toBe(1);
@@ -109,7 +109,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
 
   await button('End').click();
   await expect(status).toHaveText('Not connected');
-  await expect(button('Talk to the presenter')).toBeFocused();
+  await expect(button('Talk to the AI Presenter')).toBeFocused();
   // No retry was scheduled behind the hang-up.
   await page.waitForTimeout(1500);
   expect(token.count).toBe(2);
@@ -128,7 +128,7 @@ test('every click of a batch answers with the page it left: the counter at 1, 2,
   const frame = page.frameLocator('#target-app-frame');
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 
@@ -160,7 +160,7 @@ test('ten identical counter clicks all run: the counter reaches 10', async ({ pa
   const frame = page.frameLocator('#target-app-frame');
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 
@@ -183,6 +183,96 @@ test('ten identical counter clicks all run: the counter reaches 10', async ({ pa
   await expect(status).toHaveText('Not connected');
 });
 
+// #28: "turn notifications on and save, then off and save" is two rounds of
+// toggle, save; the loop guard refused the 4th call as an A-B-A-B cycle. Two
+// rounds now pass (a third is refused, loopGuard.test.js).
+test('an explicit two-round request runs: on, save, off, save all succeed', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await button('Talk to the AI Presenter').click();
+  await expect(status).toHaveText('Live');
+
+  const toggle = (/** @type {string} */ id) => ({
+    id,
+    name: 'click',
+    args: { selector: 'notifications-toggle' },
+  });
+  const save = (/** @type {string} */ id) => ({
+    id,
+    name: 'click',
+    args: { selector: 'save-button' },
+  });
+  live.sendToLatest({
+    toolCall: {
+      functionCalls: [
+        { id: 'call-navigate', name: 'navigate', args: { route: 'settings' } },
+        toggle('on'),
+        save('save-1'),
+        toggle('off'),
+        save('save-2'),
+      ],
+    },
+  });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(5);
+  const responses = live.toolResponses();
+  expect(responses.map((r) => r.id)).toEqual(['call-navigate', 'on', 'save-1', 'off', 'save-2']);
+  expect(responses.map((r) => r.response.success)).toEqual(Array(5).fill(true));
+  expect(responses.some((r) => 'error' in r.response)).toBe(false);
+  expect(snapshotNodes(responses[1].response.page)).toContainEqual(
+    expect.objectContaining({ selector: 'notifications-toggle', checked: true }),
+  );
+  expect(snapshotNodes(responses[3].response.page)).toContainEqual(
+    expect.objectContaining({ selector: 'notifications-toggle', checked: false }),
+  );
+  await expect(frame.getByTestId('notifications-toggle')).not.toBeChecked();
+  await expect(frame.getByTestId('save-confirmation')).toBeVisible();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
+// M9 demo: the dense Orders page (#22) driven one call at a time, the way a
+// model works it: go there, tick two orders, ship them. Each response carries
+// the page after it, and the count follows the ticks.
+test('the agent works the Orders page: two orders ticked and shipped', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await page.waitForTimeout(1000);
+  await button('Talk to the AI Presenter').click();
+  await expect(status).toHaveText('Live');
+  await page.waitForTimeout(1000);
+
+  const calls = [
+    { name: 'navigate', args: { route: 'orders' } },
+    { name: 'click', args: { selector: 'order-1003-select' } },
+    { name: 'click', args: { selector: 'order-1004-select' } },
+    { name: 'click', args: { selector: 'ship-selected' } },
+  ];
+  for (const [i, call] of calls.entries()) {
+    live.sendToLatest({ toolCall: { functionCalls: [{ id: `orders-${i}`, ...call }] } });
+    await expect.poll(() => live.toolResponses()).toHaveLength(i + 1);
+    await page.waitForTimeout(1000);
+  }
+
+  expect(live.toolResponses().map((r) => r.response.success)).toEqual([true, true, true, true]);
+  await expect(frame.getByTestId('orders-selected-count')).toHaveText('0 selected');
+  await expect(frame.getByTestId('order-1003-ship')).toBeDisabled();
+  await expect(frame.getByTestId('order-1004-ship')).toBeDisabled();
+  await expect(frame.getByTestId('order-1005-ship')).toBeEnabled();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
 // #25 review: a link click leaves the old document unchanged, so its quiet
 // window used to pass and answer with an empty delta of the page being left.
 // The bridge now waits for the new page (here 300 ms late) and its response
@@ -198,7 +288,7 @@ test('a link click answers with the page it opened, not the one it left', async 
   });
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 

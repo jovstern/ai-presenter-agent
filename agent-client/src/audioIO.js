@@ -83,6 +83,8 @@ export function startCapture({ workletUrl, onFrame, onError }) {
   let source;
   /** @type {AudioWorkletNode | undefined} */
   let worklet;
+  /** @type {GainNode | undefined} */
+  let mute;
   let stopped = false;
   let level = 0;
 
@@ -116,14 +118,22 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       );
       if (stopped) return release();
       source = audioContext.createMediaStreamSource(stream);
-      // No outputs: the node is a sink, so nothing reaches the speakers, and
-      // the browser still runs it because its input is live.
+      // One silent output, wired to the speakers through a gain of 0 (#19):
+      // Chromium runs a node with no outputs because its input is live, but
+      // WebKit renders only what is connected toward the destination, so a
+      // sink's process() might never run there. The worklet writes silence
+      // and the gain is 0, so nothing is heard either way.
       worklet = new AudioWorkletNode(audioContext, CAPTURE_PROCESSOR, {
         numberOfInputs: 1,
-        numberOfOutputs: 0,
+        numberOfOutputs: 1,
+        outputChannelCount: [1],
         channelCount: 1,
         channelCountMode: 'explicit',
       });
+      mute = audioContext.createGain();
+      mute.gain.value = 0;
+      worklet.connect(mute);
+      mute.connect(audioContext.destination);
       worklet.port.onmessage = (/** @type {MessageEvent<ArrayBuffer>} */ event) => {
         if (stopped) return;
         const frame = new Int16Array(event.data);
@@ -143,8 +153,9 @@ export function startCapture({ workletUrl, onFrame, onError }) {
     }
   })();
 
-  // Releases everything acquired so far, once: the port, the nodes, the mic
-  // track(s) (B2: no live mic left behind) and the context.
+  // Releases everything acquired so far, once: the port, the nodes (the mute
+  // gain included), the mic track(s) (B2: no live mic left behind) and the
+  // context.
   function release() {
     if (worklet) {
       worklet.port.onmessage = null;
@@ -152,6 +163,8 @@ export function startCapture({ workletUrl, onFrame, onError }) {
       worklet.disconnect();
       worklet = undefined;
     }
+    mute?.disconnect();
+    mute = undefined;
     source?.disconnect();
     source = undefined;
     stream?.getTracks().forEach((t) => t.stop());

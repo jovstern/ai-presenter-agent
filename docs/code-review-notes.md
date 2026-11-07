@@ -255,6 +255,9 @@ Also move the "[system] greet" turn (B3) into this instruction instead of a user
 > endpoint (see the editorial note at the top and ADR 0001). The two in-memory gate maps are
 > also TTL-pruned and size-capped now (`server/expiringMap.js`), so a flood can't grow them
 > without limit, and serving the nonce-templated page is rate-limited per IP (M5 fix wave).
+> M9 T1 ([ADR 0005](adr/0005-load-the-gemini-sdk-on-talk.md)): `agent-client.js` is a module
+> script now, so `main.jsx` finds its tag (and `data-ds-nonce`) by `import.meta.url` instead of
+> `document.currentScript`; its lazy SDK chunk is a same-origin script, so the CSP is unchanged.
 > Deliberate gap: `style-src` allows `'unsafe-inline'`. The agent-client's shadow root gets its
 > stylesheet as a runtime `<style>` element (`main.jsx`), and Radix Dialog's react-remove-scroll
 > injects a `<style>` and inline style attributes when the knowledge dialog opens; neither can
@@ -458,6 +461,20 @@ if (message.toolCall) {
 > (a 204, a download, a cancelled one) fires `beforeunload` and no load, so the mark stays set
 > and the next successful action waits out its 3.7 s deadline once before clearing it; not
 > reachable on today's target app.
+>
+> **M9 T6 (issue #22, the snapshot cap on a dense page).** On the new Orders page (139
+> `data-testid`s) the 30-node cap kept the first 30 in page order: rows 13–60 and the whole New
+> order form were never in a snapshot, whatever was scrolled, so the model could not reach
+> them without guessing a selector. Over the cap, `bridge.js` now keeps the 30 nodes nearest the
+> frame's viewport (on screen first, unrendered last) in page order, sends `omitted` (how many it
+> left out), and sends a snapshot on a scroll (captured, so a scrolling container counts);
+> `domSnapshotContext.js` sends any removal on such a page as a keyframe, whose last line tells
+> the model how many elements are not listed and to scroll to the nearest listed one. The
+> `scroll` action is instant rather than smooth: its result waits for the page to settle, and a
+> smooth scroll held it 0.7–1 s, past the spec's 300 ms. The cap (30) and the ratio (0.6) are
+> kept on the measurements (`docs/metrics/README.md` § M9 T6). Tested in `bridge.test.js`,
+> `domSnapshotContext.test.js`, `bridgeChannel.test.js` and `e2e/bridge.spec.js`; one live run
+> ("go to the Orders page and tick the third order") passed.
 
 Two issues in one area:
 
@@ -490,6 +507,16 @@ const cs = iframe.contentWindow.getComputedStyle(el);
 return { selector, tag: el.tagName.toLowerCase(), label: labelFor(el),
          disabled: !!el.disabled, hidden: el.hidden || cs.display === "none" || cs.visibility === "hidden" };
 ```
+
+> **Follow-up (M9 fix wave, code review C1):** on a page over the cap, every scroll scheduled a
+> debounced snapshot, and `diffAndBroadcastSnapshot` posted it even when the scroll kept the same
+> 30 nodes, so the model got empty deltas. `diffAndBroadcastSnapshot({ always })` in
+> `sandbox/bridge.js` now drops a snapshot with nothing changed, nothing removed and the same
+> `omitted`, unless someone waits for it: an action's settled page (#25), a `request-snapshot`
+> and a frame load pass `always: true`; only the debounce passes `false`. `bridge.test.js` covers
+> the small scroll (nothing sent) and the explicit request (answered). Whether an unsolicited
+> snapshot can interrupt the model at all is an open question in
+> `project-knowledge-handoff.md` §3.3.
 
 ---
 
@@ -644,6 +671,25 @@ a framework's controlled input needs it.
 > `ds:loop-trip` `budget`; the user speaking restores it. Tested in `loopGuard.test.js`,
 > `liveSession.test.js` (10 advancing clicks pass; 4 no-op clicks trip; the 51st call) and
 > `e2e/loop.spec.js` (10 real clicks, the counter at 10).
+>
+> M9 T3 (#28): the period-2 rule refused an explicit two-round request on its 4th call —
+> "turn notifications on and save, then off and save" (the bare actions' A-B-A-B) or
+> "Settings, Home, Settings, Home" (the page signatures' too, since it meets the same two pages
+> again). Ruling, both of the issue's options: a period-2 cycle now trips on its third round
+> (`repeats: 3`, in both histories, the 6th call, as period 3 already did), so a runaway costs
+> two more actions and every further call of it is refused; and the loop refusal no longer
+> says "…repeated too many times… try something different" but, like the budget's, "…so it
+> was not done. Stop here, tell the user what you have done so far, and ask the user whether
+> to go on", so a third round the user did ask for costs one question rather than a dead end,
+> and a refused model checks in instead of improvising. Unchanged: period 1 (a no-op click on
+> an unchanged page still trips on the 4th), period 3 (two rounds, the 6th call; no request
+> for a routine twice has been seen), the window of 6, the 50-action budget, the system
+> instruction (its "try a different approach rather than repeating" covers a failed action;
+> the refusal itself says what to do). The `ds:loop-trip` kinds are unchanged. Tested in
+> `loopGuard.test.js` (on/save/off/save and Settings/Home twice pass; the 10-call A-B runaway
+> refused from the 6th call on), `liveSession.test.js` (both requests dispatched; the third
+> round refused; the refusal's wording) and `e2e/loop.spec.js` (navigate, on, save, off, save
+> on the real Settings page, all `success: true`).
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says
@@ -666,6 +712,12 @@ check(sig) {
 
 Feed transcript text (normalised) through the same guard, or add a separate cap on spoken turns
 per model turn.
+
+> **Known limit (M9 fix wave, code review M6):** on a page over the bridge's snapshot cap
+> (Orders), the snapshot holds the 30 nodes nearest the viewport, so the page fingerprint
+> depends on the scroll position: a viewer's scroll between two actions makes the next state new
+> and resets period-1 detection. Written into `loopGuard.js`'s known-limits comment; the
+> budget (`ACTION_BUDGET`) still bounds such a loop.
 
 ### [x] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
 
@@ -705,6 +757,11 @@ mirror of what the client sends (and then generate both from one object).
 > call in that queue now waits for the session and is answered (it was dropped), and the greeting
 > is decided by whether the attempt resumed, not by whether a handle has arrived by then.
 > `liveSession.test.js` drives both orders.
+
+> **M9 T2 (#29):** two more connect fields, checked the same way against 2.32.0's types and
+> the Live API guide: `FunctionDeclaration.behavior` (`Behavior.BLOCKING` on every action) and
+> `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (`VOICE_NAME`). `FunctionResponse.scheduling`
+> is ignored for a blocking call, so it is not sent (handoff §3.3).
 
 `@google/genai: ^1.0.0` (also `hono: ^4.6.0`, `react: ^18.3.0`) is a very wide range for a
 preview-API integration whose message shapes the handoff doc already admits are inferred

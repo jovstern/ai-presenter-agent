@@ -7,6 +7,9 @@ import {
   ACTION_BUDGET,
 } from '../loopGuard.js';
 
+/** @import { SnapshotNode } from '../bridgeProtocol.js' */
+
+/** @type {typeof actionSignature} */
 const sig = (name, args, page) => actionSignature(name, args, page);
 const increment = sig('click', { selector: 'counter-increment' });
 const decrement = sig('click', { selector: 'counter-decrement' });
@@ -62,18 +65,26 @@ describe('loopGuard: repeated actions', () => {
 });
 
 describe('loopGuard: cycles', () => {
-  it('trips on an A-B-A-B cycle, on the call that completes it', () => {
-    expect(run([goHome, goSettings, goHome, goSettings])).toEqual([false, false, false, true]);
+  // #28: two rounds of A-B can be what the user asked for ("Settings, Home,
+  // Settings, Home"); a third, unasked, is the loop.
+  it('passes an A-B-A-B cycle: two rounds can be the request', () => {
+    expect(run([goHome, goSettings, goHome, goSettings])).toEqual([false, false, false, false]);
   });
 
-  it('keeps tripping while the A-B cycle goes on', () => {
-    expect(run([increment, decrement, increment, decrement, increment])).toEqual([
+  it('trips an A-B cycle on its third round, on the call that completes it', () => {
+    expect(run([goHome, goSettings, goHome, goSettings, goHome, goSettings])).toEqual([
       false,
       false,
       false,
-      true,
+      false,
+      false,
       true,
     ]);
+  });
+
+  it('keeps tripping while the A-B runaway goes on', () => {
+    const runaway = Array.from({ length: 10 }, (_, i) => (i % 2 ? decrement : increment));
+    expect(run(runaway)).toEqual([...Array(5).fill(false), ...Array(5).fill(true)]);
   });
 
   it('trips on a period-3 cycle (A-B-C-A-B-C) on the call that completes it', () => {
@@ -119,16 +130,30 @@ describe('loopGuard: the page an action was taken on is part of its signature', 
     expect(run([0, 0, 0, 0].map(incrementAt))).toEqual([false, false, false, true]);
   });
 
-  it('still trips a toggle flipped on, off, on, off (period 2 over two states)', () => {
+  it('passes a toggle flipped on, off, on, off; trips its third round (period 2 over two states)', () => {
     const flipOn = sig('click', { selector: 'notifications-toggle' }, 'off');
     const flipOff = sig('click', { selector: 'notifications-toggle' }, 'on');
-    expect(run([flipOn, flipOff, flipOn, flipOff])).toEqual([false, false, false, true]);
+    expect(run([flipOn, flipOff, flipOn, flipOff, flipOn, flipOff])).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
   });
 
-  it('still trips home → settings → home → settings taken from the same two pages', () => {
+  it('passes home → settings twice from the same two pages; trips the third round', () => {
     const toSettings = sig('navigate', { route: 'settings' }, 'home-page');
     const toHome = sig('navigate', { route: 'home' }, 'settings-page');
-    expect(run([toSettings, toHome, toSettings, toHome])).toEqual([false, false, false, true]);
+    expect(run([toSettings, toHome, toSettings, toHome, toSettings, toHome])).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
   });
 
   it('falls back to the bare action when there is no page yet', () => {
@@ -188,25 +213,42 @@ describe('loopGuard: cycles on the real app, whose states never repeat', () => {
     ]);
   });
 
-  it('trips toggle, save, toggle, save on the 4th call', () => {
-    expect(play(['toggle', 'save', 'toggle', 'save'])).toEqual([false, false, false, true]);
+  // #28: the explicit two-round requests the old period-2 rule refused.
+  it('passes "notifications on and save, then off and save" (toggle, save, toggle, save)', () => {
+    expect(play(['toggle', 'save', 'toggle', 'save'])).toEqual([false, false, false, false]);
   });
 
-  it('trips the toggle alone flip-flopping on the 4th call', () => {
-    expect(play(['toggle', 'toggle', 'toggle', 'toggle'])).toEqual([false, false, false, true]);
-  });
-
-  it('trips home → settings → home → settings on the 4th call', () => {
+  it('passes "Settings, Home, Settings, Home"', () => {
     expect(play(['toSettings', 'toHome', 'toSettings', 'toHome'])).toEqual([
       false,
       false,
       false,
+      false,
+    ]);
+  });
+
+  it('trips toggle, save on its third round, the 6th call, and every call after', () => {
+    /** @type {(keyof typeof steps)[]} */
+    const runaway = Array.from({ length: 10 }, (_, i) => (i % 2 ? 'save' : 'toggle'));
+    expect(play(runaway)).toEqual([...Array(5).fill(false), ...Array(5).fill(true)]);
+  });
+
+  it('trips the toggle alone flip-flopping on the 6th call', () => {
+    expect(play(Array(6).fill('toggle'))).toEqual([...Array(5).fill(false), true]);
+  });
+
+  it('trips home → settings on its third round, the 6th call', () => {
+    expect(play(['toSettings', 'toHome', 'toSettings', 'toHome', 'toSettings', 'toHome'])).toEqual([
+      ...Array(5).fill(false),
       true,
     ]);
   });
 
-  it('trips increment, decrement, increment, decrement on the 4th call', () => {
-    expect(play(['inc', 'dec', 'inc', 'dec'])).toEqual([false, false, false, true]);
+  it('trips increment, decrement on its third round, the 6th call', () => {
+    expect(play(['inc', 'dec', 'inc', 'dec', 'inc', 'dec'])).toEqual([
+      ...Array(5).fill(false),
+      true,
+    ]);
   });
 
   it('passes 10 and 50 counter clicks, and the six-step task', () => {
@@ -217,6 +259,12 @@ describe('loopGuard: cycles on the real app, whose states never repeat', () => {
 });
 
 describe('pageFingerprint', () => {
+  /**
+   * @param {string} selector
+   * @param {string} label
+   * @param {Partial<SnapshotNode>} [extra]
+   * @returns {SnapshotNode}
+   */
   const node = (selector, label, extra = {}) => ({
     selector,
     tag: 'span',
@@ -292,12 +340,8 @@ describe('loopGuard: the user speaking ends the action window', () => {
   it('still trips a loop within one request', () => {
     const guard = createLoopGuard();
     guard.userSpoke();
-    expect([goHome, goSettings, goHome, goSettings].map((s) => guard.check(s))).toEqual([
-      false,
-      false,
-      false,
-      true,
-    ]);
+    const cycle = [goHome, goSettings, goHome, goSettings, goHome, goSettings];
+    expect(cycle.map((s) => guard.check(s))).toEqual([...Array(5).fill(false), true]);
   });
 });
 
@@ -330,6 +374,7 @@ describe('loopGuard: normal varied use passes', () => {
       save,
       increment,
     ],
+    'Settings, Home, Settings, Home (#28)': [goSettings, goHome, goSettings, goHome],
     'a fill retried with a different value, then saved': [
       fillName,
       save,

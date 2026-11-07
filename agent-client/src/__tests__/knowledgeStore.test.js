@@ -1,8 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as knowledgeStore from '../knowledgeStore.js';
+import { defined } from './defined.js';
 
+/**
+ * @param {string} name
+ * @param {string} text
+ */
 function makeFile(name, text) {
   return new File([text], name, { type: 'text/plain' });
+}
+
+/**
+ * The file an add stored; an add that was refused fails the test with its reason.
+ * @param {Awaited<ReturnType<typeof knowledgeStore.addFile>>} result
+ */
+function addedFile(result) {
+  if (!result.ok) throw new Error(`not added: ${result.reason}`);
+  return result.file;
 }
 
 beforeEach(() => {
@@ -18,8 +32,7 @@ describe('knowledgeStore', () => {
 
   it('rejects files with an unaccepted extension', async () => {
     const result = await knowledgeStore.addFile(makeFile('doc.pdf', 'binary-ish'));
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/txt.*md/);
+    expect(result).toEqual({ ok: false, reason: expect.stringMatching(/txt.*md/) });
     expect(knowledgeStore.listFiles()).toHaveLength(0);
   });
 
@@ -32,7 +45,7 @@ describe('knowledgeStore', () => {
   });
 
   it('adds, lists, and removes files', async () => {
-    const { file } = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
+    const file = addedFile(await knowledgeStore.addFile(makeFile('a.txt', 'A')));
     expect(knowledgeStore.listFiles().map((f) => f.name)).toEqual(['a.txt']);
     knowledgeStore.removeFile(file.id);
     expect(knowledgeStore.listFiles()).toHaveLength(0);
@@ -41,11 +54,10 @@ describe('knowledgeStore', () => {
   it('adds files on an insecure page, where crypto.randomUUID does not exist (L6)', async () => {
     vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) });
     try {
-      const first = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
-      const second = await knowledgeStore.addFile(makeFile('b.txt', 'B'));
-      expect(first.ok && second.ok).toBe(true);
-      expect(first.file.id).toMatch(/^[0-9a-f]{32}$/);
-      expect(second.file.id).not.toBe(first.file.id);
+      const first = addedFile(await knowledgeStore.addFile(makeFile('a.txt', 'A')));
+      const second = addedFile(await knowledgeStore.addFile(makeFile('b.txt', 'B')));
+      expect(first.id).toMatch(/^[0-9a-f]{32}$/);
+      expect(second.id).not.toBe(first.id);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -159,7 +171,7 @@ describe('knowledgeStore when the browser refuses', () => {
       Object.defineProperty(
         globalThis,
         'localStorage',
-        /** @type {PropertyDescriptor} */ (descriptor),
+        defined(descriptor, 'the localStorage descriptor'),
       );
     }
   }
@@ -181,9 +193,8 @@ describe('knowledgeStore when the browser refuses', () => {
   });
 
   it('reports a removal that went through as ok', async () => {
-    const added = await knowledgeStore.addFile(makeFile('a.txt', 'A'));
-    if (!added.ok) throw new Error('not added');
-    expect(knowledgeStore.removeFile(added.file.id)).toEqual({ ok: true });
+    const added = addedFile(await knowledgeStore.addFile(makeFile('a.txt', 'A')));
+    expect(knowledgeStore.removeFile(added.id)).toEqual({ ok: true });
   });
 
   it('reads as empty, not a throw, when localStorage is blocked', () => {
@@ -204,7 +215,7 @@ describe('knowledgeStore when the browser refuses', () => {
       Object.defineProperty(
         globalThis,
         'localStorage',
-        /** @type {PropertyDescriptor} */ (descriptor),
+        defined(descriptor, 'the localStorage descriptor'),
       );
     }
   });
