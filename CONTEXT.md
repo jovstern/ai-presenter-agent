@@ -91,9 +91,14 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   model takes a turn between a function call and its response as the user talking over it
   (`sendTurn` in `liveSession.js`).
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
-  **action signature** (tool name + normalised arguments) that is the 4th identical one in a
-  row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
-  try something else. The window covers one request: the user speaking clears it. An **agent
+  **action signature** (tool name + normalised arguments + a **page fingerprint**, a hash of
+  the latest full snapshot: the page the action was taken on) that is the 4th identical one in
+  a row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
+  try something else. The same click that moves the page on (the counter at 0, 1, 2, …) is
+  progress, not a repeat; with no snapshot yet the signature is the bare action. A request
+  also has an **action budget** of 50: past it each action is refused with "ask the user
+  whether to go on". The window and the budget cover one request: the user speaking clears
+  them. An **agent
   turn** (its transcription fragments up to `turnComplete`) whose normalised sentence fills 3
   of the last 5 turns is an **utterance loop**: `liveSession` sends one **corrective turn** per
   episode, which ends when the agent says something else, calls a tool (narrating each step of

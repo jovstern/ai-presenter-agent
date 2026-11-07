@@ -6,15 +6,27 @@
 // connect(), so a new conversation starts clean, userSpoke() on the user's
 // own transcription and agentActed() on every tool call.
 
+/** @import { SnapshotNode } from './bridgeProtocol.js' */
+
 // --- Actions ---
+// A signature is the action (tool name + normalised args) plus a fingerprint
+// of the page it was taken on: liveSession's latest full snapshot, which in a
+// batch is the one the previous call's settled snapshot left (bridge.js posts
+// it before that call's result), and after a connect or resume the keyframe it
+// asks for. Since #25 every response shows the model the page, so the same
+// click that moves it on (the counter at 0, 1, 2, …) is progress, not a loop:
+// "increment the counter to 10" used to be refused on the 4th click. The same
+// action on the same page is what repeats. With no snapshot yet there is no
+// fingerprint, and the signature is the bare action.
 // Each rule trips on the call that completes `repeats` back-to-back copies of
 // a `period`-long pattern. Blocked calls stay in the history, so a model that
 // carries on with the same cycle keeps being refused.
-// - Period 1 (the same call over and over): 4th in a row. Three is legitimate
-//   ("increment the counter three times"); a fourth unasked one is a loop.
+// - Period 1 (the same call on the same page): 4th in a row. A click that
+//   changes nothing, or a failing one (no snapshot, the page as it was).
 // - Period 2 (A-B-A-B): on the second B. The model bouncing between two pages
-//   or two buttons twice is the classic agent loop; home → settings → home
-//   once (A-B-A) still passes.
+//   or two buttons twice is the classic agent loop, and it returns to the
+//   same two states, so it still trips (a toggle flipped on, off, on, off);
+//   home → settings → home once (A-B-A) still passes.
 // - Period 3 (A-B-C-A-B-C): on the second C. A three-step routine (fill,
 //   toggle, save) is one task; doing it all again, unchanged, is a loop.
 // A cycle needs at least two different calls; a constant run is period 1's.
@@ -37,7 +49,16 @@
 // (and 5 more where a refused action would show as a failed tool) nothing
 // tripped, and the six-step task's longest repeat is the counter's two
 // clicks (docs/metrics/m06.md).
+// A known limit of the fingerprint: a page with an element that changes on
+// its own (a clock, a live feed) makes every state new, so a no-op loop there
+// never repeats a signature. The target app has none. ACTION_BUDGET is the
+// backstop: one request gets 50 actions, then each further one is refused
+// with a stop-and-ask (not "repeated"), until the user speaks. The six-step
+// task takes 6; 50 still lets "increment the counter to 50" finish, and with
+// the bridge's settle (100 ms quiet, 1 s cap per action) it bounds a runaway
+// to about a minute of acting, plus the model's own turns.
 const REPEAT_LIMIT = 3;
+export const ACTION_BUDGET = 50;
 const CYCLE_RULES = [
   { period: 1, repeats: REPEAT_LIMIT + 1 },
   { period: 2, repeats: 2 },
@@ -92,6 +113,7 @@ function endsInCycle(history, period, repeats) {
 export function createLoopGuard() {
   /** @type {string[]} */
   let actions = [];
+  let actionsSpent = 0;
   /** @type {string[]} */
   let utterances = [];
   // Whether an utterance trip may fire; false from a trip until the episode ends.
@@ -103,6 +125,12 @@ export function createLoopGuard() {
     actions.push(signature);
     if (actions.length > ACTION_WINDOW) actions.shift();
     return CYCLE_RULES.some(({ period, repeats }) => endsInCycle(actions, period, repeats));
+  }
+
+  // Counts one action against the request's budget; true once it is spent.
+  function spendAction() {
+    actionsSpent += 1;
+    return actionsSpent > ACTION_BUDGET;
   }
 
   // Returns true once per loop episode: on the turn that makes the sentence a
@@ -136,6 +164,7 @@ export function createLoopGuard() {
   // did before no longer counts towards a loop.
   function userSpoke() {
     actions = [];
+    actionsSpent = 0;
     agentActed();
   }
 
@@ -143,20 +172,39 @@ export function createLoopGuard() {
     userSpoke();
   }
 
-  return { check, checkUtterance, agentActed, userSpoke, reset };
+  return { check, spendAction, checkUtterance, agentActed, userSpoke, reset };
 }
 
 /**
  * The tool name plus its args with keys sorted and strings trimmed, so the
- * same call written two ways is one signature.
+ * same call written two ways is one signature, plus the page it was taken on.
  * @param {string} name
  * @param {Record<string, unknown>} [args]
+ * @param {string} [page] pageFingerprint() of the page before the action;
+ *   none (no snapshot yet) leaves the bare action.
  */
-export function actionSignature(name, args) {
+export function actionSignature(name, args, page) {
   const normalised = Object.fromEntries(
     Object.entries(args ?? {})
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]),
   );
-  return `${name}:${JSON.stringify(normalised)}`;
+  const action = `${name}:${JSON.stringify(normalised)}`;
+  return page === undefined ? action : `${action}@${page}`;
+}
+
+/**
+ * A short, stable stand-in for a page state: 32-bit FNV-1a over the full node
+ * list's JSON (bridge.js builds every node with the same key order), in base
+ * 36. A collision would only merge two states for the guard.
+ * @param {SnapshotNode[]} nodes
+ */
+export function pageFingerprint(nodes) {
+  const text = JSON.stringify(nodes);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
 }

@@ -622,6 +622,22 @@ a framework's controlled input needs it.
 > picked up by the mic is transcribed as the user and clears the action window. Gating
 > `userSpoke()` on length was not done: the 14 live-e2e transcripts show no echo and one real
 > 3-word request fragment a gate would have dropped.
+>
+> #25 follow-up (PR #27): with every response now carrying the page, the period-1 rule refused
+> legitimate progress — "increment the counter to 10" stopped at 3 ("I can't repeat the action
+> further"). `actionSignature()` now takes the page the action was taken on:
+> `pageFingerprint()` (32-bit FNV-1a of the latest full snapshot's JSON, base 36), which
+> `liveSession.js` updates on every snapshot, so within a batch it is the page the previous
+> call's settled snapshot left, and after a connect or resume the keyframe it requests. The
+> rules are unchanged: a no-op click on an unchanged page still trips on the 4th, a toggle
+> flipped on/off/on/off or home/settings/home/settings still trips as a period-2 cycle, a
+> repeated three-step routine on the same states as period 3; with no snapshot yet the
+> signature is the bare action. Known limit: an element that changes on its own (a clock)
+> makes every state new. Backstop: `ACTION_BUDGET` (50 actions per request, `spendAction()`),
+> past which each call is refused with a stop-and-ask message (not "repeated"), marked
+> `ds:loop-trip` `budget`; the user speaking restores it. Tested in `loopGuard.test.js`,
+> `liveSession.test.js` (10 advancing clicks pass; 4 no-op clicks trip; the 51st call) and
+> `e2e/loop.spec.js` (10 real clicks, the counter at 10).
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says

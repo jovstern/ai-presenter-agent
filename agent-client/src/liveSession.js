@@ -5,7 +5,7 @@ import { GoogleGenAI, Modality } from '@google/genai/web';
 import { CHANGE_EVENT, buildContextMessage } from './knowledgeStore.js';
 import { TOOL_DECLARATIONS, toPositionalArgs } from './actionTools.js';
 import { createDomSnapshotContext, formatSnapshotMessage } from './domSnapshotContext.js';
-import { createLoopGuard, actionSignature } from './loopGuard.js';
+import { createLoopGuard, actionSignature, pageFingerprint, ACTION_BUDGET } from './loopGuard.js';
 import { INPUT_SAMPLE_RATE } from './pcm.js';
 // The one model name: server/geminiMint.js locks every token to it
 // (liveConnectConstraints), so a second copy here could drift and every
@@ -153,6 +153,14 @@ const SYSTEM_INSTRUCTION =
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
+// The error a refused action answers with. A loop is the same action on the
+// same page (loopGuard.check), so progress, which changes the page, never
+// gets it; past the request's budget (loopGuard.spendAction) the model is
+// told to check in, not that it repeated.
+const LOOP_REFUSAL =
+  'This action has repeated too many times, alone or in a cycle with your last few — try something different.';
+const BUDGET_REFUSAL = `That is ${ACTION_BUDGET} actions since the user last spoke. Stop here, tell the user what you have done so far, and ask the user whether to go on.`;
+
 // Sent once per utterance-loop episode (loopGuard.checkUtterance).
 const CORRECTIVE_TURN =
   'You are repeating yourself. Stop, say one short sentence to the user and wait for them.';
@@ -170,7 +178,8 @@ const MAX_PENDING_FRAMES = 20; // ~1.6 s of the capture worklet's 80 ms frames
 // e2e (e2e/live.spec.js, docs/metrics/README.md): `ds:connect-start`,
 // `ds:open`, `ds:first-audio`, `ds:tool-start:<id>` / `ds:tool-end:<id>` and
 // `ds:reconnected`, plus `ds:keyframe` and `ds:knowledge` with the `bytes` (UTF-8)
-// each sent message cost and `ds:loop-trip` with its `kind` (M6 T5 tunes from
+// each sent message cost and `ds:loop-trip` with its `kind` (`action`,
+// `utterance` or `budget`; M6 T5 tunes from
 // them). A mark is a timestamp in a buffer nobody reads in
 // production: no logging, no network. The buffer lasts as long as the page and
 // gets two marks per tool call, so the names are kept and cleared on
@@ -352,6 +361,12 @@ export function createLiveSession({
   /** @type {Snapshot | null} */
   let heldSnapshot = null;
   let heldCount = 0;
+  // The loop guard's view of the page: the fingerprint of the latest full
+  // snapshot, whether it was sent, held or arrived with no session. Snapshots
+  // come in order, and a successful action's settled one before its result,
+  // so when a call is checked this is the page the previous call left.
+  /** @type {string | undefined} */
+  let currentPage;
 
   // Client turns (the knowledge context, the greeting, the loop corrective)
   // can't land between a function call and its response either: the model
@@ -403,6 +418,7 @@ export function createLiveSession({
   }
 
   const unsubscribeSnapshot = bridge.onSnapshot((snapshot) => {
+    currentPage = pageFingerprint(snapshot.full);
     if (!session) return;
     if (runningBatches.size > 0) {
       heldSnapshot = snapshot;
@@ -424,17 +440,15 @@ export function createLiveSession({
       // The SDK types `name` as optional; Live always sends it with a call.
       const name = fc.name ?? '';
       const id = fc.id ?? name;
-      const signature = actionSignature(name, fc.args);
+      const signature = actionSignature(name, fc.args, currentPage);
       mark(`ds:tool-start:${id}`, { name });
-      const tripped = loopGuard.check(signature);
-      if (tripped) mark('ds:loop-trip', { kind: 'action' });
+      const overBudget = loopGuard.spendAction();
+      const looping = loopGuard.check(signature);
+      const refusal = overBudget ? BUDGET_REFUSAL : looping ? LOOP_REFUSAL : undefined;
+      if (refusal) mark('ds:loop-trip', { kind: overBudget ? 'budget' : 'action' });
       /** @type {ActionResult} */
-      const result = tripped
-        ? {
-            success: false,
-            error:
-              'This action has repeated too many times, alone or in a cycle with your last few — try something different.',
-          }
+      const result = refusal
+        ? { success: false, error: refusal }
         : await bridge.dispatchAction(name, toPositionalArgs(name, fc.args ?? {}));
       mark(`ds:tool-end:${id}`, { name, success: result.success });
 

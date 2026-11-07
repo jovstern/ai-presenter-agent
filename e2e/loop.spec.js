@@ -19,6 +19,16 @@ function snapshotNodes(page) {
   return JSON.parse(page.split('\n')[1]);
 }
 
+/**
+ * The counter's value in a `page`, if the snapshot lists it.
+ * @param {string} page
+ */
+function counterIn(page) {
+  return snapshotNodes(page).find(
+    (/** @type {{ selector: string }} */ node) => node.selector === 'counter-value',
+  )?.label;
+}
+
 test('a tool batch drives the iframe and the session survives a dropped socket', async ({
   page,
 }) => {
@@ -133,10 +143,41 @@ test('every click of a batch answers with the page it left: the counter at 1, 2,
   await expect(frame.getByTestId('counter-value')).toHaveText('3');
   const responses = live.toolResponses();
   expect(responses.map((r) => r.id)).toEqual(['inc-1', 'inc-2', 'inc-3']);
-  const counterIn = (/** @type {string} */ pageText) =>
-    snapshotNodes(pageText).find((node) => node.selector === 'counter-value')?.label;
   expect(responses.map((r) => r.response.success)).toEqual([true, true, true]);
   expect(responses.map((r) => counterIn(r.response.page))).toEqual(['1', '2', '3']);
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
+// #25: the loop guard judges an action on the page it was taken on, so ten
+// identical clicks that each move the counter on are progress, not a loop
+// (the old guard refused the 4th: "I can't repeat the action further").
+test('ten identical counter clicks all run: the counter reaches 10', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Live');
+  await expect(frame.getByTestId('counter-value')).toHaveText('0');
+
+  const clicks = Array.from({ length: 10 }, (_, i) => ({
+    id: `inc-${i + 1}`,
+    name: 'click',
+    args: { selector: 'counter-increment' },
+  }));
+  live.sendToLatest({ toolCall: { functionCalls: clicks } });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(10);
+  await expect(frame.getByTestId('counter-value')).toHaveText('10');
+  const responses = live.toolResponses();
+  expect(responses.map((r) => r.response.success)).toEqual(Array(10).fill(true));
+  expect(responses.map((r) => counterIn(r.response.page))).toEqual(
+    Array.from({ length: 10 }, (_, i) => String(i + 1)),
+  );
 
   await button('End').click();
   await expect(status).toHaveText('Not connected');

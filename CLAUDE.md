@@ -269,7 +269,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 20 vitest files (393 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 20 vitest files (408 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
@@ -303,15 +303,16 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (35
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (36
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
-  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (3: the real
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (4: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
-  response's `page` showing 1, 2, 3; a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
+  response's `page` showing 1, 2, 3; ten identical counter clicks all run (the loop guard judges
+  each on the page it was taken on), the counter at 10; a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on

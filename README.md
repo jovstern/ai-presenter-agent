@@ -197,7 +197,7 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 5 specs, 33 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 5 specs, 36 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
@@ -217,7 +217,8 @@ The suite in `agent-client/src/__tests__/`:
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
   per drop, superseded connects, in-order tool batches, the token and model it connects with,
   resumption without re-greeting, the
-  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
+  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, ten counter clicks that each move the page on all run while
+  four no-op clicks are refused, the 51st action of a request refused with a stop-and-ask, one corrective turn
   per repeated-sentence episode, never sent to a replacement session; the user speaking clears
   the action window, and narration between tool calls is no loop), the SDK's real order
   (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
@@ -277,7 +278,9 @@ The suite in `agent-client/src/__tests__/`:
   drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
   and not saved, the file picker from a real button, open focus, Tab wrapping both ways,
   Escape returning focus to the knowledge button.
-- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
+- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, each judged on
+  the page's fingerprint (identical clicks that move the counter on pass; the same click on the
+  same page, a toggle flipped back and forth, still trip), the 50-action budget, repeated agent
   sentences, realistic sequences that must pass, the window cleared by the user speaking and the
   utterance episode by a tool call.
 - `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack
@@ -312,7 +315,8 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe and the click's the
-  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; a link
+  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; ten
+  identical counter clicks all run and leave it at 10; a link
   click answers with the Settings keyframe even when the page arrives 300 ms late; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; End returns to "Not
   connected". The card's own states are `widget.spec.js`'s.
