@@ -364,19 +364,19 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 7 Playwright specs (49
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 7 Playwright specs (50
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (14: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
   text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result; on the
   Orders page, the 30 nodes nearest the view within the 4 kB keyframe budget, a tick and a fill
-  as deltas, a scroll as a keyframe, and a viewer's scroll sending a snapshot), `loop.spec.js` (5: the real
+  as deltas, a scroll as a keyframe, and a viewer's scroll sending a snapshot), `loop.spec.js` (6: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
   response's `page` showing 1, 2, 3; ten identical counter clicks all run (the loop guard judges
   each on the page it was taken on), the counter at 10; navigate, toggle on, save, toggle off,
-  save all `success: true` (an explicit two-round request passes the loop guard, #28); a link click answered with the new page's keyframe), `widget.spec.js` (9, M7 T6: every card state
+  save all `success: true` (an explicit two-round request passes the loop guard, #28); the M9 demo, "the agent works the Orders page", one call at a time: navigate, tick 1003 and 1004, Ship selected, both shipped; a link click answered with the new page's keyframe), `widget.spec.js` (9, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on

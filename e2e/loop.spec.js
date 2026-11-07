@@ -236,6 +236,43 @@ test('an explicit two-round request runs: on, save, off, save all succeed', asyn
   await expect(status).toHaveText('Not connected');
 });
 
+// M9 demo: the dense Orders page (#22) driven one call at a time, the way a
+// model works it: go there, tick two orders, ship them. Each response carries
+// the page after it, and the count follows the ticks.
+test('the agent works the Orders page: two orders ticked and shipped', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await page.waitForTimeout(1000);
+  await button('Talk to the AI Presenter').click();
+  await expect(status).toHaveText('Live');
+  await page.waitForTimeout(1000);
+
+  const calls = [
+    { name: 'navigate', args: { route: 'orders' } },
+    { name: 'click', args: { selector: 'order-1003-select' } },
+    { name: 'click', args: { selector: 'order-1004-select' } },
+    { name: 'click', args: { selector: 'ship-selected' } },
+  ];
+  for (const [i, call] of calls.entries()) {
+    live.sendToLatest({ toolCall: { functionCalls: [{ id: `orders-${i}`, ...call }] } });
+    await expect.poll(() => live.toolResponses()).toHaveLength(i + 1);
+    await page.waitForTimeout(1000);
+  }
+
+  expect(live.toolResponses().map((r) => r.response.success)).toEqual([true, true, true, true]);
+  await expect(frame.getByTestId('orders-selected-count')).toHaveText('0 selected');
+  await expect(frame.getByTestId('order-1003-ship')).toBeDisabled();
+  await expect(frame.getByTestId('order-1004-ship')).toBeDisabled();
+  await expect(frame.getByTestId('order-1005-ship')).toBeEnabled();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
 // #25 review: a link click leaves the old document unchanged, so its quiet
 // window used to pass and answer with an empty delta of the page being left.
 // The bridge now waits for the new page (here 300 ms late) and its response

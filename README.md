@@ -201,7 +201,7 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 7 specs, 49 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 7 specs, 50 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
@@ -445,7 +445,7 @@ Lighthouse per route in `docs/metrics/history.csv`). At the end of M7, after its
 | Lighthouse mobile on `/` (Perf / A11y / BP / SEO) | 100 / 100 / 100 / 100 (M4 started at 75 / 80) | ≥ 95 / 100 / 100 / 100 |
 | `/` mobile LCP / CLS / TBT | 0.90 s / 0 / 13 ms | ≤ 2.0 s / 0.05 / 150 ms |
 | CLS while Live, transcript growing (390 px) | 0 (was 0.151 before the M7 fix) | ≤ 0.05 |
-| `agent-client.js` gzip, page load | 107.79 kB at M9 T1, the SDK loaded on Talk (179.62 before; 149.5 at M4) | ≤ 180 kB |
+| `agent-client.js` gzip, page load | 108.44 kB at M9 (107.79 at T1), the SDK loaded on Talk (179.62 before; 149.5 at M4) | ≤ 180 kB |
 | Gemini SDK chunk gzip, loaded on Talk | 74.66 kB at M9 T1 | ≤ 80 kB |
 | axe violations, 13 states in light and dark | 0 | 0 |
 | React commits per second while the orb animates | 0 | ~0 |
