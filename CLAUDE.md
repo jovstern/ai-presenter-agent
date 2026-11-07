@@ -46,7 +46,10 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `audioIO.js` — capture: the mic into `public/capture-worklet.js` (an AudioWorklet, loaded
     with `addModule` from `/agent-client/capture-worklet.js`, a URL `main.jsx` resolves next to
     its own script tag), which low-passes and resamples to 16 kHz Int16 off the main thread and
-    posts 80 ms frames (1280 samples, buffer transferred); playback with barge-in. Vite copies
+    posts 80 ms frames (1280 samples, buffer transferred). The capture node has one output,
+    which the worklet fills with silence, wired to the speakers through a `GainNode` at 0 (M9 T6,
+    #19): WebKit renders only what is connected toward the destination, so a sink (0 outputs)
+    might never run there; teardown disconnects the gain too. Playback with barge-in. Vite copies
     `public/` into `dist/`; the worklet is plain JS, linted with AudioWorklet globals only and
     typechecked by its own `jsconfig.worklet.json` (+ `types/audioworklet.d.ts`). Both the
     capture and the player have `getLevel()` (0..1, `pcm.js` `levelOf`): the mic's last frame,
@@ -306,10 +309,11 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (444 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (446 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
-  `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
+  `audioIO` (the secure-context check; the capture node's muted output; capture releases
+  everything once, the mute included; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors, the
   SDK chunk's included,
   the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
@@ -317,7 +321,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `sandbox/bridge.js` against a stubbed iframe; over the cap, the nodes nearest the viewport
   and a snapshot on scroll), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
-  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext` (incl. the
+  frame size, 16 kHz from 48/44.1 kHz, no aliasing, a silent output), `domSnapshotContext` (incl. the
   `omitted` line and a removal over the cap as a keyframe), `knowledgeStore` (incl.
   full storage, an unreadable file, and blocked storage on reads and writes),
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an

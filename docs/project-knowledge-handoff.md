@@ -344,14 +344,23 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   context after `addModule` (M6 fix wave): it is created after awaits, outside the click's user
   activation, and Safari starts such a context suspended. Not verified: Firefox and Safari (the
   e2e is Chromium only). Manual checks for them, with a real mic:
-  - **Safari / WebKit:** the capture node has **0 outputs** (a sink), and WebKit has been known
+  - **Safari / WebKit:** the capture node had **0 outputs** (a sink), and WebKit has been known
     not to pull a node that isn't connected toward the destination, so `process()` might never
-    run. Check that a user transcript line appears after speaking; if not, give the node one
-    output and connect it through a muted `GainNode` to the destination.
+    run. Fixed ahead of the check (M9 T6, #19): the node has one output, which the worklet fills
+    with silence, connected through a `GainNode` at gain 0 to the destination
+    (`audioIO.test.js`, `captureWorklet.test.js`; Chromium's `e2e/audio.spec.js` and the live e2e
+    still pass). Still to check on the deployed site with a real mic (#23): that a user
+    transcript line appears after speaking. A local Playwright probe couldn't settle it: on the
+    development Mac, WebKit's `AudioContext` reports `running` but its clock stays at 0 (no node
+    renders, sink or not, even an oscillator), and Chromium on the same host audio device
+    advances 0.01 s in 3 s, so the host's audio service is stalled (as in M9 T2); the page, the
+    worklet's load under the CSP and Talk → Live worked, with no error.
   - **Firefox:** the AudioContext runs at the device rate on purpose (Firefox refuses to connect
     a mic to a context at another rate). Check on a 44.1 kHz device (many USB headsets) and a
     48 kHz one that the agent hears you and the frames are 2560 bytes at ~12.5/s (DevTools →
-    Network → WS).
+    Network → WS). The local Playwright probe (M9 T6) got as far as the worklet loading under
+    the CSP (`addModule` resolves) and Talk → Live; `resume()` never settled on this host, with
+    or without a click and with Firefox's null audio backend, so no frame was measured.
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
 - **DOM snapshot payload size is measured on the mock target app only, now with a dense page**

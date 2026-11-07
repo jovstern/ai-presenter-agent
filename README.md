@@ -307,9 +307,12 @@ The suite in `agent-client/src/__tests__/`:
   trailing half sample.
 - `captureWorklet.test.js` — `public/capture-worklet.js` under a stubbed AudioWorklet scope:
   80 ms Int16 frames of 1280 at 16 kHz, posted with the buffer transferred; from 48 and 44.1 kHz,
-  16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing).
+  16000 samples a second, a 1 kHz tone kept and a 12 kHz tone filtered out (no aliasing); its
+  one output written as silence whatever the input.
 - `audioIO.test.js` — the secure-context / AudioWorklet check, the context resumed after the
-  worklet loads (Safari), and that capture releases the port, nodes, mic track and context once,
+  worklet loads (Safari), the capture node wired to the speakers through a gain of 0 (#19:
+  WebKit pulls only nodes connected toward the destination), and that capture releases the
+  port, nodes (the gain included), mic track and context once,
   including on a stop mid-setup, a worklet that fails to load (reported as a `WorkletLoadError`)
   or a context that won't resume or never settles (a 3 s timeout, an `AudioResumeTimeoutError`).
 

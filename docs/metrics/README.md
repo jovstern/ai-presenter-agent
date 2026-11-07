@@ -225,6 +225,25 @@ resumed, Pelican recalled) all passed; connect → `open` 1.47–2.23 s, connect
 2.11–2.79 s. The Home and Settings keyframes grew from 777 / 855 B to 862 / 940 B with the
 Orders link in their nav.
 
+### WebKit and Firefox capture probe (issue #19, M9 T6)
+
+The capture node now has one silent output wired to the destination through a gain of 0, so
+WebKit pulls it. A scratch Playwright config (not in the repo; CI stays Chromium) ran the real
+page against the fake Live socket in Playwright's WebKit and Firefox (157) builds, plus the bare
+capture graph with 0 and 1 outputs:
+
+| | Page and worklet load under the CSP | Talk → Live | `AudioContext` clock in 3 s | Frames |
+|---|---|---|---|---|
+| Chromium, `--disable-audio-output` (as the e2e) | yes, no errors | yes | 3.01 s | 12.3/s, 2560 B, both graphs |
+| Chromium on the host's audio device | yes | — | 0.01 s | 0 |
+| WebKit (mock mic; the clock checked headed too) | yes, no errors | yes | 0 (`running`) | 0, both graphs, an oscillator too |
+| Firefox (fake mic prefs; also the null audio backend) | yes (`addModule` resolves) | yes | `resume()` never settles | 0 |
+
+Chromium on the same host audio device stalls too, so the host's audio service was stuck (as in
+M9 T2), and neither WebKit nor Firefox has a fake output device flag to get round it. Whether
+WebKit pulls the node, and Firefox's frame rate at 44.1 and 48 kHz, wait for the real-mic check
+on the deployed site (#23).
+
 ## M9 T2: doubled answers (issue #29, 2026-11-07)
 
 Before: runs 51–55 and 63–64 (1-based; current code with the socket tap, 7 runs). After: runs

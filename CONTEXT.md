@@ -125,7 +125,8 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   `agent-client/public/capture-worklet.js`, served as a same-origin file at
   `/agent-client/capture-worklet.js`. It low-passes, resamples to 16 kHz, converts to Int16 and
   posts one **frame** (80 ms, 1280 samples) at a time; `audioIO.js` base64-encodes each frame
-  for the session (`pcm.js`).
+  for the session (`pcm.js`). Its one output is silence, sent to the speakers through a gain of
+  0 only so that WebKit pulls the node (#19).
 - **Level** — how loud the agent's voice (the **output level**, from an `AnalyserNode` on
   playback) or the mic (the **mic level**, from the last frame) is right now, 0..1 on a 60 dB
   scale (`pcm.js` `levelOf`). Pulled with `getLevel()` (`audioIO.js`), never pushed as events.

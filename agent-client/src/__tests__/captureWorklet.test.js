@@ -12,7 +12,7 @@ const QUANTUM = 128; // samples per process() call, as in the browser
 
 /**
  * @typedef {{ posted: { message: ArrayBuffer, transfer: ArrayBuffer[] }[] }} RecordingPort
- * @typedef {new () => { port: RecordingPort, process: (inputs: Float32Array[][]) => boolean }} ProcessorClass
+ * @typedef {new () => { port: RecordingPort, process: (inputs: Float32Array[][], outputs: Float32Array[][]) => boolean }} ProcessorClass
  */
 
 // Not a literal in the import(): the worklet is a classic script (no exports)
@@ -74,7 +74,7 @@ function run(rate, seconds, signal) {
   for (let start = 0; start < total; start += QUANTUM) {
     const block = new Float32Array(Math.min(QUANTUM, total - start));
     for (let i = 0; i < block.length; i++) block[i] = signal((start + i) / rate);
-    expect(processor.process([[block]])).toBe(true);
+    expect(processor.process([[block]], [[new Float32Array(QUANTUM)]])).toBe(true);
   }
   const frames = processor.port.posted.map(({ message, transfer }) => {
     expect(transfer).toEqual([message]); // the buffer is transferred, not copied
@@ -151,8 +151,25 @@ describe('capture worklet', () => {
     vi.stubGlobal('sampleRate', 48000);
     const Processor = processorClass();
     const processor = new Processor();
-    expect(processor.process([[]])).toBe(true);
-    expect(processor.process([])).toBe(true);
+    expect(processor.process([[]], [[new Float32Array(QUANTUM)]])).toBe(true);
+    expect(processor.process([], [[new Float32Array(QUANTUM)]])).toBe(true);
     expect(processor.port.posted).toHaveLength(0);
+  });
+
+  // #19: the node has one output so WebKit pulls it (audioIO.js wires it to a
+  // gain of 0); what it writes there must be silence regardless.
+  it('writes silence to its output, whatever the output held and whatever the input', () => {
+    vi.stubGlobal('sampleRate', 48000);
+    const Processor = processorClass();
+    const processor = new Processor();
+    const output = new Float32Array(QUANTUM).fill(0.7);
+    const input = new Float32Array(QUANTUM).fill(0.5);
+
+    expect(processor.process([[input]], [[output]])).toBe(true);
+    expect(output.every((sample) => sample === 0)).toBe(true);
+
+    output.fill(-0.3);
+    expect(processor.process([], [[output]])).toBe(true);
+    expect(output.every((sample) => sample === 0)).toBe(true);
   });
 });

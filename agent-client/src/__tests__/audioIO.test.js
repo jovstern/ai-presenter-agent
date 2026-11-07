@@ -22,6 +22,7 @@ const WORKLET_URL = '/agent-client/capture-worklet.js';
  *   tracks: { stop: Mock<() => void> }[],
  *   contexts: FakeAudioContext[],
  *   nodes: FakeAudioWorkletNode[],
+ *   gains: FakeGain[],
  *   analysers: FakeAnalyser[],
  *   sources: FakeBufferSource[],
  *   events: string[],
@@ -53,6 +54,15 @@ let made;
  * }} FakeAnalyser
  */
 
+/**
+ * The mute between the capture node and the speakers (#19).
+ * @typedef {{
+ *   gain: { value: number },
+ *   connect: Mock<(destination: unknown) => void>,
+ *   disconnect: Mock<() => void>,
+ * }} FakeGain
+ */
+
 class FakeAudioContext {
   constructor() {
     this.close = vi.fn(async () => {});
@@ -66,6 +76,12 @@ class FakeAudioContext {
   }
   createMediaStreamSource() {
     return this.source;
+  }
+  createGain() {
+    /** @type {FakeGain} */
+    const gain = { gain: { value: 1 }, connect: vi.fn(), disconnect: vi.fn() };
+    made.gains.push(gain);
+    return gain;
   }
   createAnalyser() {
     /** @type {FakeAnalyser} */
@@ -109,6 +125,7 @@ class FakeAudioWorkletNode {
       onmessage: null,
       close: vi.fn(),
     };
+    this.connect = vi.fn();
     this.disconnect = vi.fn();
     made.events.push('node');
     made.nodes.push(this);
@@ -143,6 +160,7 @@ beforeEach(() => {
     tracks: [],
     contexts: [],
     nodes: [],
+    gains: [],
     analysers: [],
     sources: [],
     events: [],
@@ -185,7 +203,7 @@ describe('voiceSupportError', () => {
 });
 
 describe('startCapture', () => {
-  it('loads the worklet from the given URL and feeds the mic into a sink node', async () => {
+  it('loads the worklet from the given URL and feeds the mic into the capture node', async () => {
     const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
     await capture.ready;
 
@@ -193,8 +211,25 @@ describe('startCapture', () => {
     const [node] = made.nodes;
     expect(made.addModule).toHaveBeenCalledWith(WORKLET_URL);
     expect(node.name).toBe('capture-processor');
-    expect(node.options).toMatchObject({ numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1 });
+    expect(node.options).toMatchObject({ numberOfInputs: 1, channelCount: 1 });
     expect(context.source.connect).toHaveBeenCalledWith(node);
+  });
+
+  // #19: WebKit renders only nodes connected toward the destination, so a
+  // sink (0 outputs) might never run. One mono output through a gain of 0
+  // makes it pulled, and nothing is heard.
+  it('wires the capture node to the speakers through a gain of 0, so WebKit pulls it', async () => {
+    const capture = startCapture({ workletUrl: WORKLET_URL, onFrame: vi.fn() });
+    await capture.ready;
+
+    const [context] = made.contexts;
+    const [node] = made.nodes;
+    const [mute] = made.gains;
+    expect(node.options).toMatchObject({ numberOfOutputs: 1, outputChannelCount: [1] });
+    expect(made.gains).toHaveLength(1);
+    expect(mute.gain.value).toBe(0);
+    expect(node.connect).toHaveBeenCalledWith(mute);
+    expect(mute.connect).toHaveBeenCalledWith(context.destination);
   });
 
   // Safari starts a context created after an await (outside the click's user
@@ -297,6 +332,7 @@ describe('startCapture', () => {
     expect(node.port.onmessage).toBeNull();
     expect(node.port.close).toHaveBeenCalledTimes(1);
     expect(node.disconnect).toHaveBeenCalledTimes(1);
+    expect(made.gains[0].disconnect).toHaveBeenCalledTimes(1);
     expect(context.source.disconnect).toHaveBeenCalledTimes(1);
     expect(made.tracks[0].stop).toHaveBeenCalledTimes(1);
     expect(context.close).toHaveBeenCalledTimes(1);
