@@ -4,5 +4,9 @@
     "types": ["vite/client", "node"]
   },
   "include": ["src/__tests__"],
+  // Listed by name too: on a case-insensitive file system (macOS) the include
+  // treats it and transcript.test.js as one base name and keeps only the .js,
+  // so the check passed locally and failed on Linux CI.
+  "files": ["src/__tests__/Transcript.test.jsx"],
   "exclude": []
 }

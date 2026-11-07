@@ -112,7 +112,7 @@ describe('Transcript', () => {
     const line = live.querySelector('li');
     const firstFragment = line?.querySelector('.transcript__text')?.firstElementChild;
 
-    rerender(<Transcript entries={build([['agent', ' there!']], first)} />);
+    rerender(<Transcript entries={build([['agent', ' there!']], first)} reserve={false} />);
 
     expect(live.querySelector('li')).toBe(line);
     const fragments = line?.querySelector('.transcript__text')?.children;
@@ -132,7 +132,10 @@ describe('Transcript', () => {
     const [, two, threeLine] = live.querySelectorAll('li');
 
     rerender(
-      <Transcript entries={[...three.slice(1), ...build([['user', 'Four.']], three).slice(-1)]} />,
+      <Transcript
+        entries={[...three.slice(1), ...build([['user', 'Four.']], three).slice(-1)]}
+        reserve={false}
+      />,
     );
 
     const after = live.querySelectorAll('li');
