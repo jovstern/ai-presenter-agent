@@ -39,8 +39,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   after every load, after a debounced DOM mutation (250 ms), before each successful action's
   result once the page has **settled**, and on request (`sandbox/bridge.js`).
 - **Settled** — the page after an action, as the bridge waits for it: no mutation, input or
-  change for 100 ms, or 1 s after the action, whichever comes first. That snapshot goes out
-  just before the action's result, so it rides in that action's tool response as `page` (#25).
+  change for 100 ms, or 1 s of waiting, whichever comes first; when the action started a
+  navigation (a link click), the new page once loaded. All of it ends within 3.7 s of the
+  action's start. That snapshot goes out just before the action's result, so it rides in that
+  successful action's tool response as `page` (#25). A change the viewer makes during the
+  window is credited to the action.
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
   or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
 - **Delta** — a snapshot told to the model as only what changed and what was removed. Cheaper

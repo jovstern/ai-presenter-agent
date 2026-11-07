@@ -94,22 +94,22 @@
   const SNAPSHOT_DEBOUNCE_MS = 250;
   // An action's result waits for the page to settle, so its snapshot rides in
   // that action's tool response (#25): settled is no mutation, input or change
-  // for SETTLE_QUIET_MS, or SETTLE_CAP_MS after the action, whichever comes
-  // first. 100 ms is six frames: a handler's own change, a framework's
-  // re-render (a microtask or the next frame) and a few rAF steps after it all
-  // land inside it, while a click stays well under the spec's 300 ms round
-  // trip. The cap bounds a page that never stops mutating (an animation, a
-  // ticking clock); a slower change (a fetch) still goes out on the debounce.
+  // for SETTLE_QUIET_MS, or SETTLE_CAP_MS of settling, whichever comes first.
+  // 100 ms is six frames: a handler's own change, a framework's re-render (a
+  // microtask or the next frame) and a few rAF steps after it all land inside
+  // it, while a click stays well under the spec's 300 ms round trip. The cap
+  // bounds a page that never stops mutating (an animation, a ticking clock);
+  // a slower change (a fetch) still goes out on the debounce.
   const SETTLE_QUIET_MS = 100;
   const SETTLE_CAP_MS = 1000;
-  // With SETTLE_CAP_MS, kept under agent-client's ACTION_TIMEOUT_MS (4000,
-  // bridgeChannel.js): a navigate that never loads gets this bridge's own,
-  // specific failure back to the model, and one that loads at the last moment
-  // onto a page that never settles still answers in 3.9 s. Longer than that,
-  // the agent side gives up first with a generic timeout, and this bridge's
-  // late reply lands on an id nobody waits for. Still about twice the spec's
-  // 1.5 s navigate budget.
-  const NAVIGATION_TIMEOUT_MS = 2900;
+  // Everything one action waits for (a navigate's load, a link click's new
+  // page, the settling) ends by this long after it starts, so the reply beats
+  // agent-client's ACTION_TIMEOUT_MS (4000, bridgeChannel.js) with 300 ms to
+  // spare: a navigate that never loads gets this bridge's own, specific
+  // failure back to the model. Past 4 s the agent side gives up first with a
+  // generic timeout, and this bridge's late reply lands on an id nobody waits
+  // for. Still more than twice the spec's 1.5 s navigate budget.
+  const ACTION_DEADLINE_MS = 3700;
 
   const frameElement = document.getElementById('target-app-frame');
   // sandbox/index.html puts the frame before this deferred script; without it
@@ -176,20 +176,22 @@
     return /** @type {HTMLElement | null} */ (el);
   }
 
-  // Navigations waiting for their page.
-  /** @type {{ path: string, settle: (loaded: boolean) => void }[]} */
+  // Actions waiting for a page to load.
+  /** @type {{ path: string | null, settle: (loaded: boolean) => void }[]} */
   let loadWaiters = [];
 
-  // Resolves true once a document at `path` loads in the frame, or false after
-  // NAVIGATION_TIMEOUT_MS. Matched by path, so a load of some other page in
-  // the meantime (the viewer clicking a link in the frame) doesn't count as
-  // this navigate finishing. A load of the same path from another cause can't
-  // be told apart, but it does put the requested page in place all the same.
+  // Resolves true once a document at `path` (any document, for null) loads in
+  // the frame, or false at `deadline` (a Date.now() time). Matched by path, so
+  // a load of some other page in the meantime (the viewer clicking a link in
+  // the frame) doesn't count as a navigate finishing. A load of the same path
+  // from another cause can't be told apart, but it does put the requested
+  // page in place all the same.
   /**
-   * @param {string} path
+   * @param {string | null} path
+   * @param {number} deadline
    * @returns {Promise<boolean>}
    */
-  function waitForLoadOf(path) {
+  function waitForLoadOf(path, deadline) {
     return new Promise((resolve) => {
       const waiter = {
         path,
@@ -200,39 +202,40 @@
           resolve(loaded);
         },
       };
-      const timer = setTimeout(() => waiter.settle(false), NAVIGATION_TIMEOUT_MS);
+      const timer = setTimeout(() => waiter.settle(false), Math.max(0, deadline - Date.now()));
       loadWaiters.push(waiter);
     });
   }
 
-  // Each action takes the positional args actionTools.js orders for it.
-  /** @type {Record<ActionName, (...args: string[]) => Promise<ActionResult>>} */
+  // Each action takes its deadline (a Date.now() time, ACTION_DEADLINE_MS
+  // after it started), then the positional args actionTools.js orders for it.
+  /** @type {Record<ActionName, (deadline: number, ...args: string[]) => Promise<ActionResult>>} */
   const actions = {
-    async click(selector) {
+    async click(_deadline, selector) {
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
       el.click();
       return { success: true };
     },
-    async scroll(selector) {
+    async scroll(_deadline, selector) {
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
       return { success: true };
     },
-    async navigate(route) {
+    async navigate(deadline, route) {
       const routePath = ROUTE_PATHS.get(route);
       if (routePath === undefined) {
         return { success: false, error: `Unknown route "${route}"` };
       }
-      const loaded = waitForLoadOf(routePath);
+      const loaded = waitForLoadOf(routePath, deadline);
       iframe.src = routePath;
       // Don't report success until the new document is actually in place, and
       // don't claim it was when it never arrived.
       if (!(await loaded)) return { success: false, error: 'The page did not finish loading.' };
       return { success: true };
     },
-    async fill(selector, value) {
+    async fill(_deadline, selector, value) {
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
       // An element with no `value` used to get an expando set and a success
@@ -345,6 +348,11 @@
         error: `Action "${action}" is not allowed`,
       };
     }
+    const deadline = Date.now() + ACTION_DEADLINE_MS;
+    // An earlier change's debounced snapshot, landing inside this action's
+    // settle window, would make its page a keyframe; a success's own snapshot
+    // covers that change, and a failure sends it as the debounce would have.
+    const earlierChangePending = cancelDebouncedSnapshot();
     // A throwing action must still reply, or the agent waits out its timeout
     // (docs/code-review-notes.md M3).
     try {
@@ -352,17 +360,20 @@
       // them as they come: a non-string selector matches nothing, a non-string
       // fill value is stringified by the input. Hence the cast, not a check.
       const positional = /** @type {string[]} */ (Array.isArray(args) ? args : []);
-      const result = await actions[action](...positional);
+      const result = await actions[action](deadline, ...positional);
       // A failure changed nothing, so it answers at once. A success first
       // sends the page as the action left it: the port is ordered, so the
       // agent holds that snapshot before the result reaches it.
       if (result.success) {
-        await pageSettled();
-        clearTimeout(debounceTimer); // this snapshot covers what it would have sent
+        await pageSettled(deadline);
+        cancelDebouncedSnapshot(); // this snapshot covers what it would have sent
         diffAndBroadcastSnapshot();
+      } else if (earlierChangePending) {
+        scheduleDebouncedSnapshot();
       }
       return { ...result, type: 'action-result', id };
     } catch (err) {
+      if (earlierChangePending) scheduleDebouncedSnapshot();
       const message = err instanceof Error ? err.message : '';
       return { type: 'action-result', id, success: false, error: message || String(err) };
     }
@@ -612,16 +623,56 @@
   /** @type {Set<() => void>} */
   const settleWaiters = new Set();
 
-  function scheduleSnapshot() {
+  // Set when the frame's document starts to unload (a link click, a form
+  // submit, a script setting location, a navigate), cleared by the next load.
+  let navigationInFlight = false;
+
+  function scheduleDebouncedSnapshot() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(diffAndBroadcastSnapshot, SNAPSHOT_DEBOUNCE_MS);
+    debounceTimer = setTimeout(() => {
+      debounceTimer = undefined;
+      diffAndBroadcastSnapshot();
+    }, SNAPSHOT_DEBOUNCE_MS);
+  }
+
+  /** @returns {boolean} Whether a debounced snapshot was pending. */
+  function cancelDebouncedSnapshot() {
+    const pending = debounceTimer !== undefined;
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+    return pending;
+  }
+
+  function scheduleSnapshot() {
+    scheduleDebouncedSnapshot();
     settleWaiters.forEach((restart) => restart());
   }
 
+  // Resolves once the page an action left has settled, by `deadline` at the
+  // latest. When the action started a navigation (a link click), that is the
+  // new page: the old document doesn't change, so its quiet window would pass
+  // and answer with the page being left (#25 review). A navigation that
+  // hasn't loaded by the deadline is given up on, so the next action doesn't
+  // wait for it too.
+  /** @param {number} deadline */
+  async function pageSettled(deadline) {
+    for (;;) {
+      if (navigationInFlight && !(await waitForLoadOf(null, deadline))) {
+        navigationInFlight = false;
+      }
+      await quietPage(Math.max(0, Math.min(SETTLE_CAP_MS, deadline - Date.now())));
+      if (!navigationInFlight || Date.now() >= deadline) return;
+    }
+  }
+
   // Resolves once the frame has had no mutation, input or change for
-  // SETTLE_QUIET_MS, or SETTLE_CAP_MS from now, whichever comes first.
-  /** @returns {Promise<void>} */
-  function pageSettled() {
+  // SETTLE_QUIET_MS, or `cap` ms from now, whichever comes first.
+  /**
+   * @param {number} cap
+   * @returns {Promise<void>}
+   */
+  function quietPage(cap) {
+    if (cap <= 0) return Promise.resolve(); // out of time: as the page is now
     return new Promise((resolve) => {
       /** @type {ReturnType<typeof setTimeout> | undefined} */
       let quietTimer;
@@ -629,7 +680,7 @@
         clearTimeout(quietTimer);
         quietTimer = setTimeout(done, SETTLE_QUIET_MS);
       };
-      const capTimer = setTimeout(done, SETTLE_CAP_MS);
+      const capTimer = setTimeout(done, cap);
       function done() {
         clearTimeout(quietTimer);
         clearTimeout(capTimer);
@@ -651,6 +702,13 @@
     // so the observer alone never sees it. The listeners go with the document.
     doc.addEventListener('input', scheduleSnapshot, true);
     doc.addEventListener('change', scheduleSnapshot, true);
+    // beforeunload as soon as a navigation starts, pagehide in case it was
+    // skipped; both go with the document's window.
+    const markNavigating = () => {
+      navigationInFlight = true;
+    };
+    iframe.contentWindow?.addEventListener('beforeunload', markNavigating);
+    iframe.contentWindow?.addEventListener('pagehide', markNavigating);
   }
 
   // Native iframe `load` event, not a postMessage handshake — simpler and
@@ -667,6 +725,7 @@
     const doc = iframe.contentDocument;
     if (doc && doc !== setUpDocument) {
       setUpDocument = doc;
+      navigationInFlight = false;
       lastNodesById = new Map(); // a new document has nothing in common with the old diff state
       watchIframeMutations();
       // `navigated` first, so the agent marks a keyframe before this load's
@@ -676,7 +735,9 @@
     }
 
     const path = iframe.contentWindow?.location.pathname;
-    loadWaiters.filter((waiter) => waiter.path === path).forEach((waiter) => waiter.settle(true));
+    loadWaiters
+      .filter((waiter) => waiter.path === null || waiter.path === path)
+      .forEach((waiter) => waiter.settle(true));
   }
 
   iframe.addEventListener('load', handleFrameLoad);

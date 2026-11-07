@@ -169,7 +169,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
 - `sandbox/` (static) — host page: iframe + `bridge.js` (channel handshake, action library,
   DOM snapshots; reads the routes from the page's `#ds-routes` block, which the server
   templates in). A successful action's result waits for the page to **settle** (no mutation,
-  input or change for 100 ms, capped at 1 s) and follows that page's snapshot on the port (#25);
+  input or change for 100 ms, capped at 1 s; a link click first waits for the new page; all by a
+  3.7 s deadline) and follows that page's snapshot on the port (#25);
   a failure answers at once; changes nobody asked for go out on a 250 ms debounce. No build step.
 - `target-app/` (static) — 2-page mock app used as the demo target: `index.html` + `home.js`
   (counter), `settings.html` + `settings.js` (Save confirmation; also a Notes textarea and a
@@ -268,7 +269,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 20 vitest files (388 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 20 vitest files (392 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
   both `getLevel()`s against a stubbed analyser), `clientLog` (only the bundle's own errors,
@@ -302,15 +303,15 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (34
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 5 Playwright specs (35
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
-  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (2: the real
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (3: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
-  response's `page` showing 1, 2, 3), `widget.spec.js` (8, M7 T6: every card state
+  response's `page` showing 1, 2, 3; a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on

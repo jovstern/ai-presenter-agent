@@ -141,3 +141,44 @@ test('every click of a batch answers with the page it left: the counter at 1, 2,
   await button('End').click();
   await expect(status).toHaveText('Not connected');
 });
+
+// #25 review: a link click leaves the old document unchanged, so its quiet
+// window used to pass and answer with an empty delta of the page being left.
+// The bridge now waits for the new page (here 300 ms late) and its response
+// carries the Settings keyframe.
+test('a link click answers with the page it opened, not the one it left', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+  await page.route('**/target-app/settings.html', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Live');
+  await expect(frame.getByTestId('counter-value')).toHaveText('0');
+
+  live.sendToLatest({
+    toolCall: {
+      functionCalls: [{ id: 'call-link', name: 'click', args: { selector: 'nav-settings' } }],
+    },
+  });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(1);
+  const [linkResponse] = live.toolResponses();
+  expect(linkResponse).toEqual({
+    id: 'call-link',
+    name: 'click',
+    response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\):/) },
+  });
+  const selectors = snapshotNodes(linkResponse.response.page).map((node) => node.selector);
+  expect(selectors).toContain('notifications-toggle');
+  expect(selectors).not.toContain('counter-value');
+  await expect(frame.getByRole('heading', { name: 'Settings' })).toBeVisible();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});

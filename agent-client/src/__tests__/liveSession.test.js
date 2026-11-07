@@ -1167,7 +1167,10 @@ describe('createLiveSession', () => {
   });
 
   // bridge.js posts each successful action's settled snapshot just before its
-  // result (#25): every call of a batch answers with the page it left.
+  // result (#25): every call of a batch answers with the page it left. This
+  // passed before #25 too: it guards liveSession's half of the contract (one
+  // held snapshot per call, a delta each); bridge.test.js and e2e/loop.spec.js
+  // prove the bridge's half, the fix itself.
   it('answers each call of a batch with its own page, a delta of what that call changed', async () => {
     const { liveSession, bridge } = setup();
     const call = await connectAndEstablish(liveSession);

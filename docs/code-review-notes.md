@@ -386,8 +386,8 @@ if (message.serverContent?.interrupted) {
 > `[navigate, click]` batch and the mid-batch reconnect.
 >
 > **#25.** Serialization now also gives each call its own page: the bridge answers a successful
-> action only once the page has settled, right after that page's snapshot, so every response of
-> a batch carries `page` — one held snapshot, a delta against the previous response's (several
+> action only once the page has settled, right after that page's snapshot, so every successful
+> action's response in a batch carries `page` — one held snapshot, a delta against the previous response's (several
 > held, e.g. a navigate's load and settle, still make a keyframe). `liveSession.test.js` (a batch
 > of three clicks, each response its own counter value) and `e2e/loop.spec.js` (the same on the
 > real page).
@@ -441,6 +441,17 @@ if (message.toolCall) {
 > the result; the port's order makes `liveSession.js` hold it and send it as that call's `page`.
 > A failure answers at once. The debounce stays for changes nobody asked for. Tested in
 > `bridge.test.js`, `e2e/bridge.spec.js` and `e2e/loop.spec.js`.
+>
+> **#25 review.** A link click left the old document unchanged, so its quiet window passed and
+> the response carried an empty delta of the page being left. The frame's window now marks a
+> navigation in flight on `beforeunload` / `pagehide` (cleared by the next load), and a
+> successful action that leaves one waits for the new page, then settles, so a link click's
+> response carries the new page's keyframe (`e2e/loop.spec.js`, with the page 300 ms late). A
+> navigation that never loads is given up on at the deadline. Every wait of one action (a
+> navigate's load, a link's new page, the settling) ends by one deadline, `ACTION_DEADLINE_MS`
+> = 3.7 s after the action starts, inside the agent's 4 s. An action also cancels an earlier
+> change's pending debounced snapshot when it starts (it would land in the settle window and
+> force a keyframe); a success's snapshot covers that change, and a failure re-arms it.
 
 Two issues in one area:
 
@@ -516,9 +527,9 @@ both functions.
 
 > Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
 > The M4 fix wave closed the same class of gap for `navigate`: it used to report success when its
-> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 2.9 s
-> (3.5 s until #25 added up to 1 s of settling after the load, which must fit inside the 4 s too)
-> for a load of the requested path only and replies `{success:false, error:'The page did not finish
+> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits until
+> the action's 3.7 s deadline (3.5 s until #25, whose settling after the load shares that
+> deadline) for a load of the requested path only and replies `{success:false, error:'The page did not finish
 > loading.'}` otherwise (`agent-client/src/__tests__/bridge.test.js`).
 
 `bridge.js:188-191` calls `handler(data.args)` directly. A throw inside `fill` / `click` (e.g. the

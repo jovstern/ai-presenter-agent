@@ -202,8 +202,9 @@ events go directly from the browser to Gemini Live.
   field (a keyframe when several were held), instead of going out as a separate turn: a
   navigate's keyframe sent on its own landed between the call and its response, and the model
   ended its turn without the new page's selectors (M5 T5). The bridge answers a successful
-  action only once the page has settled (100 ms quiet, 1 s cap), right after that page's
-  snapshot, so every response carries the page it left (#25).
+  action only once the page has settled (100 ms quiet, 1 s cap; a link click first waits for
+  the page it opens), right after that page's snapshot, all within 3.7 s of the action's start,
+  so every successful action's response carries the page it left (#25).
 - Loop guard (`loopGuard.js`): an action that is the 4th identical call in a row, or completes
   an A-B-A-B or A-B-C-A-B-C cycle, is not dispatched and is answered with a failure telling the
   model to try something else; an agent sentence said in 3 of the last 5 turns gets one

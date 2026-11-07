@@ -256,7 +256,9 @@ The suite in `agent-client/src/__tests__/`:
   checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
   names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters;
   a successful action's snapshot of the settled page comes before its result (after 100 ms of
-  quiet, by the 1 s cap on a page that never stops), and a failure answers at once.
+  quiet, by the 1 s cap on a page that never stops; a link click's after its new page loads; all
+  by the 3.7 s deadline), a failure answers at once, and an action cancels an earlier change's
+  pending debounced snapshot (re-armed if it fails).
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
@@ -310,7 +312,8 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
   `toolResponse`s in order, the navigate's carrying the Settings keyframe and the click's the
-  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; a server-side close shows `Reconnecting…`, then Live, with exactly
+  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; a link
+  click answers with the Settings keyframe even when the page arrives 300 ms late; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; End returns to "Not
   connected". The card's own states are `widget.spec.js`'s.
 - `widget.spec.js` — every card state on the real `/` page through the same fake-Live harness
