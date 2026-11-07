@@ -381,14 +381,14 @@ for (const viewport of VIEWPORTS) {
       for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         await page.emulateMedia({ colorScheme });
         // The theme has switched, and the primary button's colour transition
-        // has ended, so axe reads this scheme's colours, not a blend.
+        // has ended, so axe reads this scheme's colours, not a blend. End is
+        // the outline button: the surface behind the accent text.
         const dark = colorScheme === 'dark';
-        await expect(panel).toHaveCSS(
-          'background-color',
-          dark ? 'rgb(24, 24, 27)' : 'rgb(255, 255, 255)',
-        );
+        const surface = dark ? 'rgb(24, 24, 27)' : 'rgb(255, 255, 255)';
+        await expect(panel).toHaveCSS('background-color', surface);
+        await expect(button('End')).toHaveCSS('background-color', surface);
         await expect(button('End')).toHaveCSS(
-          'background-color',
+          'color',
           dark ? 'rgb(129, 140, 248)' : 'rgb(79, 70, 229)',
         );
         const results = await new AxeBuilder({ page }).include(HOST).analyze();

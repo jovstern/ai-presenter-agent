@@ -27,6 +27,17 @@ function rulesNotice(length) {
   return '';
 }
 
+// The counter's colour band (styles.css): a warning near the limit, the
+// danger colour over it; none until then. The words are the polite region's
+// and the alert's, so colour is never the only signal.
+/** @param {number} length */
+function counterLimit(length) {
+  const left = MAX_RULES - length;
+  if (left < 0) return 'over';
+  if (left <= NEAR_LIMIT) return 'near';
+  return undefined;
+}
+
 // A page with a folded corner and two lines of text: 16 px, in the button's
 // text colour, hidden from assistive technology (the button's text names it).
 function DocumentIcon() {
@@ -259,7 +270,12 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
             <ul className="knowledge-modal__files" aria-label="Files">
               {files.map((file) => (
                 <li key={file.id}>
-                  <span className="knowledge-modal__file-name">{file.name}</span>
+                  {/* One line, cut with an ellipsis (styles.css); the title
+                      shows the whole name to a pointer, and Remove's
+                      accessible name carries it to assistive technology. */}
+                  <span className="knowledge-modal__file-name" title={file.name}>
+                    {file.name}
+                  </span>
                   <span className="knowledge-modal__file-size">{formatSize(file.size)}</span>
                   <button
                     type="button"
@@ -297,7 +313,7 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
           <p
             id={counterId}
             className="knowledge-modal__counter"
-            data-over={over > 0 ? 'true' : undefined}
+            data-limit={counterLimit(rules.length)}
           >
             {formatCount(rules.length)} / {formatCount(MAX_RULES)}
           </p>

@@ -56,7 +56,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
   - `AgentApp.jsx` — the card (an `<aside aria-label="AI presenter">` landmark): one
     never-disabled primary button, Talk to the AI Presenter / Cancel (pending, while connecting) /
-    End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
+    End (outline: `data-variant="secondary"`, #18) / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
     the failure's reason as plain text once its toast has closed, a `role="alert"` for mic and voice-support guidance
     (keyed by the connect attempt, so a repeat is announced), the transcript, the document-icon
     knowledge button (rendered by `KnowledgeModal.jsx`) and the volume orb. It owns the
@@ -66,10 +66,13 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `KnowledgeModal.jsx` — the knowledge button (a 16 px document icon and the count; the Radix `Dialog.Trigger`, so closing returns
     focus to it; a controlled `Dialog.Root`, `open` from the card) and the knowledge dialog, portalled into the shadow root: Add files (a real
     `<button>` that opens the file picker and takes dropped files), the file list with "Remove
-    <file name>" buttons, an empty state, a rules field with a used / limit counter
-    (`aria-describedby`; a polite note near the limit, a `role="alert"` over it, the text kept
+    <file name>" buttons (each name one line with an ellipsis, `title` the full name), an empty
+    state, a rules field with a used / limit counter (`aria-describedby`; `data-limit` `near` /
+    `over` colours it warning / danger, #18; a polite note near the limit, a `role="alert"` over it, the text kept
     but not saved) and `role="alert"` add errors (full storage and an unreadable file
-    included, and blocked storage on add, Remove and the rules; cleared on reopen); top-anchored, with Close in a sticky footer. It reads `knowledgeStore.js` through
+    included, and blocked storage on add, Remove and the rules; cleared on reopen); top-anchored, with Close in a sticky footer.
+    It fades and rises in and fades out on Radix's `data-state` (CSS; Presence waits for the
+    exit animation, which works in the shadow root; under reduced motion it unmounts at once, #17). It reads `knowledgeStore.js` through
     `useSyncExternalStore` (no mirrored state). Its Tab wrap and open focus are its own, read
     from the shadow root: Radix's FocusScope compares `document.activeElement` (the host), so
     its trap let Tab walk out of the dialog. `shadowFocus.js` holds `focusedIn` (shared with
@@ -97,11 +100,16 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     `requestAnimationFrame` loop pulls the two levels and writes `--level` / `--mic-level` on its
     node — no React state, so a frame renders nothing (spec goals #8 and #9). No loop under
     `prefers-reduced-motion` (followed live via `matchMedia`); the sources are read through
-    `useEffectEvent`, so a card render never restarts the loop.
+    `useEffectEvent`, so a card render never restarts the loop. While `reconnecting` it has
+    `data-reconnecting` and `styles.css` pulses its halo slowly (CSS only, no loop; off under
+    reduced motion, #17).
   - `styles.css` — the card's and the dialog's one stylesheet: the spec's design tokens as
     custom properties on `:host` (redefined under `prefers-color-scheme: dark`, durations zeroed
-    under `prefers-reduced-motion: reduce`), and the host's own `position: fixed`, `z-index` and
-    `display: block`. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
+    under `prefers-reduced-motion: reduce`, where every animation and transition is also off),
+    and the host's own `position: fixed`, `z-index` and `display: block`. Status colours
+    `--color-danger` and `--color-warning` (light #b45309 5.0:1, dark #fbbf24 10.6:1 on the
+    surface). At ≤ 340 px the card takes a half gutter, a 32 px orb (`--orb-size`) and half
+    gaps, so "Talk to the AI Presenter" stays on one line inside its button at 320 px. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
     as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
   - `clientLog.js` — the client log (spec R23): `startClientLog({ nonce, bundleBase })`, called
     once per page by `main.jsx` before the mount, listens for window `error` /
@@ -287,7 +295,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (431 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (432 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
@@ -301,7 +309,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   full storage, an unreadable file, and blocked storage on reads and writes),
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
   oversize alert, a full-storage alert, blocked-storage alerts for Remove and the rules
-  (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
+  (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter (its `near` / `over` state) and over-limit alert, a file name's `title`, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSdk` (one import shared, a failed one forgotten, no static
   `@google/genai` import anywhere in `src/`), `liveSession` (incl. the SDK loading in parallel
   with the token, a chunk that didn't load failing at once as `sdk`, and the pinned voice and
@@ -311,9 +319,10 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
   card's reason after it closes, one announcement, the keyboard walk and focus return; each
-  failure reported to `onFailure` once) and
+  failure reported to `onFailure` once; End as the outline variant; the orb marked while
+  reconnecting) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
+  reduced motion; a write only when the 2-decimal level changes; `data-reconnecting` with no loop); `rafHarness.js` holds their fake rAF and `matchMedia`. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
   capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
@@ -356,7 +365,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
   `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its
-  toast (once its slide-in has finished) and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
+  toast (once its slide-in has finished) and with the knowledge dialog open (once its fade-in has finished) — inside the shadow root —, plus the dialog from the
   keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
   inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
   `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (4, opt-in, real

@@ -143,6 +143,20 @@ describe('VolumeOrb', () => {
     expect(Number(cssLevel(orb))).toBeCloseTo(0.5, 3);
   });
 
+  // The pulse itself is CSS (styles.css); the orb only says it reconnects.
+  it('marks reconnecting for the CSS pulse, runs no loop then, and drops the mark after', () => {
+    const { container, rerender } = render(
+      <VolumeOrb active={false} reconnecting outputLevel={() => 1} micLevel={() => 1} />,
+    );
+    const orb = /** @type {HTMLElement} */ (container.firstElementChild);
+    expect(orb.dataset.reconnecting).toBe('true');
+    expect(frames.request).not.toHaveBeenCalled();
+
+    rerender(<VolumeOrb active outputLevel={() => 1} micLevel={() => 1} />);
+    expect(orb.hasAttribute('data-reconnecting')).toBe(false);
+    expect(frames.pendingCount).toBe(1);
+  });
+
   it('treats a browser without matchMedia as having no motion preference', () => {
     vi.stubGlobal('matchMedia', undefined);
     renderOrb();

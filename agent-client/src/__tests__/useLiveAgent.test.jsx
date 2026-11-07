@@ -74,6 +74,8 @@ const TALK = 'Talk to the AI Presenter';
 const card = () => screen.getByRole('complementary', { name: 'AI presenter' });
 const cardButton = (name) => within(card()).getByRole('button', { name });
 const statusLine = () => within(card()).getByRole('status');
+// The volume orb: decorative (aria-hidden), so found by its class.
+const orb = () => /** @type {HTMLElement} */ (card().querySelector('.volume-orb'));
 
 async function click(name) {
   await act(async () => {
@@ -265,7 +267,10 @@ describe('AgentApp + useLiveAgent', () => {
 
     const button = cardButton('End');
     expect(button.disabled).toBe(false);
+    expect(button.dataset.variant).toBe('secondary'); // outline, the stop action
     expect(statusLine().textContent).toBe('Reconnecting (attempt 2 of 6)…');
+    // The orb pulses in CSS while reconnecting (VolumeOrb.jsx).
+    expect(orb().dataset.reconnecting).toBe('true');
     // Reconnecting keeps the mic: the session will resume onto it.
     expect(fakes.captures[0].stop).not.toHaveBeenCalled();
 
@@ -507,6 +512,8 @@ describe('AgentApp + useLiveAgent', () => {
     await click(TALK);
     emitStatus('open');
     expect(statusLine().textContent).toBe('Live');
+    expect(cardButton('End').dataset.variant).toBe('secondary');
+    expect(orb().hasAttribute('data-reconnecting')).toBe(false);
     await click('End');
     expect(fakes.sessions[0].disconnect).toHaveBeenCalled();
     expect(fakes.captures[0].stop).toHaveBeenCalled();

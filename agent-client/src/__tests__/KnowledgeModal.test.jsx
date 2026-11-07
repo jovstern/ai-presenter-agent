@@ -97,6 +97,10 @@ describe('KnowledgeModal', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['notes.md5 BRemove notes.md']);
+    // Clamped to one line in CSS; the whole name stays in its title.
+    expect(list.querySelector('.knowledge-modal__file-name')?.getAttribute('title')).toBe(
+      'notes.md',
+    );
     expect(within(dialog).queryByText(/No files yet/)).toBeNull();
     expect(ui.getByRole('button', { name: 'Knowledge files: 1' })).toBeTruthy();
 
@@ -217,16 +221,20 @@ describe('KnowledgeModal', () => {
     const polite = within(dialog).getByRole('status');
     expect(polite.textContent).toBe('');
     expect(knowledgeStore.getRules()).toBe('Speak French.');
+    // Its colour band (styles.css): none until near the limit.
+    expect(counter.hasAttribute('data-limit')).toBe(false);
 
     fireEvent.change(rules, { target: { value: 'a'.repeat(max - 10) } });
     const near = polite.textContent;
     expect(near).toBe('200 or fewer characters left.');
+    expect(counter.dataset.limit).toBe('near');
     // Nearer still, the same band: the message doesn't change, so it isn't
     // announced again on each keystroke.
     fireEvent.change(rules, { target: { value: 'a'.repeat(max - 5) } });
     expect(polite.textContent).toBe(near);
     fireEvent.change(rules, { target: { value: 'a'.repeat(max) } });
     expect(polite.textContent).toBe('At the 2,000-character limit.');
+    expect(counter.dataset.limit).toBe('near');
     expect(within(dialog).queryByRole('alert')).toBeNull();
   });
 
@@ -247,6 +255,8 @@ describe('KnowledgeModal', () => {
     expect(knowledgeStore.getRules()).toBe('Be brief.');
     const alert = within(dialog).getByRole('alert');
     expect(alert.textContent).toMatch(/5 characters over/);
+    const counter = within(dialog).getByText(/ \/ /);
+    expect(counter.dataset.limit).toBe('over');
     expect(rules.getAttribute('aria-invalid')).toBe('true');
     expect(rules.getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
 

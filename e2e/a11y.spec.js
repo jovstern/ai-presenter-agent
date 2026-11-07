@@ -79,13 +79,7 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         // The toast slides in from opacity 0: axe sampling mid-fade read its
         // colours blended with the page (1 flaky contrast failure in 26 runs,
         // docs/metrics/m07.md miss 2), so it waits for the toast to settle.
-        await toasts
-          .first()
-          .evaluate((toast) =>
-            Promise.all(
-              toast.getAnimations({ subtree: true }).map((animation) => animation.finished),
-            ),
-          );
+        await settled(toasts.first());
 
         const { violations, checkedInShadowRoot } = await analyze(page);
         expect(violations).toEqual([]);
@@ -96,7 +90,13 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
     test('the sandbox page with the knowledge dialog open', async ({ page }) => {
       await page.goto('/');
       await cardButton(page, 'Knowledge files: 0').click();
-      await expect(page.locator(HOST).getByRole('dialog', { name: 'Knowledge' })).toBeVisible();
+      const dialog = page.locator(HOST).getByRole('dialog', { name: 'Knowledge' });
+      await expect(dialog).toBeVisible();
+      // The dialog and its overlay fade in (styles.css): axe sampling mid-fade
+      // would read blended colours, as with the toast above, so it waits for
+      // both to settle.
+      await settled(dialog);
+      await settled(page.locator(HOST).locator('.knowledge-modal__overlay'));
 
       const { violations, checkedInShadowRoot } = await analyze(page);
       expect(violations).toEqual([]);
@@ -161,6 +161,13 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
       await expect(cardButton(page, 'Knowledge files: 1')).toBeFocused();
     });
   });
+}
+
+/** Resolves once every animation on `locator`'s element and its subtree has finished. */
+function settled(/** @type {import('@playwright/test').Locator} */ locator) {
+  return locator.evaluate((node) =>
+    Promise.all(node.getAnimations({ subtree: true }).map((animation) => animation.finished)),
+  );
 }
 
 /** Whether `locator` has focus in its own tree (the shadow root's, for the card). */

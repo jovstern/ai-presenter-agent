@@ -48,7 +48,9 @@ function statusText(status, details) {
  * @param {AgentStatus} status
  * @param {StatusDetails | null} details
  * @param {Pick<LiveAgent, 'connect' | 'disconnect' | 'retry'>} agent
- * @returns {{ label: string, onClick: () => void }}
+ * @returns {{ label: string, onClick: () => void, secondary?: boolean }}
+ *   `secondary`: End, the stop action, is drawn in outline (styles.css), so
+ *   it reads apart from Talk and Retry, the actions that start something.
  */
 function primaryAction(status, details, { connect, disconnect, retry }) {
   switch (status) {
@@ -56,7 +58,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
       return { label: 'Cancel', onClick: disconnect };
     case 'open':
     case 'reconnecting':
-      return { label: 'End', onClick: disconnect };
+      return { label: 'End', onClick: disconnect, secondary: true };
     case 'failed':
       if (details?.fatal === 'token') {
         return { label: 'Reload page', onClick: () => location.reload() };
@@ -142,7 +144,12 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer, onFailure
         />
         {/* Animates outside React: its frames render nothing, and a card render
             (a transcript line) skips it, since its props are unchanged (VolumeOrb.jsx). */}
-        <VolumeOrb active={status === 'open'} outputLevel={outputLevel} micLevel={micLevel} />
+        <VolumeOrb
+          active={status === 'open'}
+          reconnecting={status === 'reconnecting'}
+          outputLevel={outputLevel}
+          micLevel={micLevel}
+        />
         {/* Pending while connecting: a spinner, and the label says what a
             press does now (Cancel). The status line says Connecting…. Pointing
             at or focusing it starts loading the Gemini SDK, which the press
@@ -151,6 +158,7 @@ export function AgentApp({ bridge, nonce, workletUrl, portalContainer, onFailure
           ref={primaryRef}
           className="agent-app__primary"
           data-pending={status === 'connecting' ? 'true' : undefined}
+          data-variant={action.secondary ? 'secondary' : undefined}
           onClick={action.onClick}
           onPointerEnter={preloadLiveSdk}
           onFocus={preloadLiveSdk}
