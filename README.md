@@ -224,7 +224,7 @@ The suite in `agent-client/src/__tests__/`:
   and before any client turn — the knowledge and the greeting wait for its response, as does a
   knowledge change during any batch; the greeting by whether the attempt resumed),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
-  during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
+  during a tool batch goes out inside the next tool response (`page`), one per call of a batch; a still-attached refusal
   retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
   timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
   on a server close; the backoff reset only after 5 s open or the first content; the two fatal
@@ -254,7 +254,9 @@ The suite in `agent-client/src/__tests__/`:
   fails and names the options); a test id with a quote in it is found (`CSS.escape`);
   a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
   checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
-  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters.
+  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters;
+  a successful action's snapshot of the settled page comes before its result (after 100 ms of
+  quiet, by the 1 s cap on a page that never stops), and a failure answers at once.
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
@@ -301,12 +303,14 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   `fill` works on the Settings textarea and select (by text and by value, firing `input` and
   `change`; no matching option leaves the selection alone), that an unknown action, an unknown
   route and `fill` on a non-input are rejected, that a second
-  `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
-  snapshot with `hidden` right for `save-confirmation`.
+  `ds-bridge-connect` and forged `window` messages are ignored, and that a navigate and a click
+  each post their settled snapshot before their result, with `hidden` right for
+  `save-confirmation`.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
-  `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
+  `toolResponse`s in order, the navigate's carrying the Settings keyframe and the click's the
+  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; End returns to "Not
   connected". The card's own states are `widget.spec.js`'s.
 - `widget.spec.js` — every card state on the real `/` page through the same fake-Live harness

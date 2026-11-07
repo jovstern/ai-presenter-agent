@@ -44,11 +44,14 @@
  * @typedef {{ type: 'request-snapshot' }} RequestSnapshotMessage
  */
 /**
- * bridge -> agent: the reply to the ActionMessage with the same `id`.
+ * bridge -> agent: the reply to the ActionMessage with the same `id`. A
+ * success is sent once the page has settled, right after the snapshot of it,
+ * so that snapshot belongs to this action; a failure is sent at once.
  * @typedef {{ type: 'action-result', id: string, success: boolean, error?: string }} ActionResultMessage
  */
 /**
- * bridge -> agent: after every load and debounced DOM mutation, and on request.
+ * bridge -> agent: after every load and debounced DOM mutation, before each
+ * successful action's result, and on request.
  * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} SnapshotMessage
  */
 /**

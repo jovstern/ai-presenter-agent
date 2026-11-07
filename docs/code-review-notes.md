@@ -384,6 +384,13 @@ if (message.serverContent?.interrupted) {
 > order and sends each `sendToolResponse` before the next call; a batch from a retired generation
 > stops instead of answering into a new session. `liveSession.test.js` covers the in-order
 > `[navigate, click]` batch and the mid-batch reconnect.
+>
+> **#25.** Serialization now also gives each call its own page: the bridge answers a successful
+> action only once the page has settled, right after that page's snapshot, so every response of
+> a batch carries `page` — one held snapshot, a delta against the previous response's (several
+> held, e.g. a navigate's load and settle, still make a keyframe). `liveSession.test.js` (a batch
+> of three clicks, each response its own counter value) and `e2e/loop.spec.js` (the same on the
+> real page).
 
 `handleServerMessage` does `for (const fc of message.toolCall.functionCalls) handleToolCall(fc)`
 (`useLiveAgent.js:172-174`) with no `await` — `handleToolCall` is `async`. If the model emits
@@ -424,6 +431,16 @@ if (message.toolCall) {
 > button-like input's value, the placeholder and the title; and every source, the placeholder,
 > title and `aria-label` included, is cut to 60 characters (`MAX_NAME_LENGTH`). Tested in
 > `bridge.test.js`.
+>
+> **#25 (found by the user).** Replacing the fixed post-action wait with the debounce alone left
+> an action's own change out of its tool response: the bridge answered in 1–2 ms and the
+> snapshot followed 250 ms later as a separate client turn, so "increment the counter to 10"
+> got ten bare `{ success: true }`. A successful action's result now waits for the page to
+> settle (no mutation, input or change for `SETTLE_QUIET_MS` = 100 ms, capped at
+> `SETTLE_CAP_MS` = 1 s), cancels the pending debounced snapshot, posts the settled one and then
+> the result; the port's order makes `liveSession.js` hold it and send it as that call's `page`.
+> A failure answers at once. The debounce stays for changes nobody asked for. Tested in
+> `bridge.test.js`, `e2e/bridge.spec.js` and `e2e/loop.spec.js`.
 
 Two issues in one area:
 
@@ -499,7 +516,8 @@ both functions.
 
 > Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
 > The M4 fix wave closed the same class of gap for `navigate`: it used to report success when its
-> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 3.5 s
+> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 2.9 s
+> (3.5 s until #25 added up to 1 s of settling after the load, which must fit inside the 4 s too)
 > for a load of the requested path only and replies `{success:false, error:'The page did not finish
 > loading.'}` otherwise (`agent-client/src/__tests__/bridge.test.js`).
 

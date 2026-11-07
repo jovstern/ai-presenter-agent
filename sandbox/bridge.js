@@ -47,11 +47,14 @@
    * @typedef {{ type: 'request-snapshot' }} RequestSnapshotMessage
    */
   /**
-   * bridge -> agent: the reply to the ActionMessage with the same `id`.
+   * bridge -> agent: the reply to the ActionMessage with the same `id`. A
+   * success is sent once the page has settled, right after the snapshot of it,
+   * so that snapshot belongs to this action; a failure is sent at once.
    * @typedef {{ type: 'action-result', id: string, success: boolean, error?: string }} ActionResultMessage
    */
   /**
-   * bridge -> agent: after every load and debounced DOM mutation, and on request.
+   * bridge -> agent: after every load and debounced DOM mutation, before each
+   * successful action's result, and on request.
    * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} SnapshotMessage
    */
   /**
@@ -86,12 +89,27 @@
   // so 30 nodes is ~3–3.5 kB, inside the 4 kB budget (docs/metrics/m06.md).
   // Not yet measured on a page big enough to reach it.
   const MAX_SNAPSHOT_NODES = 30;
+  // Changes nobody asked for (the viewer's clicks, async page JS) go out once
+  // the DOM has been quiet this long.
   const SNAPSHOT_DEBOUNCE_MS = 250;
-  // Kept under agent-client's ACTION_TIMEOUT_MS (4000, bridgeChannel.js) so a
-  // navigate that never loads gets this bridge's own, specific failure back to
-  // the model. Longer than that, the agent side gives up first with a generic
-  // timeout, and this bridge's late reply lands on an id nobody waits for.
-  const NAVIGATION_TIMEOUT_MS = 3500;
+  // An action's result waits for the page to settle, so its snapshot rides in
+  // that action's tool response (#25): settled is no mutation, input or change
+  // for SETTLE_QUIET_MS, or SETTLE_CAP_MS after the action, whichever comes
+  // first. 100 ms is six frames: a handler's own change, a framework's
+  // re-render (a microtask or the next frame) and a few rAF steps after it all
+  // land inside it, while a click stays well under the spec's 300 ms round
+  // trip. The cap bounds a page that never stops mutating (an animation, a
+  // ticking clock); a slower change (a fetch) still goes out on the debounce.
+  const SETTLE_QUIET_MS = 100;
+  const SETTLE_CAP_MS = 1000;
+  // With SETTLE_CAP_MS, kept under agent-client's ACTION_TIMEOUT_MS (4000,
+  // bridgeChannel.js): a navigate that never loads gets this bridge's own,
+  // specific failure back to the model, and one that loads at the last moment
+  // onto a page that never settles still answers in 3.9 s. Longer than that,
+  // the agent side gives up first with a generic timeout, and this bridge's
+  // late reply lands on an id nobody waits for. Still about twice the spec's
+  // 1.5 s navigate budget.
+  const NAVIGATION_TIMEOUT_MS = 2900;
 
   const frameElement = document.getElementById('target-app-frame');
   // sandbox/index.html puts the frame before this deferred script; without it
@@ -335,6 +353,14 @@
       // fill value is stringified by the input. Hence the cast, not a check.
       const positional = /** @type {string[]} */ (Array.isArray(args) ? args : []);
       const result = await actions[action](...positional);
+      // A failure changed nothing, so it answers at once. A success first
+      // sends the page as the action left it: the port is ordered, so the
+      // agent holds that snapshot before the result reaches it.
+      if (result.success) {
+        await pageSettled();
+        clearTimeout(debounceTimer); // this snapshot covers what it would have sent
+        diffAndBroadcastSnapshot();
+      }
       return { ...result, type: 'action-result', id };
     } catch (err) {
       const message = err instanceof Error ? err.message : '';
@@ -574,19 +600,45 @@
     postToAgent({ type: 'snapshot', full, changed, removed });
   }
 
-  // Debounced and reconnected on every iframe load — this is the completion-
-  // detection mechanism for agent-initiated actions too: rather than a fixed
-  // post-action timeout, the model gets a fresh grounding snapshot once the
-  // DOM actually settles, from whatever caused the change (agent action,
-  // user click, or async page JS alike).
+  // Reconnected on every iframe load. Every mutation, input or change both
+  // schedules the debounced snapshot (for changes nobody asked for: the
+  // viewer's clicks, async page JS) and restarts a running action's quiet
+  // window (pageSettled), whose own snapshot then replaces the debounced one.
   /** @type {ReturnType<typeof setTimeout> | undefined} */
   let debounceTimer;
   /** @type {MutationObserver | null} */
   let observer = null;
+  // The quiet-window restarts of actions waiting for the page to settle.
+  /** @type {Set<() => void>} */
+  const settleWaiters = new Set();
 
   function scheduleSnapshot() {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(diffAndBroadcastSnapshot, SNAPSHOT_DEBOUNCE_MS);
+    settleWaiters.forEach((restart) => restart());
+  }
+
+  // Resolves once the frame has had no mutation, input or change for
+  // SETTLE_QUIET_MS, or SETTLE_CAP_MS from now, whichever comes first.
+  /** @returns {Promise<void>} */
+  function pageSettled() {
+    return new Promise((resolve) => {
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let quietTimer;
+      const restart = () => {
+        clearTimeout(quietTimer);
+        quietTimer = setTimeout(done, SETTLE_QUIET_MS);
+      };
+      const capTimer = setTimeout(done, SETTLE_CAP_MS);
+      function done() {
+        clearTimeout(quietTimer);
+        clearTimeout(capTimer);
+        settleWaiters.delete(restart);
+        resolve();
+      }
+      settleWaiters.add(restart);
+      restart();
+    });
   }
 
   function watchIframeMutations() {

@@ -1166,6 +1166,58 @@ describe('createLiveSession', () => {
     ]);
   });
 
+  // bridge.js posts each successful action's settled snapshot just before its
+  // result (#25): every call of a batch answers with the page it left.
+  it('answers each call of a batch with its own page, a delta of what that call changed', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const counter = (value) => ({
+      selector: 'counter-value',
+      tag: 'span',
+      label: String(value),
+      disabled: false,
+      hidden: false,
+    });
+    const button = {
+      selector: 'counter-increment',
+      tag: 'button',
+      label: 'Increment',
+      disabled: false,
+      hidden: false,
+    };
+    const pageAt = (value) => [counter(value), button];
+    bridge.emitSnapshot({ full: pageAt(0), changed: pageAt(0), removed: [] }); // the first keyframe
+    let value = 0;
+    bridge.dispatchAction.mockImplementation(async () => {
+      value += 1;
+      bridge.emitSnapshot({ full: pageAt(value), changed: [counter(value)], removed: [] });
+      return { success: true };
+    });
+
+    const clicks = [1, 2, 3].map((n) => ({
+      id: `inc-${n}`,
+      name: 'click',
+      args: { selector: 'counter-increment' },
+    }));
+    call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks } });
+    await flush();
+
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    expect(responses.map((r) => r.id)).toEqual(['inc-1', 'inc-2', 'inc-3']);
+    expect(responses.map((r) => r.response.page)).toEqual(
+      [1, 2, 3].map(
+        (n) => `Page snapshot (delta) — changed:\n${JSON.stringify([counter(n)])}\nremoved:\n[]`,
+      ),
+    );
+    // Nothing went out on its own: each snapshot rode in its call's response.
+    const standalone = call.session.sendClientContent.mock.calls.filter(([arg]) =>
+      arg.turns.startsWith('Page snapshot'),
+    );
+    expect(standalone).toHaveLength(1);
+  });
+
   it('answers a tool call without a page when no snapshot arrived during it', async () => {
     const { liveSession } = setup();
     const call = await connectAndEstablish(liveSession);

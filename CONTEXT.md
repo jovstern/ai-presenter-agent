@@ -36,7 +36,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   (each one's name, state, a text field's `value`, and a select's `options` by visible text):
   the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
-  after every load, after a debounced DOM mutation, and on request (`sandbox/bridge.js`).
+  after every load, after a debounced DOM mutation (250 ms), before each successful action's
+  result once the page has **settled**, and on request (`sandbox/bridge.js`).
+- **Settled** — the page after an action, as the bridge waits for it: no mutation, input or
+  change for 100 ms, or 1 s after the action, whichever comes first. That snapshot goes out
+  just before the action's result, so it rides in that action's tool response as `page` (#25).
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
   or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
 - **Delta** — a snapshot told to the model as only what changed and what was removed. Cheaper
@@ -75,7 +79,7 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   the reason.
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
-  the next response (`liveSession.js`).
+  the next response (`liveSession.js`), so each successful call carries its own settled page.
 - **Client turn** — anything the agent-client tells the model as content rather than as a tool
   response: the knowledge context, the greeting, the loop's corrective turn. None is sent while
   a tool batch runs: each is **held** (one per kind) until the batch's last response, since the

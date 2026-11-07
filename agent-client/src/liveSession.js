@@ -144,8 +144,10 @@ const SYSTEM_INSTRUCTION =
   'on it using the click, scroll, fill, and navigate tools. Only ever use a ' +
   'selector that was given to you in a snapshot — never invent or guess one. ' +
   'Speak concisely: briefly say what you are about to do just before you do it, ' +
-  'then act. A tool result may include the page as it is after the action, in ' +
-  'its `page` field; use it to choose your next step. When the user asks for ' +
+  'then act. A successful tool result includes the page as it is after the ' +
+  'action, in its `page` field (a delta lists only what changed; an empty one ' +
+  'means nothing on the page changed); use it to check the action worked and ' +
+  'to choose your next step. When the user asks for ' +
   'several steps, carry out every one of them in order without waiting to be ' +
   'asked again, then confirm what you did. ' +
   'If a tool call fails or a page does not change as expected, say so honestly ' +
@@ -331,7 +333,11 @@ export function createLiveSession({
   });
 
   // A snapshot that arrives while a tool batch runs is held, then sent inside
-  // the batch's next tool response, as `page`.
+  // the batch's next tool response, as `page`. bridge.js posts each successful
+  // action's snapshot, taken once the page has settled, just before that
+  // action's result (#25), so every successful call answers with the page it
+  // left: one held snapshot, a delta against the one the previous response
+  // carried.
   // A navigate's keyframe lands before its own result: sent on its own, it was
   // a user turn between a function call and its response, and with
   // turnComplete false it never prompted a turn, so the model ended its turn
@@ -385,8 +391,10 @@ export function createLiveSession({
   /** @returns {string | undefined} The held snapshot as a message, if any. */
   function takeHeldSnapshot() {
     if (!heldSnapshot) return undefined;
-    // Each held snapshot is a diff against the one before it, so only the
-    // last one, sent as a keyframe, carries everything the others changed.
+    // Each held snapshot is a diff against the one before it, so when more
+    // than one arrived (a debounced one besides the action's own, or a
+    // navigate's load and settle) only the last one, sent as a keyframe,
+    // carries everything the others changed.
     if (heldCount > 1) snapshotContext.markNavigated();
     const message = snapshotMessage(heldSnapshot);
     heldSnapshot = null;

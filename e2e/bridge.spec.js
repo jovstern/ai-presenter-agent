@@ -202,7 +202,7 @@ test('forged messages on window are ignored', async ({ page }) => {
   expect(ids).not.toContain('forged-result');
 });
 
-test('a snapshot follows a mutation, with hidden correct for save-confirmation', async ({
+test('an action’s settled snapshot comes before its result, with hidden correct for save-confirmation', async ({
   page,
 }) => {
   expect(await act(page, 'navigate', ['settings'])).toEqual({ success: true });
@@ -212,26 +212,30 @@ test('a snapshot follows a mutation, with hidden correct for save-confirmation',
       .filter((message) => message.type === 'snapshot')
       .map((snapshot) => snapshot.full.find((node) => node.selector === 'save-confirmation'))
       .filter(Boolean);
+  const types = (messages) => messages.map((message) => message.type);
 
-  // The settings load: `navigated`, then a snapshot where the confirmation is
-  // in the DOM but display:none.
-  await expect.poll(async () => confirmationIn(await received(page))).toHaveLength(1);
+  // The settings load: `navigated`, then the load's snapshot, then the
+  // settled page's (#25), then the result; in both snapshots the
+  // confirmation is in the DOM but display:none.
   const onLoad = await received(page);
-  const navigatedAt = onLoad.findIndex((message) => message.type === 'navigated');
-  const snapshotAt = onLoad.findIndex((message) => message.type === 'snapshot');
-  expect(navigatedAt).toBeGreaterThanOrEqual(0);
-  expect(navigatedAt).toBeLessThan(snapshotAt);
-  expect(confirmationIn(onLoad)[0]).toMatchObject({ tag: 'p', label: 'Saved.', hidden: true });
+  expect(types(onLoad)).toEqual(['navigated', 'snapshot', 'snapshot', 'action-result']);
+  expect(confirmationIn(onLoad)).toEqual([
+    expect.objectContaining({ tag: 'p', label: 'Saved.', hidden: true }),
+    expect.objectContaining({ tag: 'p', label: 'Saved.', hidden: true }),
+  ]);
 
-  // Saving shows it: the debounced MutationObserver sends a snapshot whose
-  // diff carries exactly that change.
+  // Saving shows it: the click's own snapshot, sent before its result,
+  // carries exactly that change.
   expect(await act(page, 'click', ['save-button'])).toEqual({ success: true });
-  await expect.poll(async () => confirmationIn(await received(page))).toHaveLength(2);
-  const afterSave = (await received(page)).filter((message) => message.type === 'snapshot').at(-1);
-  expect(afterSave.changed).toEqual([
+  const afterSave = (await received(page)).slice(onLoad.length);
+  expect(types(afterSave)).toEqual(['snapshot', 'action-result']);
+  expect(afterSave[0].changed).toEqual([
     { selector: 'save-confirmation', tag: 'p', label: 'Saved.', disabled: false, hidden: false },
   ]);
-  expect(afterSave.removed).toEqual([]);
+  expect(afterSave[0].removed).toEqual([]);
+  // The debounced snapshot the click also scheduled was replaced, not sent.
+  await page.waitForTimeout(IGNORED_GRACE_MS);
+  expect(await received(page)).toHaveLength(onLoad.length + 2);
 });
 
 // docs/code-review-notes.md M1: target-app/routes.json is the one route list.
