@@ -780,6 +780,111 @@ describe('sandbox/bridge.js snapshots', () => {
   });
 });
 
+// Issue #22: a page with more data-testid elements than MAX_SNAPSHOT_NODES
+// (30) reports the 30 nearest the frame's viewport, in page order, and how
+// many it left out.
+describe('sandbox/bridge.js snapshots of a page over the cap', () => {
+  const MAX_SNAPSHOT_NODES = 30;
+  const VIEWPORT_HEIGHT = 720;
+  const ROW_HEIGHT = 50;
+  const SNAPSHOT_DEBOUNCE_MS = 250;
+  const sleep = (/** @type {number} */ ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  /**
+   * Loads `count` buttons stacked ROW_HEIGHT apart (jsdom lays nothing out, so
+   * each one's rect is stubbed), the frame scrolled to `page.scrollY`, and
+   * resolves with the snapshot of them. `hidden` buttons have no box, as with
+   * display: none.
+   * @param {number} count
+   * @param {{ scrollY: number }} page
+   * @param {number[]} [hidden]
+   * @returns {Promise<{ snapshot: SnapshotMessage, messages: SnapshotMessage[] }>}
+   */
+  async function loadTallPage(count, page, hidden = []) {
+    /** @type {SnapshotMessage[]} */
+    const messages = [];
+    /** @type {Promise<SnapshotMessage>} */
+    const snapshot = new Promise((resolve) => {
+      agentPort.onmessage = ({ data }) => {
+        if (data?.type !== 'snapshot' || data.full.length === 0) return;
+        messages.push(data);
+        resolve(data);
+      };
+    });
+    frame.load('/target-app/orders.html');
+    Object.assign(frame.win, { innerHeight: VIEWPORT_HEIGHT });
+    frame.doc.body.innerHTML = Array.from(
+      { length: count },
+      (_, i) => `<button data-testid="b${i}">Row ${i}</button>`,
+    ).join('');
+    frame.doc.querySelectorAll('button').forEach((button, i) => {
+      button.getBoundingClientRect = () => {
+        const top = i * ROW_HEIGHT - page.scrollY;
+        const height = hidden.includes(i) ? 0 : ROW_HEIGHT - 10;
+        return DOMRect.fromRect({ x: 0, y: hidden.includes(i) ? 0 : top, width: height, height });
+      };
+    });
+    return { snapshot: await snapshot, messages };
+  }
+
+  /** @param {number} from @param {number} to inclusive */
+  const selectors = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => `b${from + i}`);
+
+  it('reports every element, and no `omitted`, on a page at the cap', async () => {
+    const { snapshot } = await loadTallPage(MAX_SNAPSHOT_NODES, { scrollY: 0 });
+
+    expect(snapshot.full.map((node) => node.selector)).toEqual(selectors(0, 29));
+    expect(snapshot).not.toHaveProperty('omitted');
+  });
+
+  it('keeps the elements on screen and the nearest ones off it, in page order', async () => {
+    // Scrolled to b20: b20–b34 are on screen. The 15 nearest off screen
+    // alternate above and below, so b10–b19 above and b35–b39 below.
+    const { snapshot } = await loadTallPage(40, { scrollY: 20 * ROW_HEIGHT });
+
+    expect(snapshot.full.map((node) => node.selector)).toEqual(selectors(10, 39));
+    expect(snapshot.omitted).toBe(10);
+  });
+
+  it('keeps the top of the page when it is scrolled to the top', async () => {
+    const { snapshot } = await loadTallPage(40, { scrollY: 0 });
+
+    expect(snapshot.full.map((node) => node.selector)).toEqual(selectors(0, 29));
+    expect(snapshot.omitted).toBe(10);
+  });
+
+  it('leaves out an element with no box (display: none) before any off-screen one', async () => {
+    const { snapshot } = await loadTallPage(31, { scrollY: 0 }, [3]);
+
+    expect(snapshot.full.map((node) => node.selector)).not.toContain('b3');
+    expect(snapshot.full).toHaveLength(MAX_SNAPSHOT_NODES);
+    expect(snapshot.omitted).toBe(1);
+  });
+
+  it('sends a snapshot of what a scroll brought into view', async () => {
+    const page = { scrollY: 0 };
+    const { messages } = await loadTallPage(40, page);
+
+    page.scrollY = 20 * ROW_HEIGHT;
+    frame.doc.dispatchEvent(new Event('scroll'));
+    await vi.waitFor(() => expect(messages).toHaveLength(2));
+
+    const scrolled = /** @type {SnapshotMessage} */ (messages.at(-1));
+    expect(scrolled.full.map((node) => node.selector)).toEqual(selectors(10, 39));
+    expect(scrolled.removed).toEqual(selectors(0, 9));
+    expect(scrolled.changed.map((node) => node.selector)).toEqual(selectors(30, 39));
+  });
+
+  it('sends nothing on a scroll of a page under the cap: what it holds can’t change', async () => {
+    const { messages } = await loadTallPage(10, { scrollY: 0 });
+
+    frame.doc.dispatchEvent(new Event('scroll'));
+    await sleep(SNAPSHOT_DEBOUNCE_MS * 2);
+
+    expect(messages).toHaveLength(1);
+  });
+});
+
 // An action's result waits for the page to settle, and the snapshot of the
 // settled page goes out first, so the agent can send it inside that action's
 // tool response (#25). Settled: no mutation, input or change for

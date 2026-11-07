@@ -37,7 +37,13 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
   after every load, after a debounced DOM mutation (250 ms), before each successful action's
-  result once the page has **settled**, and on request (`sandbox/bridge.js`).
+  result once the page has **settled**, and on request (`sandbox/bridge.js`). At most 30
+  nodes: see **Snapshot cap**.
+- **Snapshot cap** — `MAX_SNAPSHOT_NODES` (30) in `sandbox/bridge.js`. On a page with more
+  `data-testid` elements (the target app's Orders page has 139), a snapshot keeps the 30
+  nearest the frame's viewport (on screen first, unrendered last), in page order, and counts
+  the rest as `omitted`; a scroll on such a page sends a new snapshot. The model is told the
+  count in each keyframe and scrolls to reach the rest.
 - **Settled** — the page after an action, as the bridge waits for it: no mutation, input or
   change for 100 ms, or 1 s of waiting, whichever comes first; when the action started a
   navigation (a link click), the new page once loaded. All of it ends within 3.7 s of the
@@ -47,7 +53,9 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   download) makes the next successful action wait out its deadline once; the target app has
   none.
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
-  or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
+  when the diff covers most of the page (`FULL_REFRESH_RATIO`, 0.6), or on a page over the
+  snapshot cap when anything left the snapshot (a scroll moved it out of view, not off the
+  page) (`agent-client/src/domSnapshotContext.js`).
 - **Delta** — a snapshot told to the model as only what changed and what was removed. Cheaper
   than a keyframe; same idea as a video codec's delta frames.
 - **Grounding** — keeping the model's picture of the page true by sending it snapshots.

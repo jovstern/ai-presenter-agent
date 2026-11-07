@@ -301,6 +301,20 @@ test('act: a spoken request is carried out and answered once', async ({ page }) 
   expect(counterValues, 'the counter went to three, once').toEqual(['1', '2', '3']);
 });
 
+// Issue #22: the Orders page has 139 elements, so the agent sees the 30
+// nearest the view (bridge.js). The third order is on screen when the page
+// loads; the agent has to navigate there and tick that row, and only that one.
+test('orders: a row on the dense Orders page is ticked', async ({ page }) => {
+  test.setTimeout(120_000);
+  const frame = page.frameLocator('#target-app-frame');
+  await connectLive(page);
+
+  await expect(frame.getByTestId('order-1003-select')).toBeChecked({ timeout: 60_000 });
+  await settle(page);
+  await expect(frame.getByTestId('orders-heading')).toBeVisible();
+  await expect(frame.getByTestId('orders-selected-count')).toHaveText('1 selected');
+});
+
 // The reconnect scenario's knowledge file (knowledgeStore.js's storage format).
 // The follow-up asks for the code name, so the answer says whether the resumed
 // session still has the knowledge sent before the drop (M9).

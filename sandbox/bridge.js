@@ -28,8 +28,10 @@
    */
   /**
    * The full node list plus its diff against the bridge's previous snapshot.
-   * `removed` holds selectors.
-   * @typedef {{ full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} Snapshot
+   * `removed` holds selectors. `omitted` is set only on a page with more
+   * elements than the bridge's cap: how many it left out, those furthest from
+   * the viewport.
+   * @typedef {{ full: SnapshotNode[], changed: SnapshotNode[], removed: string[], omitted?: number }} Snapshot
    */
   /**
    * The handshake, posted to `window` with the bridge's MessagePort as its one
@@ -55,7 +57,7 @@
   /**
    * bridge -> agent: after every load and debounced DOM mutation, before each
    * successful action's result, and on request.
-   * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[] }} SnapshotMessage
+   * @typedef {{ type: 'snapshot', full: SnapshotNode[], changed: SnapshotNode[], removed: string[], omitted?: number }} SnapshotMessage
    */
   /**
    * bridge -> agent: a new document loaded in the frame. Sent before that
@@ -85,9 +87,10 @@
   const ROUTE_PATHS = readRoutes();
 
   // Size cap so a larger page can't blow the model's context. Kept at 30 in
-  // M6 T5: keyframes measured ~100 B a node (777–855 B for the target app's 8),
-  // so 30 nodes is ~3–3.5 kB, inside the 4 kB budget (docs/metrics/m06.md).
-  // Not yet measured on a page big enough to reach it.
+  // M6 T5 and again in M9 T6 on the Orders page (139 elements), where 30 nodes
+  // made a 3.4 kB keyframe, ~103 B a node: inside the 4 kB budget, with room
+  // for a select's options; 40 would not be (docs/metrics/README.md). On a
+  // page over the cap the nodes nearest the viewport are kept (pickElements).
   const MAX_SNAPSHOT_NODES = 30;
   // Changes nobody asked for (the viewer's clicks, async page JS) go out once
   // the DOM has been quiet this long.
@@ -223,7 +226,11 @@
     async scroll(_deadline, selector) {
       const el = findByTestId(selector);
       if (!el) return { success: false, error: `No element with data-testid="${selector}"` };
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Instant, not smooth (M9 T6): the result waits for the page to settle,
+      // and on a page over the snapshot cap a scroll changes the snapshot, so
+      // a smooth scroll held the reply 0.7–1 s, past the spec's 300 ms round
+      // trip, and answering sooner would snapshot the page mid-scroll.
+      el.scrollIntoView({ behavior: 'instant', block: 'center' });
       return { success: true };
     },
     async navigate(deadline, route) {
@@ -578,13 +585,55 @@
     );
   }
 
-  /** @returns {SnapshotNode[]} */
+  // How far an element is from the frame's viewport, in px vertically: 0 on
+  // screen, Infinity when it isn't rendered (display: none, or in a hidden
+  // ancestor), so a hidden element is the first to be left out.
+  /**
+   * @param {Element} el
+   * @param {number} viewportHeight
+   */
+  function distanceFromViewport(el, viewportHeight) {
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) return Infinity;
+    if (rect.bottom < 0) return -rect.bottom;
+    if (rect.top > viewportHeight) return rect.top - viewportHeight;
+    return 0;
+  }
+
+  // The elements a snapshot reports, in page order. Under the cap, all of them.
+  // Over it (issue #22: a 60-row table), the MAX_SNAPSHOT_NODES nearest the
+  // viewport, on screen first: what the viewer sees is what they ask about,
+  // and in page order the cap kept the top of the page whatever was scrolled
+  // to, so the rest of a long page could never be reached. The model is told
+  // how many were left out (`omitted`), and a scroll brings others in.
+  /**
+   * @param {Element[]} elements
+   * @param {number} viewportHeight
+   */
+  function pickElements(elements, viewportHeight) {
+    if (elements.length <= MAX_SNAPSHOT_NODES) return { picked: elements, omitted: 0 };
+    const kept = elements
+      .map((el, index) => ({ index, distance: distanceFromViewport(el, viewportHeight) }))
+      .sort((a, b) => a.distance - b.distance || a.index - b.index)
+      .slice(0, MAX_SNAPSHOT_NODES)
+      .map(({ index }) => index)
+      .sort((a, b) => a - b);
+    return {
+      picked: kept.map((index) => elements[index]),
+      omitted: elements.length - MAX_SNAPSHOT_NODES,
+    };
+  }
+
+  /** @returns {{ nodes: SnapshotNode[], omitted: number }} */
   function buildSnapshotNodes() {
     const doc = iframe.contentDocument;
     const win = iframe.contentWindow;
-    if (!doc || !win) return [];
-    const elements = [...doc.querySelectorAll('[data-testid]')].slice(0, MAX_SNAPSHOT_NODES);
-    return elements.map((el) => {
+    if (!doc || !win) return { nodes: [], omitted: 0 };
+    const { picked, omitted } = pickElements(
+      [...doc.querySelectorAll('[data-testid]')],
+      win.innerHeight,
+    );
+    const nodes = picked.map((el) => {
       const computedStyle = win.getComputedStyle(el);
       /** @type {SnapshotNode} */
       const node = {
@@ -600,13 +649,19 @@
       if (isSelect(el)) node.options = optionTexts(el);
       return node;
     });
+    return { nodes, omitted };
   }
+
+  // Whether the last snapshot left elements out: only then does a scroll
+  // change what a snapshot holds, so only then does one send a snapshot.
+  let pageOverCap = false;
 
   function diffAndBroadcastSnapshot() {
     // Before the handshake there's no one to tell; agent-client asks for a
     // fresh snapshot once connected, so nothing is lost by dropping this.
     if (!agentPort) return;
-    const full = buildSnapshotNodes();
+    const { nodes: full, omitted } = buildSnapshotNodes();
+    pageOverCap = omitted > 0;
     const nodesById = new Map(full.map((n) => [n.selector, n]));
 
     const removed = [...lastNodesById.keys()].filter((id) => !nodesById.has(id));
@@ -616,7 +671,7 @@
     });
 
     lastNodesById = nodesById;
-    postToAgent({ type: 'snapshot', full, changed, removed });
+    postToAgent({ type: 'snapshot', full, changed, removed, ...(omitted > 0 ? { omitted } : {}) });
   }
 
   // Reconnected on every iframe load. Every mutation, input or change both
@@ -715,6 +770,17 @@
     // so the observer alone never sees it. The listeners go with the document.
     doc.addEventListener('input', scheduleSnapshot, true);
     doc.addEventListener('change', scheduleSnapshot, true);
+    // On a page over the cap, a scroll (the viewer's or a `scroll` action's)
+    // changes which elements are nearest the viewport, and an action settles
+    // only once the scrolling stops. Captured, so a scrolling container
+    // counts too.
+    doc.addEventListener(
+      'scroll',
+      () => {
+        if (pageOverCap) scheduleSnapshot();
+      },
+      true,
+    );
     // beforeunload as soon as a navigation starts, pagehide in case it was
     // skipped; both go with the document's window.
     const markNavigating = () => {

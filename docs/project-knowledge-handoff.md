@@ -354,11 +354,18 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
     Network → WS).
 - **The "point this at a real external site" path was never built**, on purpose — see
   `sandbox-simulation.md` §5 for the (non-trivial) same-origin-proxy approach that would be needed.
-- **DOM snapshot payload size is measured on the mock target app only** (M6 T5, the `ds:keyframe`
-  mark): 8 nodes per page, keyframes 777–855 B, about 100 B a node, so the 30-node cap
-  (`MAX_SNAPSHOT_NODES` in `bridge.js`) comes to roughly 3–3.5 kB, inside the 4 kB budget. The cap
-  and the 0.6 full-refresh ratio were kept, but these pages never reach the cap or a large delta,
-  so neither is stressed. A real, larger page is the test that's still missing.
+- **DOM snapshot payload size is measured on the mock target app only, now with a dense page**
+  (M9 T6, issue #22). The Orders page (`target-app/orders.html`: 60 rows of a checkbox and a
+  Ship button, an eleven-field form, 139 `data-testid`s) reaches the 30-node cap
+  (`MAX_SNAPSHOT_NODES` in `bridge.js`): keyframes of 3.56–3.73 kB in use, 3.96 kB at worst with
+  every text field filled to 60+ characters, ~103 B a node, so the cap stays at 30 (40 would be
+  ~4.4 kB). Before T6 the cap kept the first 30 in page order, so rows 13–60 and the whole form
+  could never be seen, whatever was scrolled; it now keeps the 30 nearest the viewport and the
+  model is told how many it left out. Deltas for a tick, a ship or a fill are 0.16–0.73 kB
+  (0.03–0.2 of the page), so the 0.6 ratio stays. Still not verified: a page whose 30 visible
+  nodes carry long selects (a select's options can add ~1.2 kB on their own, so the budget is
+  not guaranteed by a node count), and a real site rather than the mock
+  (`docs/metrics/README.md` § M9 T6).
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
   `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
   T1, the client log (`/api/client-log`, `clientLog.js`) in M8 T2, checked locally only; the

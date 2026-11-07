@@ -461,6 +461,20 @@ if (message.toolCall) {
 > (a 204, a download, a cancelled one) fires `beforeunload` and no load, so the mark stays set
 > and the next successful action waits out its 3.7 s deadline once before clearing it; not
 > reachable on today's target app.
+>
+> **M9 T6 (issue #22, the snapshot cap on a dense page).** On the new Orders page (139
+> `data-testid`s) the 30-node cap kept the first 30 in page order: rows 13–60 and the whole New
+> order form were never in a snapshot, whatever was scrolled, so the model could not reach
+> them without guessing a selector. Over the cap, `bridge.js` now keeps the 30 nodes nearest the
+> frame's viewport (on screen first, unrendered last) in page order, sends `omitted` (how many it
+> left out), and sends a snapshot on a scroll (captured, so a scrolling container counts);
+> `domSnapshotContext.js` sends any removal on such a page as a keyframe, whose last line tells
+> the model how many elements are not listed and to scroll to the nearest listed one. The
+> `scroll` action is instant rather than smooth: its result waits for the page to settle, and a
+> smooth scroll held it 0.7–1 s, past the spec's 300 ms. The cap (30) and the ratio (0.6) are
+> kept on the measurements (`docs/metrics/README.md` § M9 T6). Tested in `bridge.test.js`,
+> `domSnapshotContext.test.js`, `bridgeChannel.test.js` and `e2e/bridge.spec.js`; one live run
+> ("go to the Orders page and tick the third order") passed.
 
 Two issues in one area:
 

@@ -315,7 +315,7 @@ describe('the sandbox page', () => {
     },
   );
 
-  it.each(['/target-app/index.html', '/target-app/settings.html'])(
+  it.each(['/target-app/index.html', '/target-app/settings.html', '/target-app/orders.html'])(
     '%s ships no inline script',
     async (path) => {
       const { app } = setup();
@@ -611,7 +611,12 @@ describe('other routes', () => {
 
   it('serves the static directories', async () => {
     const { app } = setup();
-    for (const path of ['/sandbox/bridge.js', '/target-app/home.js', '/target-app/settings.js']) {
+    for (const path of [
+      '/sandbox/bridge.js',
+      '/target-app/home.js',
+      '/target-app/settings.js',
+      '/target-app/orders.js',
+    ]) {
       expect((await request(app).get(path)).status, path).toBe(200);
     }
   });

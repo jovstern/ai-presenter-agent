@@ -30,8 +30,8 @@ performance — see the docs for why.
 ```
 docs/            spec, handoff, review checklist, ADRs (docs/adr/), build cycle (docs/superpowers/),
                  the observer's metrics per milestone (docs/metrics/)
-target-app/      static mock "cloned app" (2 pages + their scripts, a few data-testid elements,
-                 routes.json: the one route list)
+target-app/      static mock "cloned app" (3 pages + their scripts: Home, Settings, and Orders,
+                 a 60-row table and a form past the snapshot cap; routes.json: the one route list)
 sandbox/         the host page: iframe + the MessageChannel bridge (ADR 0001) + action library
 agent-client/    npm package: the React app built into an ES module (plus the Gemini SDK as a
                  chunk loaded on Talk), mounted in a shadow root
@@ -201,7 +201,7 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 6 specs, 40 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 6 specs, 43 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
@@ -215,7 +215,7 @@ npm run build   # agent-client/dist/: agent-client.js (an ES module), the SDK ch
                 # web-<hash>.js (ADR 0005), and public/capture-worklet.js
 
 cd ../server
-npm test        # vitest + supertest: 5 files, 119 tests
+npm test        # vitest + supertest: 5 files, 120 tests
 ```
 
 The suite in `agent-client/src/__tests__/`:
@@ -269,14 +269,18 @@ The suite in `agent-client/src/__tests__/`:
   a successful action's snapshot of the settled page comes before its result (after 100 ms of
   quiet, by the 1 s cap on a page that never stops; a link click's after its new page loads; all
   by the 3.7 s deadline), a failure answers at once, and an action cancels an earlier change's
-  pending debounced snapshot (re-armed if it fails).
+  pending debounced snapshot (re-armed if it fails); on a page over the 30-node cap, the
+  snapshot keeps the nodes nearest the viewport (on screen first, unrendered last) in page
+  order with an `omitted` count, and a scroll sends a new one (under the cap it sends nothing).
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
   inherited names (`toString`) get none; `navigate`'s enum is `target-app/routes.json`'s keys.
 - `bridgeChannel.test.js` — the private channel: one port handed over, results correlated by id,
   the 4 s timeout, forged `window` messages ignored.
-- `domSnapshotContext.test.js` — the keyframe-vs-delta decision.
+- `domSnapshotContext.test.js` — the keyframe-vs-delta decision; on a page over the cap, the
+  keyframe's line saying how many elements were left out and how to reach them, and any removal
+  sent as a keyframe (a scroll moved it out of view, not off the page).
 - `knowledgeStore.test.js` — accept/reject by file type, the size cap, add/remove/list (the
   same array until the files change, for `useSyncExternalStore`), file ids without
   `crypto.randomUUID` (plain http), the context blob it builds.
@@ -325,7 +329,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   route and `fill` on a non-input are rejected, that a second
   `ds-bridge-connect` and forged `window` messages are ignored, and that a navigate and a click
   each post their settled snapshot before their result, with `hidden` right for
-  `save-confirmation`.
+  `save-confirmation`. On the Orders page (139 elements, issue #22) the snapshot keeps the 30
+  nearest the view, within the 4 kB keyframe budget; ticking a row and filling a field are
+  deltas, scrolling to the form a keyframe that brings it in, and a viewer's own scroll sends a
+  snapshot of what came into view.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
@@ -366,7 +373,7 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   none after End.
 - `a11y.spec.js` — axe (`@axe-core/playwright`, every default rule), in light and dark, on `/`
   with the card idle, failed with its toast, and with the knowledge dialog open; connected (the fake-Live harness, `e2e/fakeLive.js`, shared
-  with `loop.spec.js` and `widget.spec.js`) with a transcript line on screen, and on both target-app pages: zero
+  with `loop.spec.js` and `widget.spec.js`) with a transcript line on screen, and on the three target-app pages: zero
   violations. In each theme it also walks the knowledge dialog from the keyboard only: Enter on
   Add files opens the file picker, Tab and Shift+Tab wrap inside the dialog, Escape returns
   focus to the knowledge button. axe walks the
@@ -374,8 +381,10 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
 
 `npm run e2e:live` is the opt-in live e2e (`e2e/live.spec.js`, R12): the real server key and the
 real Gemini Live API, with spoken prompts (`e2e/make-prompts.sh`, macOS `say`) played by
-Chromium's fake mic. Three scenarios: the greeting, the scripted six-step task checked in the
-iframe, and a forced socket close that must recover. It records the app metrics (connect time,
+Chromium's fake mic. Five scenarios: the greeting, the scripted six-step task checked in the
+iframe, "increment the counter to three" listened to for a doubled answer, "go to the Orders
+page and tick the third order" on the dense page, and a forced socket close that must
+recover. It records the app metrics (connect time,
 first audio, tool round trips, reconnect time, pass rate) in `.metrics/live.json`. Never in CI.
 How to run it, what each number means and the current baseline: `docs/metrics/README.md`.
 

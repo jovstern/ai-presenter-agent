@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Orders page of the mock app the presenter agent operates: a long table and a form."
+    />
+    <title>Target App — Orders</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body class="wide">
+    <nav>
+      <a data-testid="nav-home" href="index.html">Home</a>
+      <a data-testid="nav-settings" href="settings.html">Settings</a>
+      <a data-testid="nav-orders" aria-current="page" href="orders.html">Orders</a>
+    </nav>
+
+    <main>
+      <h1 data-testid="orders-heading">Orders</h1>
+
+      <!-- The denser page (issue #22): 60 rows, each with a checkbox and a
+           button, then a form of eleven fields, so a snapshot reaches
+           bridge.js's MAX_SNAPSHOT_NODES. orders.js fills the table. -->
+      <section aria-labelledby="orders-list-heading">
+        <h2 id="orders-list-heading" class="visually-hidden">Order list</h2>
+        <p class="toolbar">
+          <span data-testid="orders-selected-count" role="status">0 selected</span>
+          <button data-testid="ship-selected" type="button" disabled>Ship selected</button>
+        </p>
+        <div class="table-scroll" role="region" aria-label="Orders" tabindex="0">
+          <table>
+            <thead>
+              <tr>
+                <th scope="col"><span class="visually-hidden">Select</span></th>
+                <th scope="col">Order</th>
+                <th scope="col">Customer</th>
+                <th scope="col" class="numeric">Total</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span class="visually-hidden">Action</span></th>
+              </tr>
+            </thead>
+            <tbody id="orders-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-labelledby="new-order-heading">
+        <h2 id="new-order-heading">New order</h2>
+        <form id="new-order-form" class="order-form">
+          <p class="field">
+            <label for="order-customer">Customer</label>
+            <input
+              id="order-customer"
+              name="customer"
+              data-testid="order-customer"
+              type="text"
+              autocomplete="organization"
+              required
+            />
+          </p>
+          <p class="field">
+            <label for="order-email">Email</label>
+            <input
+              id="order-email"
+              name="email"
+              data-testid="order-email"
+              type="email"
+              autocomplete="email"
+            />
+          </p>
+          <p class="field">
+            <label for="order-phone">Phone</label>
+            <input
+              id="order-phone"
+              name="phone"
+              data-testid="order-phone"
+              type="tel"
+              autocomplete="tel"
+            />
+          </p>
+          <p class="field">
+            <label for="order-street">Street</label>
+            <input
+              id="order-street"
+              name="street"
+              data-testid="order-street"
+              type="text"
+              autocomplete="street-address"
+            />
+          </p>
+          <p class="field">
+            <label for="order-city">City</label>
+            <input
+              id="order-city"
+              name="city"
+              data-testid="order-city"
+              type="text"
+              autocomplete="address-level2"
+            />
+          </p>
+          <p class="field">
+            <label for="order-postcode">Postcode</label>
+            <input
+              id="order-postcode"
+              name="postcode"
+              data-testid="order-postcode"
+              type="text"
+              autocomplete="postal-code"
+            />
+          </p>
+          <p class="field">
+            <label for="order-country">Country</label>
+            <select id="order-country" name="country" data-testid="order-country">
+              <option>United States</option>
+              <option>Canada</option>
+              <option>United Kingdom</option>
+              <option>Germany</option>
+              <option>France</option>
+              <option>Israel</option>
+              <option>Japan</option>
+              <option>Australia</option>
+            </select>
+          </p>
+          <p class="field">
+            <label for="order-quantity">Quantity</label>
+            <input
+              id="order-quantity"
+              name="quantity"
+              data-testid="order-quantity"
+              type="number"
+              min="1"
+              value="1"
+            />
+          </p>
+          <p class="field">
+            <label for="order-date">Delivery date</label>
+            <input id="order-date" name="date" data-testid="order-date" type="date" />
+          </p>
+          <p>
+            <label>
+              <input data-testid="order-priority" name="priority" type="checkbox" />
+              Priority shipping
+            </label>
+          </p>
+          <p class="field">
+            <label for="order-notes">Notes</label>
+            <textarea id="order-notes" name="notes" data-testid="order-notes" rows="3"></textarea>
+          </p>
+          <p>
+            <button data-testid="create-order" type="submit">Create order</button>
+          </p>
+          <p data-testid="order-confirmation" class="order-confirmation" role="status"></p>
+        </form>
+      </section>
+    </main>
+
+    <script defer src="orders.js"></script>
+  </body>
+</html>

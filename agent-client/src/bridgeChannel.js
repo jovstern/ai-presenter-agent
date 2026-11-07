@@ -87,7 +87,9 @@ export function connectBridge({ postConnect = postConnectToWindow } = {}) {
       if (data.error !== undefined) result.error = data.error;
       settleAction(data.id, result);
     } else if (data.type === 'snapshot') {
+      /** @type {Snapshot} */
       const snapshot = { full: data.full, changed: data.changed, removed: data.removed };
+      if (data.omitted !== undefined) snapshot.omitted = data.omitted;
       snapshotListeners.forEach((listener) => listener(snapshot));
     } else if (data.type === 'navigated') {
       navigatedListeners.forEach((listener) => listener());

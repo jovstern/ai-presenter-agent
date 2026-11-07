@@ -201,7 +201,11 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   expect(checkedInShadowRoot('li')).toBe(true);
 });
 
-for (const path of ['/target-app/index.html', '/target-app/settings.html']) {
+for (const path of [
+  '/target-app/index.html',
+  '/target-app/settings.html',
+  '/target-app/orders.html',
+]) {
   test(`the target app at ${path}`, async ({ page }) => {
     await page.goto(path);
     const { violations } = await analyze(page);

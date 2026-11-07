@@ -99,3 +99,92 @@ button:hover {
   white-space: nowrap;
   border: 0;
 }
+
+/* The page the viewer is on (aria-current), told by more than colour. */
+nav a[aria-current='page'] {
+  font-weight: 600;
+  text-decoration-thickness: 2px;
+}
+
+/* The Orders page: a table needs more room than the other pages' 480 px. */
+body.wide {
+  max-width: 720px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+button:disabled {
+  /* 4.5:1 on the button's own background. */
+  color: #595959;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: #f2f2f2;
+}
+
+/* A narrow screen scrolls the table, not the page. Positioned, so the
+   visually hidden column names are clipped with it rather than widening the
+   page. */
+.table-scroll {
+  position: relative;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+th,
+td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid #d9d9d9;
+  white-space: nowrap;
+}
+
+thead th {
+  font-weight: 600;
+}
+
+tbody th {
+  font-weight: normal;
+}
+
+.numeric {
+  text-align: right;
+}
+
+td input[type='checkbox'] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  vertical-align: middle;
+}
+
+/* A form reads best at the other pages' width, not the table's. The room
+   below it lets its last controls scroll clear of the presenter card, which
+   floats over the bottom of the frame. */
+.order-form {
+  max-width: 480px;
+  padding-bottom: 160px;
+}
+
+.order-form .field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #767676;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.order-confirmation {
+  color: #1a7a1a;
+}

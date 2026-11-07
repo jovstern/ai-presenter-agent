@@ -146,6 +146,16 @@ describe('connectBridge', () => {
     await expect(gotSnapshot).resolves.toEqual(snapshot);
   });
 
+  it('passes on how many elements a snapshot of a page over the cap left out', async () => {
+    const { channel, bridgePort } = open();
+    const snapshot = { full: [{ selector: 'a' }], changed: [], removed: [], omitted: 109 };
+
+    const gotSnapshot = new Promise((resolve) => channel.onSnapshot(resolve));
+    bridgePort.postMessage({ type: 'snapshot', ...snapshot });
+
+    await expect(gotSnapshot).resolves.toEqual(snapshot);
+  });
+
   it('stops delivering to a subscriber after it unsubscribes', async () => {
     const { channel, bridgePort } = open();
     const removedSnapshot = vi.fn();

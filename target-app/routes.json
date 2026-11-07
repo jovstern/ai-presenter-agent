@@ -1,1 +1,5 @@
-{ "home": "/target-app/index.html", "settings": "/target-app/settings.html" }
+{
+  "home": "/target-app/index.html",
+  "settings": "/target-app/settings.html",
+  "orders": "/target-app/orders.html"
+}

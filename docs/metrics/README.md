@@ -62,18 +62,20 @@ not made cross-platform because `say` is macOS-only anyway.
 ### Scenarios
 
 Each WAV is its own Playwright project (`live-greeting`, `live-task`, `live-act`,
-`live-reconnect`), because the fake-capture file is a browser launch flag.
+`live-orders`, `live-reconnect`), because the fake-capture file is a browser launch flag.
 
 | Scenario | Prompt (`make-prompts.sh`) | Passes when |
 |---|---|---|
 | `greeting` | "Hi!" at 4 s | Live within 15 s, then the first agent audio (`ds:first-audio`) and an agent transcript line |
 | `task` | at 6 s: "Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save." | within 150 s: the save confirmation is visible, the Settings heading is shown, the toggle is checked, the Plan select is `pro` (a `fill`), and the counter went exactly `1`, `2` |
 | `act` | at 6 s: "Please increment the counter to three." (issue #29: a spoken request that makes the agent act, then its answer) | the counter goes `1`, `2`, `3` within 60 s, the agent's answer completes, and it is listened to for 10 s more |
+| `orders` | at 6 s: "Go to the Orders page and tick the third order." (issue #22: the dense page, past the snapshot cap) | order 1003's checkbox is checked within 60 s; once the agent's answer completes and 10 s more have passed, the Orders heading is shown and exactly one order is selected |
 | `reconnect` | at 12 s: "Which page are we on right now, and what is the code name of this demo?" | a knowledge file naming the code name (Pelican) is seeded in `localStorage` first. After the first audio, the test closes the page side of the real Gemini socket (a `routeWebSocket` pass-through); the card shows `Reconnecting…`, then Live, `ds:reconnected` is marked, and the agent answers the follow-up. Whether the answer names Pelican is recorded (`recalledKnowledge`), not asserted |
 
 Until M6 T5 the task had five steps (no Plan) and the follow-up asked only for the page, with
 no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts. The `act` scenario
-and the socket tap below arrived in M9 T2 (issue #29), from run 51 on.
+and the socket tap below arrived in M9 T2 (issue #29), from run 51 on; the `orders` scenario in
+M9 T6 (issue #22), from run 69 on.
 
 ### The socket tap (M9 T2)
 
@@ -162,6 +164,66 @@ worst per metric, pass rate per scenario) in the milestone report.
 
 The latest numbers are in `m06.md` (M6 T5: six-step task 8 of 10, reconnect worst 2.89 s,
 keyframe ≤ 855 B, fill ≤ 3 ms). The M5 baseline below is kept for history.
+
+## M9 T6: the snapshot cap on a dense page (issue #22, 2026-11-07)
+
+The target app's third page, Orders (`target-app/orders.html`), has 139 `data-testid`
+elements: nav, heading, a selected count and Ship selected, 60 rows of a checkbox and a Ship
+button, and an eleven-field New order form. Measured deterministically through the real bridge
+in Chromium (1280 × 720, the frame filling the window), each snapshot decided by
+`domSnapshotContext.js` as the agent would; `e2e/bridge.spec.js` asserts the shape of it on
+every e2e run. Sizes are the whole message, UTF-8.
+
+**Truncation.** Before T6 the 30-node cap kept the first 30 in page order: nav, heading, the
+toolbar and orders 1001–1012. Scrolling changed nothing, so orders 1013–1060 and the whole form
+were never in a snapshot, and the model can't use a selector it wasn't given. Since T6 a page
+over the cap keeps the 30 nodes nearest the viewport (on screen first, then by distance,
+unrendered last), in page order, and says how many it left out (`omitted`: 109 here); a scroll
+sends a new snapshot, and any removal on such a page is a keyframe.
+
+| Step | Sent as | Bytes | changed / removed of 30 | Ratio |
+|---|---|---|---|---|
+| Load (top of the page) | keyframe | 3,563 | — | — |
+| Tick order 1003 (checkbox, count, Ship selected) | delta | 382 | 3 / 0 | 0.10 |
+| Tick order 1004 | delta | 283 | 2 / 0 | 0.07 |
+| Ship order 1005 | delta | 284 | 2 / 0 | 0.07 |
+| Ship selected (two ticked rows) | delta | 727 | 6 / 0 | 0.20 |
+| Scroll to the form's Customer field | keyframe | 3,698 | 30 / 30 | 2.00 |
+| Fill Customer | delta | 164 | 1 / 0 | 0.03 |
+| Fill Country (a select, 8 options) | delta | 261 | 1 / 0 | 0.03 |
+| Scroll to Create order (4 nodes swapped) | keyframe | 3,669 | 4 / 4 | 0.27 |
+| Fill Notes, Street, City, Email to 60+ characters | delta each | 209–214 | 1 / 0 | 0.03 |
+| The form full, as a keyframe would be | (keyframe) | **3,960** | — | — |
+| Scroll back to order 1030 | keyframe | 3,729 | 30 / 30 | 2.00 |
+
+A node is 80–133 B (median 103 B). A keyframe on a page over the cap carries a 165 B line
+saying how many elements are not listed and to scroll to the nearest listed one.
+
+**Ruling.**
+- **`MAX_SNAPSHOT_NODES` stays 30.** Keyframes are 3.56–3.73 kB in use and 3.96 kB at worst
+  (every text field filled past the 60-character cut), inside the 4 kB budget; 40 nodes would be
+  ~4.4 kB. A node count can't guarantee the budget (a select's options can add ~1.2 kB on
+  their own; see `m06.md`); a byte cap is the change to make if a target page ever needs it.
+- **What the cap keeps changed**: the nodes nearest the viewport, not the first in the page.
+  What the viewer is looking at is what they ask about, and the model reaches the rest by
+  scrolling (the count tells it there is more).
+- **`FULL_REFRESH_RATIO` stays 0.6.** The page's typical actions are deltas of 0.03–0.2 of the
+  page (0.16–0.73 kB against a 3.6 kB keyframe). Only a scroll swaps most of the snapshot, and
+  on a page over the cap any removal is a keyframe anyway: a delta's `removed` would tell the
+  model a row that only scrolled out of view was gone. That rule, not the ratio, made the
+  0.27 scroll a keyframe.
+- **The `scroll` action is instant now.** Its result waits for the page to settle, and on this
+  page the snapshot depends on the scroll position: a smooth scroll held the reply 0.7–1 s, past
+  the spec's 300 ms round trip. Instant, every scroll above answered in 102–107 ms.
+
+**Live run** (run 69, one run, 5 of 5 scenarios passed): the new `orders` scenario navigated
+(127 ms) and ticked order 1003 (105 ms), and only it, in 24.6 s; its keyframes were 862 B (Home)
+and 3,563 B (Orders); the agent's turns were "I'll tick the third order." and "The third order
+has been selected.", no doubled answer, no loop trip. The other four: greeting, the six-step
+task (41.7 s, every tool call successful), act (the counter 1, 2, 3) and reconnect (1.09 s,
+resumed, Pelican recalled) all passed; connect → `open` 1.47–2.23 s, connect → first audio
+2.11–2.79 s. The Home and Settings keyframes grew from 777 / 855 B to 862 / 940 B with the
+Orders link in their nav.
 
 ## M9 T2: doubled answers (issue #29, 2026-11-07)
 

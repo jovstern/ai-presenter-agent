@@ -193,10 +193,18 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   templates in). A successful action's result waits for the page to **settle** (no mutation,
   input or change for 100 ms, capped at 1 s; a link click first waits for the new page; all by a
   3.7 s deadline) and follows that page's snapshot on the port (#25);
-  a failure answers at once; changes nobody asked for go out on a 250 ms debounce. No build step.
-- `target-app/` (static) — 2-page mock app used as the demo target: `index.html` + `home.js`
+  a failure answers at once; changes nobody asked for go out on a 250 ms debounce. A snapshot
+  holds at most 30 nodes (`MAX_SNAPSHOT_NODES`); on a page with more (issue #22, M9 T6) it keeps
+  the 30 nearest the frame's viewport (on screen first, unrendered last), in page order, and
+  says how many it left out (`omitted`), a scroll on such a page sends a new one, and
+  `domSnapshotContext.js` makes any removal there a keyframe that tells the model to scroll for
+  the rest. The `scroll` action is instant, so its result waits for no animation. No build step.
+- `target-app/` (static) — 3-page mock app used as the demo target: `index.html` + `home.js`
   (counter), `settings.html` + `settings.js` (Save confirmation; also a Notes textarea and a
-  Plan select for `fill`), `style.css`, and `routes.json` — the one route list (route name →
+  Plan select for `fill`), `orders.html` + `orders.js` (M9 T6, issue #22: the dense page — a
+  60-row table, each row a checkbox and a Ship button, with a selected count and Ship
+  selected, then an eleven-field New order form; 139 `data-testid`s, past the snapshot cap),
+  `style.css`, and `routes.json` — the one route list (route name →
   page path): the server templates it into the sandbox page for `bridge.js`, and
   `actionTools.js` imports it for `navigate`'s enum. No build step.
 
@@ -219,7 +227,7 @@ chromium` once for the e2e):
   device on Chromium's own clock, so a stalled host audio service can't silence the worklet).
 - `npm run e2e:live` — the opt-in live e2e (`e2e/live.spec.js`, R12), never in `check` or CI.
   macOS only: it first runs `e2e/make-prompts.sh` (`say`, WAVs gitignored), then
-  `GEMINI_LIVE_E2E=1 playwright test`, which defines only the four live projects (one fake-mic
+  `GEMINI_LIVE_E2E=1 playwright test`, which defines only the five live projects (one fake-mic
   WAV each) and starts the server from `server/` on port 3972, so the key comes from the
   server's own env — the config never passes one. It reads the agent-client's `ds:*`
   `performance.mark`s, taps the Live socket for the agent's turns (`e2e/liveTurns.js`: per-turn
@@ -298,7 +306,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (432 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (444 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
@@ -306,9 +314,11 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   SDK chunk's included,
   the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
   `sendBeacon` dropped, nothing sent once disabled or from a `token` failure on), `bridge` (runs
-  `sandbox/bridge.js` against a stubbed iframe), `bridgeChannel`, `bridgeProtocol` (the typedef
+  `sandbox/bridge.js` against a stubbed iframe; over the cap, the nodes nearest the viewport
+  and a snapshot on scroll), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
-  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext`, `knowledgeStore` (incl.
+  frame size, 16 kHz from 48/44.1 kHz, no aliasing), `domSnapshotContext` (incl. the
+  `omitted` line and a removal over the cap as a keyframe), `knowledgeStore` (incl.
   full storage, an unreadable file, and blocked storage on reads and writes),
   `KnowledgeModal.test.jsx` (in a real shadow root: add, list, remove and focus after it, an
   oversize alert, a full-storage alert, blocked-storage alerts for Remove and the rules
@@ -325,7 +335,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   failure reported to `onFailure` once; End as the outline variant; the orb marked while
   reconnecting) and
   `VolumeOrb.test.jsx` (the loop's lifecycle: active only, stopped on unmount, none under
-  reduced motion; a write only when the 2-decimal level changes; `data-reconnecting` with no loop); `rafHarness.js` holds their fake rAF and `matchMedia`, and `defined.js` the tests' narrowing helpers. `server/__tests__/` has 5 vitest files (119 tests), sharing `harness.js` (`setup`, the
+  reduced motion; a write only when the 2-decimal level changes; `data-reconnecting` with no loop); `rafHarness.js` holds their fake rAF and `matchMedia`, and `defined.js` the tests' narrowing helpers. `server/__tests__/` has 5 vitest files (120 tests), sharing `harness.js` (`setup`, the
   capturing logger, `pageNonce`): `app` (supertest against
   `createApp` with a stubbed mint and clock: the token gate's 403/400/429/500/502/200 paths, the
   mint-failure mapping and the error handler, both sandbox URLs templated and rate-limited, no
@@ -340,12 +350,14 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (40
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (43
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
-  violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
+  violation in any frame: `bridge.spec.js` (14: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
-  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (5: the real
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result; on the
+  Orders page, the 30 nodes nearest the view within the 4 kB keyframe budget, a tick and a fill
+  as deltas, a scroll as a keyframe, and a viewer's scroll sending a snapshot), `loop.spec.js` (5: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
   response's `page` showing 1, 2, 3; ten identical counter clicks all run (the loop guard judges
@@ -367,13 +379,13 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   an aborted chunk gives Can't connect with one toast and Retry, which loads it and connects),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
-  `a11y.spec.js` (11: axe with zero violations, in light and dark, on `/` idle, failed with its
+  `a11y.spec.js` (12: axe with zero violations, in light and dark, on `/` idle, failed with its
   toast (once its slide-in has finished) and with the knowledge dialog open (once its fade-in has finished) — inside the shadow root —, plus the dialog from the
   keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
   inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
-  `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (4, opt-in, real
+  `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on the three target-app pages). `e2e/live.spec.js` (5, opt-in, real
   Gemini: greeting, the six-step task, "increment the counter to three" listened to for a doubled
-  answer, a forced close → recovery) runs only under
+  answer, "go to the Orders page and tick the third order", a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.

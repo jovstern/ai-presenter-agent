@@ -81,6 +81,7 @@ export default defineConfig({
         liveProject('greeting', 'greeting.wav'),
         liveProject('task', 'task.wav'),
         liveProject('act', 'act.wav'),
+        liveProject('orders', 'orders.wav'),
         liveProject('reconnect', 'followup.wav'),
       ]
     : [
