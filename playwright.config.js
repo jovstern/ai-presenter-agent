@@ -20,7 +20,17 @@ const BASE_URL = `http://localhost:${PORT}`;
 
 // The deterministic suite's fake mic grants itself and streams a tone; the
 // loop spec presses Connect, which calls getUserMedia (audioIO.js).
-const FAKE_MIC = ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'];
+// --disable-audio-output renders to a fake output device on Chromium's own
+// clock. Without it every AudioContext runs on the host's audio device, and a
+// host whose audio service has stalled (seen on macOS in M9 T2: the clock
+// advanced 5 ms in 500 ms) runs no worklet, so the fake mic sends nothing and
+// every voice test fails for a reason outside the app. The tests are muted
+// anyway, and the analyser behind the orb still reads the fake output.
+const FAKE_MIC = [
+  '--use-fake-device-for-media-stream',
+  '--use-fake-ui-for-media-stream',
+  '--disable-audio-output',
+];
 
 const PROMPTS = fileURLToPath(new URL('./e2e/fixtures/prompts/', import.meta.url));
 
@@ -70,6 +80,7 @@ export default defineConfig({
     ? [
         liveProject('greeting', 'greeting.wav'),
         liveProject('task', 'task.wav'),
+        liveProject('act', 'act.wav'),
         liveProject('reconnect', 'followup.wav'),
       ]
     : [

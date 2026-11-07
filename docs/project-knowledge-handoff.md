@@ -302,6 +302,20 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   token (ADR 0004). The same check covered every other field `liveSession.js` reads
   (`message.data`, transcriptions, `interrupted`, `turnComplete`, `toolCall.functionCalls`,
   `setupComplete`) and the three send signatures (code-review-notes M8, L10).
+- **Tool `behavior` and the voice (M9 T2, issue #29), checked against `@google/genai` 2.32.0's
+  types and Google's Live API guide (aistudio.google.com/docs/live-api/tools and
+  /capabilities, 2026-11-07).** The guide says function calling on `gemini-3.8-live` is
+  sequential by default and supports both synchronous and asynchronous calls
+  (`behavior: NON_BLOCKING` opts in; `gemini-3.8-live-extended-thinking` is async only,
+  `gemini-3.1-flash-live-preview` sync only). The SDK's `FunctionDeclaration.behavior` doc
+  says an unset one "keeps the current function call behavior", so `liveSession.js` now sends
+  `Behavior.BLOCKING` on every declaration rather than rely on the default. The issue's lead
+  (non-blocking by default on 3.8) is not what the guide says. `FunctionResponse.scheduling`
+  (`SILENT` / `WHEN_IDLE` / `INTERRUPT`) is "only applicable to NON_BLOCKING function calls, is
+  ignored otherwise", so tool responses carry none. The voice is pinned with
+  `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (`VOICE_NAME`, `Kore`, the voice in
+  the guide's own example; native audio models take any of the 30 TTS voices). Both were
+  accepted by the real API in four live e2e runs (16 scenarios) under the model-locked token.
 - **A resumed reconnect resends the DOM keyframe but not the knowledge context — reversed in
   M6 T5 (code-review-notes M9).** Until then both were resent on every (re)connect, "deliberately":
   a reconnect couldn't trust that a resumed session's history was intact. The live e2e now
@@ -464,6 +478,24 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   protocol ours to track. A chunk that doesn't load is `fatal: 'sdk'` with Retry, not the
   backoff. The CSP didn't change (`script-src 'self'` covers both).
 
+- **Doubled answers (M9 T2, issue #29): blocking declarations and a pinned voice; the live e2e
+  now counts doubles.** The live e2e taps the Live socket (`e2e/liveTurns.js`), records the
+  agent's speech per turn and counts a doubled answer (a sentence of 4+ words said again in the
+  next turn, or twice in one turn), with a new `act` scenario close to the report ("Please
+  increment the counter to three") and a 10 s listen after each answer. Before (7 runs, 28
+  scenarios): one double, in the greeting scenario, after the user's "Hi!" barged into the
+  greeting: the interrupted greeting's sentence ("I am your voice-controlled presenter agent")
+  was said again in the reply. No double followed a tool response: every turn after one either
+  ended in the next call or was the final answer, once. After (4 runs, 16 scenarios): no double;
+  every scenario passed; connect, first audio and tool round trips unchanged (medians 1.47 s,
+  2.09 s, click 102 ms). So the change pins what the guide documents rather than fixing a
+  reproduced cause. The best evidence for the report is a barge-in: the user's speech (or the
+  agent's own voice reaching the mic from the speakers) interrupts an answer, and the next
+  generation says it again, in a fresh take that can sound different. The client cannot play
+  two streams at once (one player, one queue; `interrupted` stops it) or show a fragment twice.
+  Not verified: echo on real speakers (the e2e's fake mic has none). One after-run greeting
+  reply ran on into a spoken Python listing (run 67 in `.metrics/live.json`): a model glitch,
+  once in 16, not a double; worth watching.
 - **Live knobs tuned from the live e2e (M6 T5, 2026-11-02; numbers in `docs/metrics/m06.md`).**
   Kept: `MAX_SNAPSHOT_NODES` 30 (about 100 B a node, so about 3–3.5 kB at the cap, under the
   4 kB budget), `FULL_REFRESH_RATIO` 0.6, and the loop-guard thresholds (no trip in 14 runs).

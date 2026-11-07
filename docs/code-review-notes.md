@@ -709,6 +709,11 @@ mirror of what the client sends (and then generate both from one object).
 > is decided by whether the attempt resumed, not by whether a handle has arrived by then.
 > `liveSession.test.js` drives both orders.
 
+> **M9 T2 (#29):** two more connect fields, checked the same way against 2.32.0's types and
+> the Live API guide: `FunctionDeclaration.behavior` (`Behavior.BLOCKING` on every action) and
+> `speechConfig.voiceConfig.prebuiltVoiceConfig.voiceName` (`VOICE_NAME`). `FunctionResponse.scheduling`
+> is ignored for a blocking call, so it is not sent (handoff §3.3).
+
 `@google/genai: ^1.0.0` (also `hono: ^4.6.0`, `react: ^18.3.0`) is a very wide range for a
 preview-API integration whose message shapes the handoff doc already admits are inferred
 (`sessionResumptionUpdate` / `.newHandle` / `.resumable`, `useLiveAgent.js:180-183`).

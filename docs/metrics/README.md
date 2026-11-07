@@ -46,7 +46,7 @@ not made cross-platform because `say` is macOS-only anyway.
   scenario fails at "Live", because the card shows the `not_configured` alert.
 - **Port:** 3972 (the deterministic suite uses 3971, `npm run dev` 3000). A server already on
   the port fails the run instead of being reused.
-- **One at a time:** `workers: 1`. The three scenarios share one key and one per-IP token rate
+- **One at a time:** `workers: 1`. The four scenarios share one key and one per-IP token rate
   limit, and the timings are cleaner on an unloaded machine.
 - **No retries, no traces:** a failure is a data point for the pass rate. Traces are off in
   live mode because they would record the minted token (the token response and the Live socket
@@ -61,17 +61,34 @@ not made cross-platform because `say` is macOS-only anyway.
 
 ### Scenarios
 
-Each WAV is its own Playwright project (`live-greeting`, `live-task`, `live-reconnect`), because
-the fake-capture file is a browser launch flag.
+Each WAV is its own Playwright project (`live-greeting`, `live-task`, `live-act`,
+`live-reconnect`), because the fake-capture file is a browser launch flag.
 
 | Scenario | Prompt (`make-prompts.sh`) | Passes when |
 |---|---|---|
 | `greeting` | "Hi!" at 4 s | Live within 15 s, then the first agent audio (`ds:first-audio`) and an agent transcript line |
 | `task` | at 6 s: "Increment the counter twice, then go to Settings, choose the Pro plan, turn on notifications and save." | within 150 s: the save confirmation is visible, the Settings heading is shown, the toggle is checked, the Plan select is `pro` (a `fill`), and the counter went exactly `1`, `2` |
+| `act` | at 6 s: "Please increment the counter to three." (issue #29: a spoken request that makes the agent act, then its answer) | the counter goes `1`, `2`, `3` within 60 s, the agent's answer completes, and it is listened to for 10 s more |
 | `reconnect` | at 12 s: "Which page are we on right now, and what is the code name of this demo?" | a knowledge file naming the code name (Pelican) is seeded in `localStorage` first. After the first audio, the test closes the page side of the real Gemini socket (a `routeWebSocket` pass-through); the card shows `Reconnecting…`, then Live, `ds:reconnected` is marked, and the agent answers the follow-up. Whether the answer names Pelican is recorded (`recalledKnowledge`), not asserted |
 
 Until M6 T5 the task had five steps (no Plan) and the follow-up asked only for the page, with
-no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts.
+no knowledge seeded; runs 1–18 in `.metrics/live.json` used those prompts. The `act` scenario
+and the socket tap below arrived in M9 T2 (issue #29), from run 51 on.
+
+### The socket tap (M9 T2)
+
+Every scenario routes the real Gemini socket through a pass-through (`tapLive` in
+`e2e/live.spec.js`) that records each non-audio message both ways: the page's setup, client
+turns (classified as `snapshot`, `knowledge`, `greeting`, `corrective` or `text`) and tool
+responses; Gemini's transcriptions, `turnComplete`, `generationComplete`, `interrupted` and
+tool calls (`e2e/liveTurns.js`). Audio is skipped, and the token, which is in the socket's URL,
+is never recorded. From the events, the agent's speech is cut into **turns**: the text between
+two boundaries (`turnComplete`, `interrupted`, a tool call, or a drop). A **doubled answer** is
+a sentence of four words or more that the agent says again in the next turn, or twice in one
+turn; two turns that each end in a tool call are narration of a repeated action ("Incrementing
+the counter again."), not a double. The greeting, task and act scenarios end by waiting for the
+agent's turn after its last tool response to complete, then listening 10 s more
+(`SETTLE_MS`), so a repeat after the answer is caught.
 
 ### Timing marks
 
@@ -121,6 +138,15 @@ each test's `live-metrics` attachment):
             "reconnectAttempts": 1,            // reconnect scenario only: sockets after the drop
             "resumed": true,                   // reconnect scenario only: the last one resumed
             "recalledKnowledge": true,         // reconnect scenario only: the answer named Pelican
+            "agentTurns": [                    // the agent's speech per turn (the socket tap)
+              { "text": "I have incremented the counter to three.",
+                "after": "toolResponse",       // what the page last sent (or `user`) before it
+                "end": "turnComplete",         // or interrupted / toolCall / open (a drop)
+                "userBefore": false }          // the user spoke since the agent's last turn
+            ],
+            "doubledTurns": 0,                 // how many doubled answers (issue #29)
+            "doubles": [],                     // each: { "text", "userBetween" }
+            "events": ["3294 0 in outputTranscription Hello! How can I "], // ms, socket, dir, kind, text or names
             "transcript": ["agent: …", "user: …"] // failed tests only, one line per turn
           }
         }
@@ -136,6 +162,30 @@ worst per metric, pass rate per scenario) in the milestone report.
 
 The latest numbers are in `m06.md` (M6 T5: six-step task 8 of 10, reconnect worst 2.89 s,
 keyframe ≤ 855 B, fill ≤ 3 ms). The M5 baseline below is kept for history.
+
+## M9 T2: doubled answers (issue #29, 2026-11-07)
+
+Before: runs 51–55 and 63–64 (1-based; current code with the socket tap, 7 runs). After: runs
+65–68 (`Behavior.BLOCKING` on every declaration and the voice pinned, 4 runs). Runs 56–62 are
+left out: the host's audio service had stalled (an `AudioContext`'s clock moved 5 ms in 500 ms),
+so the fake mic sent nothing and the agent never heard a prompt, on either code. Since then the
+Playwright config passes `--disable-audio-output`, so Chromium renders to a fake output on its
+own clock and the voice tests no longer depend on the host's audio device.
+
+| Metric | Before | After |
+|---|---|---|
+| Doubled answers | 1 in 28 scenarios (greeting, after a barge-in) | 0 in 16 |
+| Task (six steps) | 7 of 7 | 4 of 4 |
+| Act ("increment the counter to three") | 6 of 7 (one stall: no answer after the third click) | 4 of 4 |
+| Greeting, reconnect | 7 of 7, 7 of 7 | 4 of 4, 4 of 4 |
+| Connect → `open`, median / worst | 1.53 s / 2.31 s | 1.47 s / 1.62 s |
+| Connect → first audio, median / worst | 2.16 s / 3.06 s | 2.09 s / 2.46 s |
+| Tool round trip, click, median (n) | 103 ms (49) | 102 ms (28) |
+| Task duration, median | 37.3 s | 35.7 s |
+| Reconnect, median / worst | 1.64 s / 2.46 s | 1.01 s / 2.34 s |
+
+The click's round trip includes the bridge's settling since #25 (100 ms of quiet), hence ~100 ms
+rather than M5's 1.5 ms. Analysis: handoff §4, "Doubled answers".
 
 ## M5 T5 baseline (2026-10-29, 11 runs)
 

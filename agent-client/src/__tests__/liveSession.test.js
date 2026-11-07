@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createLiveSession } from '../liveSession.js';
+import { VOICE_NAME, createLiveSession } from '../liveSession.js';
 import { SdkLoadError, loadLiveSdk } from '../liveSdk.js';
 import { setRules } from '../knowledgeStore.js';
 import LIVE_MODEL from '../liveModel.json' with { type: 'json' };
@@ -26,7 +26,7 @@ vi.mock('@google/genai/web', () => {
       };
     }
   }
-  return { GoogleGenAI, Modality: { AUDIO: 'AUDIO' } };
+  return { GoogleGenAI, Modality: { AUDIO: 'AUDIO' }, Behavior: { BLOCKING: 'BLOCKING' } };
 });
 
 // The real loader (it imports the mock above), wrapped so a test can make
@@ -368,6 +368,52 @@ describe('createLiveSession', () => {
     });
     // server/geminiMint.js constrains the token to this same file's model.
     expect(call.params.model).toBe(LIVE_MODEL.model);
+  });
+
+  // Issue #29: the voice is pinned, and every action is a blocking call, so
+  // the model waits for its result instead of talking on and answering again
+  // once the result lands.
+  it('pins the voice and declares every action as a blocking call (#29)', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const { config } = call.params;
+
+    expect(config.speechConfig).toEqual({
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_NAME } },
+    });
+    const declarations = config.tools.flatMap((tool) => tool.functionDeclarations);
+    expect(declarations.map((d) => d.name)).toEqual(['click', 'scroll', 'fill', 'navigate']);
+    declarations.forEach((declaration) => expect(declaration.behavior).toBe('BLOCKING'));
+  });
+
+  it('pins the same voice on a resumed reconnect', async () => {
+    const { liveSession } = setup();
+    const first = await connectAndEstablish(liveSession);
+    first.params.callbacks.onmessage({
+      sessionResumptionUpdate: { resumable: true, newHandle: 'handle-1' },
+    });
+    drop(first);
+    await flush();
+    const second = live.calls.at(-1);
+
+    expect(second.params.config.sessionResumption).toEqual({ handle: 'handle-1' });
+    expect(second.params.config.speechConfig).toEqual({
+      voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_NAME } },
+    });
+  });
+
+  // `scheduling` applies to NON_BLOCKING calls only (the SDK's
+  // FunctionResponse), so a blocking call's response carries none.
+  it('answers a blocking call with no scheduling', async () => {
+    const { liveSession } = setup();
+    const call = await connectAndEstablish(liveSession);
+    call.params.callbacks.onmessage({
+      toolCall: { functionCalls: [{ id: 'c1', name: 'click', args: { selector: 'x' } }] },
+    });
+    await flush();
+
+    const [[{ functionResponses }]] = call.session.sendToolResponse.mock.calls;
+    expect(functionResponses).not.toHaveProperty('scheduling');
   });
 
   it('resumes with the stored handle on reconnect and does not greet again', async () => {

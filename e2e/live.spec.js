@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures.js';
+import { agentTurns, doubledTurns, tapEvents } from './liveTurns.js';
 
 // The opt-in live e2e (R12, docs/metrics/README.md): the real agent-client,
 // the real server with its real key, the real Gemini Live API. The user's
@@ -8,7 +9,9 @@ import { test, expect } from './fixtures.js';
 // failure is a data point for the pass rate in .metrics/live.json.
 //
 // Each test reads the agent-client's `ds:*` performance marks (liveSession.js)
-// and attaches the durations; e2e/live-reporter.js collects them.
+// and attaches the durations; e2e/live-reporter.js collects them. Each also
+// taps the Live socket (tapLive) for the agent's turns as Gemini sent them,
+// so a doubled answer is counted (issue #29).
 
 const LIVE_SOCKET = /^wss:\/\/generativelanguage\.googleapis\.com\//;
 
@@ -89,6 +92,8 @@ function summarize(marks, extra) {
   const sizes = (name) =>
     marks.filter((entry) => entry.name === name).map((entry) => entry.detail?.bytes ?? null);
   const { closedAt } = extra;
+  const turns = agentTurns(extra.events ?? []);
+  const doubles = doubledTurns(turns);
   return {
     connectToOpenMs: between(connectStart, open),
     connectToFirstAudioMs: between(connectStart, firstAudio),
@@ -107,6 +112,13 @@ function summarize(marks, extra) {
         : marks
             .filter((entry) => entry.name === 'ds:knowledge' && entry.startTime > closedAt)
             .reduce((sum, entry) => sum + (entry.detail?.bytes ?? 0), 0),
+    agentTurns: turns,
+    doubledTurns: doubles.length,
+    doubles,
+    // The socket's non-audio traffic, for reading what prompted a turn.
+    events: (extra.events ?? []).map(({ t, socket, dir, kind, text, names }) =>
+      [t, socket, dir, kind, text ?? names?.join(',') ?? ''].join(' '),
+    ),
     ...(extra.reconnectAttempts === undefined
       ? {}
       : {
@@ -118,14 +130,69 @@ function summarize(marks, extra) {
 }
 
 /**
- * @typedef {{ closedAt?: number, resumed?: boolean, reconnectAttempts?: number, recalledKnowledge?: boolean }} Extra
+ * @typedef {{ closedAt?: number, resumed?: boolean, reconnectAttempts?: number, recalledKnowledge?: boolean, events?: import('./liveTurns.js').TapEvent[] }} Extra
  */
 /** @type {Extra} */
 let extra = {};
 
+/**
+ * A pass-through to the real Gemini socket that records every non-audio
+ * message both ways (liveTurns.js), and lets the reconnect scenario drop the
+ * socket and read whether a reconnect's setup asked to resume. Nothing it
+ * keeps holds the token: that is in the socket's URL, which isn't recorded.
+ * @param {import('@playwright/test').Page} page
+ */
+async function tapLive(page) {
+  /** @type {import('./liveTurns.js').TapEvent[]} */
+  const events = [];
+  /** @type {import('@playwright/test').WebSocketRoute[]} */
+  const sockets = [];
+  /** @type {boolean[]} */
+  const resumedPerSocket = [];
+  const started = Date.now();
+  await page.routeWebSocket(LIVE_SOCKET, (ws) => {
+    const server = ws.connectToServer();
+    const index = sockets.push(ws) - 1;
+    ws.onMessage((message) => {
+      if (resumedPerSocket[index] === undefined) {
+        const frame = JSON.parse(String(message));
+        resumedPerSocket[index] = Boolean(frame.setup?.sessionResumption?.handle);
+      }
+      events.push(...tapEvents(message, 'out', index, Date.now() - started));
+      server.send(message);
+    });
+    server.onMessage((message) => {
+      events.push(...tapEvents(message, 'in', index, Date.now() - started));
+      ws.send(message);
+    });
+  });
+  extra.events = events;
+  return { sockets, resumedPerSocket };
+}
+
 test.beforeEach(() => {
   extra = {};
 });
+
+// How long the agent is listened to once it has answered: a doubled answer
+// (issue #29) comes after the turn that ends the task, which the assertions
+// alone would cut off.
+const SETTLE_MS = 10_000;
+
+/**
+ * Waits for the agent's turn that follows its last tool response to complete,
+ * then listens SETTLE_MS more.
+ * @param {import('@playwright/test').Page} page
+ */
+async function settle(page) {
+  const answered = () => {
+    const events = extra.events ?? [];
+    const lastResponse = events.findLastIndex((event) => event.kind === 'toolResponse');
+    return events.slice(lastResponse + 1).some((event) => event.kind === 'turnComplete');
+  };
+  await expect.poll(answered, { timeout: 30_000 }).toBe(true);
+  await page.waitForTimeout(SETTLE_MS);
+}
 
 /**
  * The card's transcript, one line per turn as the card coalesces them
@@ -155,30 +222,14 @@ test.afterEach(async ({ page }, testInfo) => {
   });
 });
 
-/** @param {import('@playwright/test').Page} page */
-async function connectLive(page) {
-  const { status, button } = card(page);
-  await page.goto('/');
-  await button('Talk to the AI Presenter').click();
-  await expect(status).toHaveText('Live', { timeout: 15_000 });
-}
-
-test('greeting: the agent greets on connect', async ({ page }) => {
-  test.setTimeout(60_000);
-  await connectLive(page);
-
-  await expect.poll(() => markTime(page, 'ds:first-audio'), { timeout: 20_000 }).toBeDefined();
-  await expect(card(page).agentLines.first()).toBeVisible({ timeout: 20_000 });
-});
-
-test('task: the spoken six-step task drives the target app', async ({ page }) => {
-  test.setTimeout(180_000);
-  // The counter lives on Home only and resets on every load, so its values
-  // are recorded as they change rather than read after the agent has left.
-  /** @type {string[]} */
-  const counterValues = [];
+/**
+ * Records each value the target app's counter shows, in order.
+ * @param {import('@playwright/test').Page} page
+ * @param {string[]} values
+ */
+async function watchCounter(page, values) {
   await page.exposeBinding('__e2eCounterChanged', (_source, /** @type {string} */ value) => {
-    counterValues.push(value);
+    values.push(value);
   });
   // On window, once per window: an iframe's first document reuses the Window
   // of its initial about:blank, where the init script already ran (as in
@@ -195,6 +246,34 @@ test('task: the spoken six-step task drives the target app', async ({ page }) =>
       );
     });
   });
+}
+
+/** @param {import('@playwright/test').Page} page */
+async function connectLive(page) {
+  const { status, button } = card(page);
+  const tap = await tapLive(page);
+  await page.goto('/');
+  await button('Talk to the AI Presenter').click();
+  await expect(status).toHaveText('Live', { timeout: 15_000 });
+  return tap;
+}
+
+test('greeting: the agent greets on connect', async ({ page }) => {
+  test.setTimeout(60_000);
+  await connectLive(page);
+
+  await expect.poll(() => markTime(page, 'ds:first-audio'), { timeout: 20_000 }).toBeDefined();
+  await expect(card(page).agentLines.first()).toBeVisible({ timeout: 20_000 });
+  await settle(page);
+});
+
+test('task: the spoken six-step task drives the target app', async ({ page }) => {
+  test.setTimeout(220_000);
+  // The counter lives on Home only and resets on every load, so its values
+  // are recorded as they change rather than read after the agent has left.
+  /** @type {string[]} */
+  const counterValues = [];
+  await watchCounter(page, counterValues);
   const frame = page.frameLocator('#target-app-frame');
 
   await connectLive(page);
@@ -205,6 +284,21 @@ test('task: the spoken six-step task drives the target app', async ({ page }) =>
   await expect(frame.getByTestId('notifications-toggle')).toBeChecked();
   await expect(frame.getByTestId('plan-select')).toHaveValue('pro');
   expect(counterValues, 'the counter was incremented exactly twice').toEqual(['1', '2']);
+  await settle(page);
+});
+
+// Close to issue #29's report: one spoken request that makes the agent act,
+// then its answer, listened to for a repeat.
+test('act: a spoken request is carried out and answered once', async ({ page }) => {
+  test.setTimeout(120_000);
+  /** @type {string[]} */
+  const counterValues = [];
+  await watchCounter(page, counterValues);
+  await connectLive(page);
+
+  await expect.poll(() => counterValues.at(-1), { timeout: 60_000 }).toBe('3');
+  await settle(page);
+  expect(counterValues, 'the counter went to three, once').toEqual(['1', '2', '3']);
 });
 
 // The reconnect scenario's knowledge file (knowledgeStore.js's storage format).
@@ -232,27 +326,9 @@ test('reconnect: a dropped socket recovers and the conversation carries on', asy
       localStorage.setItem('ds-agent-knowledge-files', JSON.stringify([file]));
     }
   }, KNOWLEDGE_FILE);
-  // A pass-through to the real Gemini socket, so the test can drop it. The
-  // page's frames are forwarded by hand only to read whether the reconnect's
-  // setup asked to resume.
-  /** @type {import('@playwright/test').WebSocketRoute[]} */
-  const sockets = [];
-  /** @type {boolean[]} */
-  const resumedPerSocket = [];
-  await page.routeWebSocket(LIVE_SOCKET, (ws) => {
-    const server = ws.connectToServer();
-    const index = sockets.push(ws) - 1;
-    ws.onMessage((message) => {
-      if (resumedPerSocket[index] === undefined) {
-        const frame = JSON.parse(String(message));
-        resumedPerSocket[index] = Boolean(frame.setup?.sessionResumption?.handle);
-      }
-      server.send(message);
-    });
-  });
   const { status, userLines, agentLines } = card(page);
 
-  await connectLive(page);
+  const { sockets, resumedPerSocket } = await connectLive(page);
   await expect.poll(() => markTime(page, 'ds:first-audio'), { timeout: 20_000 }).toBeDefined();
 
   // Watch for `Reconnecting` from inside the page before dropping the socket:

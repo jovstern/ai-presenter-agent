@@ -154,6 +154,13 @@ const SYSTEM_INSTRUCTION =
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
+// The agent's one voice (issue #29): unset, it is the server's default, so
+// nothing in the session says it stays the same. Kore is the voice Google's
+// Live API guide sets in its own example (speechConfig.voiceConfig.
+// prebuiltVoiceConfig.voiceName; native audio models take any of the TTS
+// voices), checked in the live e2e (docs/metrics/README.md).
+export const VOICE_NAME = 'Kore';
+
 // The error a refused action answers with. A loop (loopGuard.check) is the
 // same action on the same page, or a cycle of two or three different
 // actions, so one action repeated while it moves the page on never gets it;
@@ -710,7 +717,7 @@ export function createLiveSession({
     }
     if (gen !== generation) return;
 
-    const { GoogleGenAI, Modality } = sdk;
+    const { GoogleGenAI, Modality, Behavior } = sdk;
     const ai = new GoogleGenAI({ apiKey: token, httpOptions: { apiVersion: 'v1alpha' } });
     attemptResumed = Boolean(resumeHandle);
     // The abandoned socket can't be closed from here (live.connect hasn't
@@ -753,9 +760,23 @@ export function createLiveSession({
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
           inputAudioTranscription: {},
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE_NAME } } },
           systemInstruction: SYSTEM_INSTRUCTION,
           sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
-          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+          // BLOCKING (issue #29): the model waits for each action's result
+          // before it goes on, which the act → observe → narrate loop needs.
+          // The Live API's documented default on gemini-3.8-live, but the
+          // declaration's own default is "keep the current behavior", so it is
+          // said, not assumed. A blocking call's response takes no
+          // `scheduling` (the SDK ignores it for anything but NON_BLOCKING).
+          tools: [
+            {
+              functionDeclarations: TOOL_DECLARATIONS.map((declaration) => ({
+                ...declaration,
+                behavior: Behavior.BLOCKING,
+              })),
+            },
+          ],
         },
       });
 

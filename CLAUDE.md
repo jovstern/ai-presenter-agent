@@ -29,7 +29,9 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `liveSession.js` — the Gemini Live socket: connect, reconnect backoff, resumption, tool
     dispatch, context injection. The riskiest file; unit-tested. Each successful action's
     tool response carries the page after it as `page` (#25): the bridge's settled snapshot,
-    held because a batch is running.
+    held because a batch is running. The connect config pins the voice (`VOICE_NAME`, Kore, in
+    `speechConfig`) and declares every action `behavior: BLOCKING`, so a blocking call's
+    response carries no `scheduling` (#29).
   - `liveSdk.js` — the one `import('@google/genai/web')` (ADR 0005): loaded once, a failed
     load forgotten so Retry imports again (`SdkLoadError`); `preloadLiveSdk()` runs when Talk
     is pointed at or focused. `liveSession.js` awaits it in parallel with the token request; a
@@ -205,13 +207,16 @@ chromium` once for the e2e):
   both. Its `webServer` builds agent-client and runs `node server/index.js` on port 3971 with
   `GEMINI_API_KEY=e2e-dummy` and `DOTENV_CONFIG_PATH=/dev/null`, so it never loads
   `server/.env`; the token endpoint and the Live socket are stubbed in the tests. Needs no key.
+  Both suites launch Chromium with a fake mic and `--disable-audio-output` (a fake output
+  device on Chromium's own clock, so a stalled host audio service can't silence the worklet).
 - `npm run e2e:live` — the opt-in live e2e (`e2e/live.spec.js`, R12), never in `check` or CI.
   macOS only: it first runs `e2e/make-prompts.sh` (`say`, WAVs gitignored), then
-  `GEMINI_LIVE_E2E=1 playwright test`, which defines only the three live projects (one fake-mic
+  `GEMINI_LIVE_E2E=1 playwright test`, which defines only the four live projects (one fake-mic
   WAV each) and starts the server from `server/` on port 3972, so the key comes from the
   server's own env — the config never passes one. It reads the agent-client's `ds:*`
-  `performance.mark`s and appends the app metrics to `.metrics/live.json` (gitignored). See
-  `docs/metrics/README.md`.
+  `performance.mark`s, taps the Live socket for the agent's turns (`e2e/liveTurns.js`: per-turn
+  transcripts and a `doubledTurns` count, #29) and appends the app metrics to
+  `.metrics/live.json` (gitignored). See `docs/metrics/README.md`.
 
 Lint is ESLint 10 flat config, one `eslint.config.js` per package: `@eslint/js` recommended +
 `globals`; agent-client adds `eslint-plugin-react-hooks` (the React Compiler rules) and bans
@@ -282,7 +287,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (423 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (426 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
@@ -299,7 +304,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   (text kept), a generic alert for an unexpected add failure, the error cleared on reopen, drop, the rules counter and over-limit alert, the picker from a button, open
   focus, the Tab wrap both ways, Escape returning focus), `liveSdk` (one import shared, a failed one forgotten, no static
   `@google/genai` import anywhere in `src/`), `liveSession` (incl. the SDK loading in parallel
-  with the token, and a chunk that didn't load failing at once as `sdk`), `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  with the token, a chunk that didn't load failing at once as `sdk`, and the pinned voice and
+  blocking declarations, a resume included), `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
@@ -351,8 +357,9 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   toast (once its slide-in has finished) and with the knowledge dialog open — inside the shadow root —, plus the dialog from the
   keyboard only in each theme: Enter on Add files opens the file picker, Tab and Shift+Tab wrap
   inside it, Escape returns focus to the knowledge button; connected with a coalesced transcript line (the fake-Live harness in
-  `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (3, opt-in, real
-  Gemini: greeting, the six-step task, a forced close → recovery) runs only under
+  `e2e/fakeLive.js`, shared with `loop.spec.js` and `widget.spec.js`), and on both target-app pages). `e2e/live.spec.js` (4, opt-in, real
+  Gemini: greeting, the six-step task, "increment the counter to three" listened to for a doubled
+  answer, a forced close → recovery) runs only under
   `npm run e2e:live`. Follow the existing vitest pattern when adding unit tests.
 - This is an interaction-heavy feature (voice + DOM action loop) — exercise it in a real browser
   before calling a change done, not just unit tests.
