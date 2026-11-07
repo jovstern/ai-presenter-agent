@@ -159,7 +159,7 @@ test.afterEach(async ({ page }, testInfo) => {
 async function connectLive(page) {
   const { status, button } = card(page);
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live', { timeout: 15_000 });
 }
 

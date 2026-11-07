@@ -55,7 +55,7 @@
   /* Layout. The breakpoint (400px) is repeated in the media query below:
      custom properties can't be used in a media condition. */
   --gutter: var(--space-4);
-  --card-width: 344px; /* "Talk to the presenter" on one line, with room for wider system fonts */
+  --card-width: 344px; /* "Talk to the AI Presenter" on one line, with room for wider system fonts */
   --dialog-width: 360px;
   --control-height: 44px;
   --transcript-height: 192px; /* 8 lines of transcript text */
@@ -269,7 +269,7 @@ button:active {
 }
 
 /* The one primary action takes the row; the knowledge button sits beside it.
-   Its label never wraps ("Talk to the presenter" fits at 320 px, below). */
+   Its label never wraps ("Talk to the AI Presenter" fits at 320 px, below). */
 .agent-app__primary {
   margin-bottom: var(--space-1);
   white-space: nowrap;
@@ -319,7 +319,7 @@ button:active {
 }
 
 /* The narrowest phones (320 px): a tighter card, so the primary button keeps
-   "Talk to the presenter" on one line beside the orb and the knowledge button. */
+   "Talk to the AI Presenter" on one line beside the orb and the knowledge button. */
 @media (max-width: 340px) {
   .agent-app {
     padding: var(--space-3);

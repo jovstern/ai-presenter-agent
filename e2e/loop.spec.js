@@ -40,7 +40,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await page.goto('/');
   await expect(status).toHaveText('Not connected');
 
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(button('End')).toBeVisible();
   expect(token.count).toBe(1);
@@ -109,7 +109,7 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
 
   await button('End').click();
   await expect(status).toHaveText('Not connected');
-  await expect(button('Talk to the presenter')).toBeFocused();
+  await expect(button('Talk to the AI Presenter')).toBeFocused();
   // No retry was scheduled behind the hang-up.
   await page.waitForTimeout(1500);
   expect(token.count).toBe(2);
@@ -128,7 +128,7 @@ test('every click of a batch answers with the page it left: the counter at 1, 2,
   const frame = page.frameLocator('#target-app-frame');
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 
@@ -160,7 +160,7 @@ test('ten identical counter clicks all run: the counter reaches 10', async ({ pa
   const frame = page.frameLocator('#target-app-frame');
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 
@@ -198,7 +198,7 @@ test('a link click answers with the page it opened, not the one it left', async 
   });
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   await expect(frame.getByTestId('counter-value')).toHaveText('0');
 

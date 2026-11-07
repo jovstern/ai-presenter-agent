@@ -60,7 +60,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
       }
       return { label: details?.fatal === 'config' ? 'Try again' : 'Retry', onClick: retry };
     default: // idle, closed
-      return { label: 'Talk to the presenter', onClick: connect };
+      return { label: 'Talk to the AI Presenter', onClick: connect };
   }
 }
 
@@ -72,7 +72,7 @@ function primaryAction(status, details, { connect, disconnect, retry }) {
 /** @param {Error} error */
 function micErrorText(error) {
   if (error.name === 'NotAllowedError') {
-    return 'Microphone blocked — allow it in the address bar and press Talk to the presenter.';
+    return 'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.';
   }
   if (error.name === 'InsecureContextError') {
     return 'Voice needs a secure connection (https). Open this page over https, or on localhost.';
@@ -83,15 +83,15 @@ function micErrorText(error) {
   // audioIO.js's own name for the capture worklet failing to load: nothing
   // the viewer did, and a reload fetches the file again.
   if (error.name === 'WorkletLoadError') {
-    return "Voice couldn't start. Reload the page, then press Talk to the presenter.";
+    return "Voice couldn't start. Reload the page, then press Talk to the AI Presenter.";
   }
   // audioIO.js's own name for a resume() that never settled (Safari): another
   // press is a fresh user activation, which may let the context start.
   if (error.name === 'AudioResumeTimeoutError') {
-    return "Voice couldn't start: the browser kept audio paused. Press Talk to the presenter to try again.";
+    return "Voice couldn't start: the browser kept audio paused. Press Talk to the AI Presenter to try again.";
   }
   if (error.name === 'NotFoundError') {
-    return 'No microphone found. Connect one, then press Talk to the presenter.';
+    return 'No microphone found. Connect one, then press Talk to the AI Presenter.';
   }
   return `Microphone unavailable: ${error.message || String(error)}`;
 }

@@ -6,7 +6,7 @@ the v1 build. It also has a small RAG-lite knowledge feature: add or drop `.txt`
 standing rules, in a dialog and the agent gets them as context, stored only in your browser's `localStorage`.
 
 **Live:** <!-- LIVE_URL --> not deployed yet ([#23](https://github.com/jovstern/ai-presenter-agent/issues/23)); once it is (Render's free plan: the first visit after it has been idle takes
-about 30 s to wake it). Open it on https, press **Talk to the presenter**, allow the mic, and
+about 30 s to wake it). Open it on https, press **Talk to the AI Presenter**, allow the mic, and
 ask it to "increment the counter twice, then go to Settings, turn on notifications and save".
 
 ![The widget: Talk, Live with the orb and transcript, a lost connection, Retry](https://github.com/jovstern/ai-presenter-agent/blob/pr-media/m07/demo.gif?raw=true)
@@ -104,7 +104,7 @@ npm start
 ```
 
 Then open **http://localhost:3000/** (or `/sandbox/`, which serves the same page; the port is
-`PORT` if you set one, 3000 otherwise). Press **Talk to the presenter** on the agent card in the bottom-right
+`PORT` if you set one, 3000 otherwise). Press **Talk to the AI Presenter** on the agent card in the bottom-right
 corner and allow microphone access: the agent greets you once the session is open (it does not
 speak on page load). Try asking it to increment the counter, search for something, or go to
 Settings, turn on notifications and save. The card's one button follows the connection: Talk

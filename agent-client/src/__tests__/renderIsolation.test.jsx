@@ -110,7 +110,7 @@ describe('render isolation', () => {
       </Profiler>,
     );
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Talk to the presenter' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Talk to the AI Presenter' }));
     });
     act(() => fakes.sessions[0].options.onStatusChange('open'));
     expect(screen.getByRole('status').textContent).toBe('Live');

@@ -161,7 +161,7 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
 - `useLiveAgent.js` — thin React glue over `liveSession.js` and `audioIO.js` (mic capture,
   playback, barge-in); owns teardown. Mic capture runs in an AudioWorklet,
   `agent-client/public/capture-worklet.js` (§4).
-- `AgentApp.jsx` — the card (the volume orb, one Talk to the presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
+- `AgentApp.jsx` — the card (the volume orb, one Talk to the AI Presenter / Cancel / End / Retry / Try again / Reload page button, status line, the
   failure's reason, mic alerts, transcript, the knowledge button with its document icon); `FailureToast.jsx` — the Radix
   toast on `failed`, once per failure (§5.2); `VolumeOrb.jsx` — the orb's rAF loop (§4);
   `Transcript.jsx` — the coalesced turns (up to 20) in a fixed-height box that follows the newest line, `aria-live="polite"` (additions only);
@@ -540,7 +540,7 @@ failure notice (M7 T4, R20).
 Connection status (v1 gap #6) lives in the card (`AgentApp.jsx`): a status line
 (`role="status"`: Not connected / Connecting… / Live / Reconnecting (attempt n of 6)… /
 Connection lost, or Can't connect for a fatal failure) and one primary button whose job follows
-the status and is never disabled, so focus stays on it (Talk to the presenter; a pending Cancel
+the status and is never disabled, so focus stays on it (Talk to the AI Presenter; a pending Cancel
 while connecting; End while live or reconnecting, so the viewer can hang up during the backoff;
 Retry on `failed`, Reload page when the page's token is rejected, or Try again when the server
 isn't configured — a reload can't fix that, M6 T6). On `failed` the reason shows under the status

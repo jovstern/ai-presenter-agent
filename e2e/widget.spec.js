@@ -42,7 +42,7 @@ test.describe('the card through every connection state', () => {
     // connecting: setupComplete held back; the same button, enabled, as a
     // pending Cancel.
     live.holdSetup(true);
-    await button('Talk to the presenter').click();
+    await button('Talk to the AI Presenter').click();
     await expect(status).toHaveText('Connecting…');
     await expect(button('Cancel')).toHaveAttribute('data-pending', 'true');
     await expect(button('Cancel')).toBeEnabled();
@@ -126,7 +126,7 @@ test.describe('the card through every connection state', () => {
 
     await button('End').click();
     await expect(status).toHaveText('Not connected');
-    await expect(button('Talk to the presenter')).toBeFocused();
+    await expect(button('Talk to the AI Presenter')).toBeFocused();
     await pause();
   });
 });
@@ -164,7 +164,7 @@ test.describe('when the server has no API key', () => {
     };
 
     await page.goto('/');
-    await button('Talk to the presenter').focus();
+    await button('Talk to the AI Presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
@@ -242,7 +242,7 @@ test.describe('when the page nonce is rejected', () => {
     const reason = 'This page can no longer get a connection token. Reload the page to reconnect.';
 
     await page.goto('/');
-    await button('Talk to the presenter').focus();
+    await button('Talk to the AI Presenter').focus();
     await page.keyboard.press('Enter');
 
     await expect(status).toHaveText("Can't connect");
@@ -279,12 +279,12 @@ test('a blocked microphone shows the guidance and leaves the card on Talk', asyn
   const { status, alert, button, toasts } = card(page);
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(alert).toHaveText(
-    'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
+    'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.',
   );
   await expect(status).toHaveText('Not connected');
-  await expect(button('Talk to the presenter')).toBeVisible();
+  await expect(button('Talk to the AI Presenter')).toBeVisible();
   await expect(toasts).toHaveCount(0);
 });
 
@@ -331,7 +331,7 @@ for (const viewport of VIEWPORTS) {
 
       // Tab from the top of the page (the host page, then the target app's
       // iframe) reaches the card's primary button, with a visible focus ring.
-      const talk = button('Talk to the presenter');
+      const talk = button('Talk to the AI Presenter');
       for (let i = 0; i < 40 && !(await isFocused(talk)); i++) {
         await page.keyboard.press('Tab');
       }
@@ -442,7 +442,7 @@ test.describe('at 390 px, while the transcript grows', () => {
     const live = await fakeGeminiLive(page);
     const { status, transcript, button } = card(page);
     await page.goto('/');
-    await button('Talk to the presenter').click();
+    await button('Talk to the AI Presenter').click();
     await expect(status).toHaveText('Live');
     // Past the press's 500 ms input window: what follows is speech, not input.
     await page.waitForTimeout(600);

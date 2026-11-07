@@ -44,7 +44,7 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   - `bridgeChannel.js` — the private `MessageChannel` to `sandbox/bridge.js`
     ([ADR 0001](docs/adr/0001-private-bridge-channel.md)); `main.jsx` opens it once per page.
   - `AgentApp.jsx` — the card (an `<aside aria-label="AI presenter">` landmark): one
-    never-disabled primary button, Talk to the presenter / Cancel (pending, while connecting) /
+    never-disabled primary button, Talk to the AI Presenter / Cancel (pending, while connecting) /
     End / Retry / Try again / Reload page, a status line ("Can't connect" on a fatal failure),
     the failure's reason as plain text once its toast has closed, a `role="alert"` for mic and voice-support guidance
     (keyed by the connect attempt, so a repeat is announced), the transcript, the document-icon

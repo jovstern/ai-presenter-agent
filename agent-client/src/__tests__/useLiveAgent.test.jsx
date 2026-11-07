@@ -70,7 +70,7 @@ function renderApp(bridge = fakeBridge()) {
 
 // The card's own controls, by the spec's names (Screens): the failure toast
 // renders outside the card, in its own region, and may repeat a label.
-const TALK = 'Talk to the presenter';
+const TALK = 'Talk to the AI Presenter';
 const card = () => screen.getByRole('complementary', { name: 'AI presenter' });
 const cardButton = (name) => within(card()).getByRole('button', { name });
 const statusLine = () => within(card()).getByRole('status');
@@ -103,7 +103,7 @@ afterEach(() => {
 });
 
 describe('AgentApp + useLiveAgent', () => {
-  it('starts idle with an enabled Talk to the presenter button', () => {
+  it('starts idle with an enabled Talk to the AI Presenter button', () => {
     renderApp();
     expect(cardButton(TALK).disabled).toBe(false);
   });
@@ -379,7 +379,7 @@ describe('AgentApp + useLiveAgent', () => {
     emitStatus('closed');
     expect(cardButton(TALK)).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toBe(
-      'Microphone blocked — allow it in the address bar and press Talk to the presenter.',
+      'Microphone blocked — allow it in the address bar and press Talk to the AI Presenter.',
     );
   });
 
@@ -390,19 +390,19 @@ describe('AgentApp + useLiveAgent', () => {
     [
       'the worklet failing to load',
       Object.assign(new Error("Unable to load a worklet's module."), { name: 'WorkletLoadError' }),
-      "Voice couldn't start. Reload the page, then press Talk to the presenter.",
+      "Voice couldn't start. Reload the page, then press Talk to the AI Presenter.",
     ],
     [
       'the browser never starting audio',
       Object.assign(new Error('The browser did not start audio in time.'), {
         name: 'AudioResumeTimeoutError',
       }),
-      "Voice couldn't start: the browser kept audio paused. Press Talk to the presenter to try again.",
+      "Voice couldn't start: the browser kept audio paused. Press Talk to the AI Presenter to try again.",
     ],
     [
       'no microphone',
       Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' }),
-      'No microphone found. Connect one, then press Talk to the presenter.',
+      'No microphone found. Connect one, then press Talk to the AI Presenter.',
     ],
     [
       'the microphone busy',

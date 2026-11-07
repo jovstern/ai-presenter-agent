@@ -71,7 +71,7 @@ say what it is doing while it does it, recovering cleanly if the connection drop
       `renderIsolation.test.jsx`.)*
 - ✅ R19 A coalesced, bounded transcript with `aria-live` (M7 T3).
 - ✅ R20 Connection states shown in the card, with a Radix Toast and Retry. *(M7 T4:
-      `AgentApp.jsx` (Talk to the presenter / pending Cancel / End / Retry / Try again / Reload
+      `AgentApp.jsx` (Talk to the AI Presenter / pending Cancel / End / Retry / Try again / Reload
       page) and `FailureToast.jsx` (once per failure, above the card, in the shadow root; the
       one live announcement of the reason; F8 and Tab handled inside the shadow root). M7 T6:
       `e2e/widget.spec.js` drives every state, the backoff run out to the toast included.
@@ -224,13 +224,13 @@ come from `status`.
 
 | State | Card shows |
 |---|---|
-| idle | orb at rest, "Talk to the presenter" button |
+| idle | orb at rest, "Talk to the AI Presenter" button |
 | connecting | the button pending (a spinner, still enabled) as Cancel, "Connecting…" |
 | open | rings animate with output volume, "Live", End button |
 | reconnecting | "Reconnecting (attempt n of 6)…", an enabled End button (hang up during the backoff; never a disabled button, which would drop focus) |
 | failed | "Connection lost" ("Can't connect" for a fatal failure, which never had a connection to lose) in the text colour at medium weight (`data-status="failed"`), plus, on the same focused button: Retry after the backoff runs out; "Reload page" for `fatal: 'token'` (the page's nonce is rejected; a reload brings a new one); "Try again" for `fatal: 'config'` (no key on the server: a reload can't help, so it asks the server again, and connects once the owner has fixed it; if fixing it restarted the server, the in-memory nonce is gone and Try again turns into Reload page, which the reason warns of). A Radix toast once per failure, above the card: the reason and Dismiss only, with a visually hidden line naming the card's button ("Use the Retry button on the presenter card."); it is the one live announcement of the reason (assertive). While it is open the card holds its own reason line (its space kept, `visibility: hidden` and `aria-hidden`, so Retry never moves); once it closes (dismissed, Escape, swiped or timed out after 8 s) the card shows the reason as plain text under the headline, in that space, so the screen holds one reason and one Retry, and the reason is announced once (M7 T4; ruling of the M7 fix wave) |
 | closed | back to idle |
-| mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk to the presenter." |
+| mic denied | inline error: "Microphone blocked — allow it in the address bar and press Talk to the AI Presenter." |
 | insecure page (plain http) | inline error: "Voice needs a secure connection (https)…"; no session is opened (M6 T3, code-review-notes L6) |
 
 - **Transcript:** the coalesced turns (the last 20, `MAX_ENTRIES`), `aria-live="polite"`, with
@@ -283,10 +283,10 @@ come from `status`.
   under the button column, aligned with the primary button (M7 fix wave). The knowledge button
   is a 16 px inline SVG document icon (`currentColor`, `aria-hidden`) and the count, with
   `title="Knowledge files"`. The primary label never wraps (`white-space: nowrap`); at 340 px and
-  below the card's padding and the two buttons' padding tighten so "Talk to the presenter" fits
+  below the card's padding and the two buttons' padding tighten so "Talk to the AI Presenter" fits
   at 320 px.
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
-- **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the presenter" wrapped).
+- **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the AI Presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus
   returns to the button that opened it.
 

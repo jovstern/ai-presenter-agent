@@ -32,7 +32,7 @@ test('the capture worklet loads under the CSP and streams 16 kHz frames in real 
   const panel = page
     .locator('#ai-presenter-agent-host')
     .getByRole('complementary', { name: 'AI presenter' });
-  await panel.getByRole('button', { name: 'Talk to the presenter', exact: true }).click();
+  await panel.getByRole('button', { name: 'Talk to the AI Presenter', exact: true }).click();
   await expect(panel.getByRole('status')).toHaveText('Live');
 
   // Frames queued while connecting are flushed in a burst at setupComplete,

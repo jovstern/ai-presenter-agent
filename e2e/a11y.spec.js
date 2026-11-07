@@ -46,7 +46,7 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
 
     test('the sandbox page with the card idle', async ({ page }) => {
       await page.goto('/');
-      await expect(cardButton(page, 'Talk to the presenter')).toBeVisible();
+      await expect(cardButton(page, 'Talk to the AI Presenter')).toBeVisible();
       // The theme really switched (--color-surface), so axe saw this scheme's colours.
       await expect(page.locator(HOST).locator('.agent-app')).toHaveCSS(
         'background-color',
@@ -73,7 +73,7 @@ for (const colorScheme of /** @type {const} */ (['light', 'dark'])) {
         });
         const { status, button, toasts } = card(page);
         await page.goto('/');
-        await button('Talk to the presenter').click();
+        await button('Talk to the AI Presenter').click();
         await expect(status).toHaveText("Can't connect");
         await expect(toasts).toHaveCount(1);
         // The toast slides in from opacity 0: axe sampling mid-fade read its
@@ -180,7 +180,7 @@ test('the sandbox page with the card connected and a transcript line', async ({ 
   const { status, button } = card(page);
 
   await page.goto('/');
-  await button('Talk to the presenter').click();
+  await button('Talk to the AI Presenter').click();
   await expect(status).toHaveText('Live');
   // Fragments as Live streams them: coalesced into one turn (transcript.js).
   live.sendToLatest({ serverContent: { outputTranscription: { text: 'Hello' } } });
