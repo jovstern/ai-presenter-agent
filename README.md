@@ -202,7 +202,7 @@ npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 20 files, 381 tests
+npm test        # vitest: 20 files, 414 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -218,7 +218,7 @@ The suite in `agent-client/src/__tests__/`:
   per drop, superseded connects, in-order tool batches, the token and model it connects with,
   resumption without re-greeting, the
   `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, ten counter clicks that each move the page on all run while
-  four no-op clicks are refused, the 51st action of a request refused with a stop-and-ask, one corrective turn
+  four no-op clicks, or toggle/save/toggle/save over pages that all differ, are refused, the 51st action of a request refused with a stop-and-ask, one corrective turn
   per repeated-sentence episode, never sent to a replacement session; the user speaking clears
   the action window, and narration between tool calls is no loop), the SDK's real order
   (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
@@ -278,9 +278,11 @@ The suite in `agent-client/src/__tests__/`:
   drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
   and not saved, the file picker from a real button, open focus, Tab wrapping both ways,
   Escape returning focus to the knowledge button.
-- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, each judged on
-  the page's fingerprint (identical clicks that move the counter on pass; the same click on the
-  same page, a toggle flipped back and forth, still trip), the 50-action budget, repeated agent
+- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, on the page
+  signatures and the bare actions (identical clicks that move the counter on pass; the same
+  click on the same page, a toggle flipped back and forth, and on a model of the app whose
+  save confirmation stays: toggle/save twice and fill/toggle/save twice, still trip), the
+  50-action budget, repeated agent
   sentences, realistic sequences that must pass, the window cleared by the user speaking and the
   utterance episode by a tool call.
 - `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack

@@ -18,17 +18,26 @@
 // "increment the counter to 10" used to be refused on the 4th click. The same
 // action on the same page is what repeats. With no snapshot yet there is no
 // fingerprint, and the signature is the bare action.
+// The rules run on two histories. On the page signatures: periods 1, 2 and 3.
+// On the bare actions: periods 2 and 3 only, since a routine or a bounce
+// whose side effects last never meets the same pages again (the save
+// confirmation stays visible, the toggle alternates: fill, toggle, save
+// twice is a period-6 cycle of page signatures). A constant run is no cycle,
+// so the bare history can't block the counter's identical clicks.
 // Each rule trips on the call that completes `repeats` back-to-back copies of
 // a `period`-long pattern. Blocked calls stay in the history, so a model that
 // carries on with the same cycle keeps being refused.
-// - Period 1 (the same call on the same page): 4th in a row. A click that
-//   changes nothing, or a failing one (no snapshot, the page as it was).
+// - Period 1 (the same call on the same page; page signatures only): 4th in
+//   a row. A click that changes nothing, or a failing one (no snapshot, the
+//   page as it was).
 // - Period 2 (A-B-A-B): on the second B. The model bouncing between two pages
-//   or two buttons twice is the classic agent loop, and it returns to the
-//   same two states, so it still trips (a toggle flipped on, off, on, off);
-//   home → settings → home once (A-B-A) still passes.
+//   or two buttons twice is the classic agent loop: the bare actions catch
+//   it (toggle, save, toggle, save), the page signatures one button
+//   flip-flopping between two states (a toggle on, off, on, off); home →
+//   settings → home once (A-B-A) still passes.
 // - Period 3 (A-B-C-A-B-C): on the second C. A three-step routine (fill,
-//   toggle, save) is one task; doing it all again, unchanged, is a loop.
+//   toggle, save) is one task; doing it all again, unchanged, is a loop,
+//   whatever it left on the page.
 // A cycle needs at least two different calls; a constant run is period 1's.
 // The window covers one request: the user speaking clears it, since a loop is
 // the model acting with no new input. Four separate "click increment"
@@ -51,7 +60,10 @@
 // clicks (docs/metrics/m06.md).
 // A known limit of the fingerprint: a page with an element that changes on
 // its own (a clock, a live feed) makes every state new, so a no-op loop there
-// never repeats a signature. The target app has none. ACTION_BUDGET is the
+// never repeats a signature. The target app has none. A model that overshoots
+// (keeps clicking past the number it was asked for) is progress to the guard
+// too, and only the budget stops it: it sees the counter in each response.
+// ACTION_BUDGET is the
 // backstop: one request gets 50 actions, then each further one is refused
 // with a stop-and-ask (not "repeated"), until the user speaks. The six-step
 // task takes 6; 50 still lets "increment the counter to 50" finish, and with
@@ -59,12 +71,13 @@
 // to about a minute of acting, plus the model's own turns.
 const REPEAT_LIMIT = 3;
 export const ACTION_BUDGET = 50;
-const CYCLE_RULES = [
+const PAGE_RULES = [
   { period: 1, repeats: REPEAT_LIMIT + 1 },
   { period: 2, repeats: 2 },
   { period: 3, repeats: 2 },
 ];
-const ACTION_WINDOW = Math.max(...CYCLE_RULES.map(({ period, repeats }) => period * repeats));
+const BARE_RULES = PAGE_RULES.filter(({ period }) => period > 1);
+const ACTION_WINDOW = Math.max(...PAGE_RULES.map(({ period, repeats }) => period * repeats));
 
 // --- Utterances ---
 // An agent turn is all its output-transcription fragments up to the server's
@@ -112,6 +125,8 @@ function endsInCycle(history, period, repeats) {
 
 export function createLoopGuard() {
   /** @type {string[]} */
+  let pages = [];
+  /** @type {string[]} */
   let actions = [];
   let actionsSpent = 0;
   /** @type {string[]} */
@@ -119,12 +134,18 @@ export function createLoopGuard() {
   // Whether an utterance trip may fire; false from a trip until the episode ends.
   let armed = true;
 
-  // Returns true when `signature` repeats or completes a cycle past the limits.
-  /** @param {string} signature */
-  function check(signature) {
-    actions.push(signature);
-    if (actions.length > ACTION_WINDOW) actions.shift();
-    return CYCLE_RULES.some(({ period, repeats }) => endsInCycle(actions, period, repeats));
+  /**
+   * Returns true when the call repeats or completes a cycle past the limits.
+   * @param {string} signature The action with its page (actionSignature).
+   * @param {string} [action] The bare action; the same as `signature` if omitted.
+   */
+  function check(signature, action = signature) {
+    pages = [...pages, signature].slice(-ACTION_WINDOW);
+    actions = [...actions, action].slice(-ACTION_WINDOW);
+    return (
+      PAGE_RULES.some(({ period, repeats }) => endsInCycle(pages, period, repeats)) ||
+      BARE_RULES.some(({ period, repeats }) => endsInCycle(actions, period, repeats))
+    );
   }
 
   // Counts one action against the request's budget; true once it is spent.
@@ -163,6 +184,7 @@ export function createLoopGuard() {
   // The user taking the floor starts a new request: what the agent said or
   // did before no longer counts towards a loop.
   function userSpoke() {
+    pages = [];
     actions = [];
     actionsSpent = 0;
     agentActed();

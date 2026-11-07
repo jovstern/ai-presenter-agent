@@ -629,10 +629,16 @@ a framework's controlled input needs it.
 > `pageFingerprint()` (32-bit FNV-1a of the latest full snapshot's JSON, base 36), which
 > `liveSession.js` updates on every snapshot, so within a batch it is the page the previous
 > call's settled snapshot left, and after a connect or resume the keyframe it requests. The
-> rules are unchanged: a no-op click on an unchanged page still trips on the 4th, a toggle
-> flipped on/off/on/off or home/settings/home/settings still trips as a period-2 cycle, a
-> repeated three-step routine on the same states as period 3; with no snapshot yet the
-> signature is the bare action. Known limit: an element that changes on its own (a clock)
+> rules are unchanged, but run on two histories (#25 review): periods 1, 2 and 3 on the page
+> signatures, and 2 and 3 on the bare actions. A routine with a lasting side effect never
+> meets the same pages twice (the save confirmation stays visible, the toggle alternates:
+> fill/toggle/save twice is a period-6 cycle of page signatures, toggle/save twice period 4),
+> so only the bare history catches it; a constant run is no cycle, so it can't block the
+> counter. A no-op click on an unchanged page still trips on the 4th, a toggle flipped
+> on/off/on/off on the page signatures, home/settings/home/settings and toggle/save/toggle/save
+> on the 4th call, fill/toggle/save repeated on round 2's save; with no snapshot yet the
+> signature is the bare action. A model that overshoots the asked number is progress to the
+> guard too, stopped only by the budget below. Known limit: an element that changes on its own (a clock)
 > makes every state new. Backstop: `ACTION_BUDGET` (50 actions per request, `spendAction()`),
 > past which each call is refused with a stop-and-ask message (not "repeated"), marked
 > `ds:loop-trip` `budget`; the user speaking restores it. Tested in `loopGuard.test.js`,

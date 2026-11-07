@@ -1536,6 +1536,51 @@ describe('createLiveSession: loop guard', () => {
       expect(responsesOf(call).at(-1).response).toMatchObject({ success: false });
     });
 
+    // #25 review: the save confirmation stays and the toggle alternates, so
+    // toggle, save, toggle, save never meets the same page twice; the bare
+    // actions' A-B-A-B still trips it.
+    it('refuses toggle, save, toggle, save on the 4th call though every page differs', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      const app = { checked: false, saved: false };
+      const settingsPage = () => [
+        {
+          selector: 'notifications-toggle',
+          tag: 'input',
+          label: 'Enable notifications',
+          disabled: false,
+          hidden: false,
+          checked: app.checked,
+        },
+        {
+          selector: 'save-confirmation',
+          tag: 'p',
+          label: 'Saved',
+          disabled: false,
+          hidden: !app.saved,
+        },
+      ];
+      bridge.emitSnapshot({ full: settingsPage(), changed: settingsPage(), removed: [] });
+      bridge.dispatchAction.mockImplementation(async (_name, [selector]) => {
+        if (selector === 'notifications-toggle') app.checked = !app.checked;
+        else app.saved = true;
+        bridge.emitSnapshot({ full: settingsPage(), changed: settingsPage(), removed: [] });
+        return { success: true };
+      });
+      const toggle = (id) => ({ id, name: 'click', args: { selector: 'notifications-toggle' } });
+      const save = (id) => ({ id, name: 'click', args: { selector: 'save-button' } });
+
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [toggle('1'), save('2'), toggle('3'), save('4')] },
+      });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+      const responses = responsesOf(call);
+      expect(responses.map((r) => r.response.success)).toEqual([true, true, true, false]);
+      expect(responses[3].response.error).toMatch(/repeated/i);
+    });
+
     it('past 50 actions in one request, tells the model to stop and ask, not that it repeated', async () => {
       const { call, bridge } = await sessionWithCounter(1);
       call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(51) } });

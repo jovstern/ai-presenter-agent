@@ -131,18 +131,88 @@ describe('loopGuard: the page an action was taken on is part of its signature', 
     expect(run([toSettings, toHome, toSettings, toHome])).toEqual([false, false, false, true]);
   });
 
-  it('still trips a 3-step routine repeated on the same states (period 3)', () => {
-    const routine = [
-      sig('fill', { selector: 'name', value: 'Ada' }, 's0'),
-      sig('click', { selector: 'notifications' }, 's1'),
-      sig('click', { selector: 'save-button' }, 's2'),
-    ];
-    expect(run([...routine, ...routine]).at(-1)).toBe(true);
-  });
-
   it('falls back to the bare action when there is no page yet', () => {
     expect(sig('click', { selector: 'counter-increment' }, undefined)).toBe(increment);
     expect(run([increment, increment, increment, increment]).at(-1)).toBe(true);
+  });
+});
+
+// The rules as liveSession runs them: each call checked with its page
+// signature and its bare action, on a model of the target app whose side
+// effects last (the save confirmation stays visible, the toggle alternates),
+// so a routine repeated on it never meets the same states twice.
+describe('loopGuard: cycles on the real app, whose states never repeat', () => {
+  /** @typedef {[string, Record<string, unknown>]} Step */
+  /** @type {Record<string, Step>} */
+  const steps = {
+    fill: ['fill', { selector: 'name', value: 'Ada' }],
+    toggle: ['click', { selector: 'notifications-toggle' }],
+    save: ['click', { selector: 'save-button' }],
+    inc: ['click', { selector: 'counter-increment' }],
+    dec: ['click', { selector: 'counter-decrement' }],
+    toSettings: ['navigate', { route: 'settings' }],
+    toHome: ['navigate', { route: 'home' }],
+  };
+
+  /**
+   * Plays the step names on a fresh guard and app; a refused step changes nothing.
+   * @param {(keyof typeof steps)[]} names
+   */
+  function play(names) {
+    const guard = createLoopGuard();
+    const app = { route: 'home', counter: 0, name: '', notifications: false, saved: false };
+    return names.map((stepName) => {
+      const [name, args] = steps[stepName];
+      const page = JSON.stringify(app);
+      const tripped = guard.check(sig(name, args, page), sig(name, args));
+      if (tripped) return true;
+      if (stepName === 'fill') app.name = 'Ada';
+      if (stepName === 'toggle') app.notifications = !app.notifications;
+      if (stepName === 'save') app.saved = true;
+      if (stepName === 'inc') app.counter += 1;
+      if (stepName === 'dec') app.counter -= 1;
+      if (stepName === 'toSettings') app.route = 'settings';
+      if (stepName === 'toHome') app.route = 'home';
+      return false;
+    });
+  }
+
+  it("trips fill, toggle, save repeated on round 2's save", () => {
+    expect(play(['fill', 'toggle', 'save', 'fill', 'toggle', 'save'])).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('trips toggle, save, toggle, save on the 4th call', () => {
+    expect(play(['toggle', 'save', 'toggle', 'save'])).toEqual([false, false, false, true]);
+  });
+
+  it('trips the toggle alone flip-flopping on the 4th call', () => {
+    expect(play(['toggle', 'toggle', 'toggle', 'toggle'])).toEqual([false, false, false, true]);
+  });
+
+  it('trips home → settings → home → settings on the 4th call', () => {
+    expect(play(['toSettings', 'toHome', 'toSettings', 'toHome'])).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('trips increment, decrement, increment, decrement on the 4th call', () => {
+    expect(play(['inc', 'dec', 'inc', 'dec'])).toEqual([false, false, false, true]);
+  });
+
+  it('passes 10 and 50 counter clicks, and the six-step task', () => {
+    expect(play(Array(10).fill('inc')).some(Boolean)).toBe(false);
+    expect(play(Array(50).fill('inc')).some(Boolean)).toBe(false);
+    expect(play(['inc', 'inc', 'toSettings', 'toggle', 'fill', 'save']).some(Boolean)).toBe(false);
   });
 });
 

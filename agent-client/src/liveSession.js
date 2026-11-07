@@ -153,10 +153,11 @@ const SYSTEM_INSTRUCTION =
   'If a tool call fails or a page does not change as expected, say so honestly ' +
   'and try a different approach rather than repeating the same action.';
 
-// The error a refused action answers with. A loop is the same action on the
-// same page (loopGuard.check), so progress, which changes the page, never
-// gets it; past the request's budget (loopGuard.spendAction) the model is
-// told to check in, not that it repeated.
+// The error a refused action answers with. A loop (loopGuard.check) is the
+// same action on the same page, or a cycle of two or three different
+// actions, so one action repeated while it moves the page on never gets it;
+// past the request's budget (loopGuard.spendAction) the model is told to
+// check in, not that it repeated.
 const LOOP_REFUSAL =
   'This action has repeated too many times, alone or in a cycle with your last few — try something different.';
 const BUDGET_REFUSAL = `That is ${ACTION_BUDGET} actions since the user last spoke. Stop here, tell the user what you have done so far, and ask the user whether to go on.`;
@@ -441,9 +442,10 @@ export function createLiveSession({
       const name = fc.name ?? '';
       const id = fc.id ?? name;
       const signature = actionSignature(name, fc.args, currentPage);
+      const action = actionSignature(name, fc.args);
       mark(`ds:tool-start:${id}`, { name });
       const overBudget = loopGuard.spendAction();
-      const looping = loopGuard.check(signature);
+      const looping = loopGuard.check(signature, action);
       const refusal = overBudget ? BUDGET_REFUSAL : looping ? LOOP_REFUSAL : undefined;
       if (refusal) mark('ds:loop-trip', { kind: overBudget ? 'budget' : 'action' });
       /** @type {ActionResult} */
