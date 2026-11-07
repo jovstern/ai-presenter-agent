@@ -746,6 +746,7 @@ What pushes it to the worst case:
 | M6 | ~130 min | ~150 min (1.15×) | T5's live tuning took 19 runs; a 7-Important fix wave plus 14 minors; two review rounds. Three usage-limit pauses aren't counted. M4–M6 together: ~407 vs ~390 min (1.04×), so M7 ~105 and M8 ~75. |
 | M7 | ~100 min (~105 re-scaled) | ~150 min (1.43×) | The React Compiler had never run (T2b, a user ruling); Radix focus inside the shadow root needed our own Tab handling in the toast and the dialog; the UI review's Must fix (sliced transcript lines) and the observer's CLS miss led to a 7-commit fix wave and two more rounds. Usage-limit pauses aren't counted. M4–M7 together: ~557 vs ~495 min (1.13×), so M8 ~80. |
 | M8 | ~70 min (~80 re-scaled) | ~75 min without T3 (1.07×, 0.94× re-scaled) | T1, T2 and T4 ran to size; one review fix wave and a doc-only second round. T3 (go live) was deferred to #23 by the user's call, so its ~15 min isn't counted. M4–M8 together: ~632 vs ~545 min as first planned without T3 (1.16×). |
+| M9 | ~130 min (100 tasks + ~30 overhead) | ~245 min (1.9×) | T2's live runs took ~80 min alone (the host audio service stalled mid-way; runs 56–62 discarded) for a cause that never reproduced; T5b fixed 767 type errors; T6 added a page and a snapshot policy rather than only measuring; the first review round found 2 UI Must fixes and a CLS miss on the new page, then a second fix round (focus ring under the fade, the alert behind the footer). #23 (go live) not counted. |
 
 ### Calibration
 
