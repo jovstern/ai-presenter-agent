@@ -32,7 +32,11 @@ describe('pcm', () => {
 
     const encoded = encodeInputFrame(samples);
     expect(encoded).toHaveLength(Math.ceil(samples.byteLength / 3) * 4);
-    expect(bytesToInt16(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)))).toEqual(samples);
+    const decoded = bytesToInt16(Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0)));
+    // Not toEqual: its element-by-element deep equality over 512 Ki samples
+    // takes about a second idle and timed out under parallel load (#26).
+    expect(decoded).toHaveLength(samples.length);
+    expect(decoded.findIndex((sample, i) => sample !== samples[i])).toBe(-1);
   });
 
   it('matches the platform base64 for a frame', () => {
