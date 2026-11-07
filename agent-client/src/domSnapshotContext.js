@@ -61,7 +61,7 @@ export function formatSnapshotMessage(decision) {
   if (decision.type === 'keyframe') {
     const snapshot = `Page snapshot (full):\n${JSON.stringify(decision.nodes)}`;
     if (decision.omitted === 0) return snapshot;
-    return `${snapshot}\nThe page has ${decision.omitted} more elements, further from view, that are not listed. To reach one, scroll to the listed element nearest it (the first or the last), then look again.`;
+    return `${snapshot}\nThe page has ${decision.omitted} more elements not listed: off screen or hidden. To reach one off screen, scroll to the listed element nearest it (the first or the last), then look again.`;
   }
   return `Page snapshot (delta) — changed:\n${JSON.stringify(decision.changed)}\nremoved:\n${JSON.stringify(decision.removed)}`;
 }

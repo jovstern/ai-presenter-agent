@@ -45,7 +45,7 @@ describe('createSdkLoader', () => {
 });
 
 // The SDK stays out of the page-load chunk only while no module imports it as
-// a value; liveSdk.js's import() is the one way in (e2e/bundle.spec.js checks
+// a value; liveSdk.js's import() is the one way in (e2e/sdk.spec.js checks
 // the build output itself). JSDoc `@import`s are types only and don't count.
 describe('the page-load module graph', () => {
   it('has no static import of @google/genai outside type comments', () => {

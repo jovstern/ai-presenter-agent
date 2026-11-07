@@ -91,7 +91,7 @@ describe('domSnapshotContext', () => {
 
       expect(decision).toEqual({ type: 'keyframe', nodes: nodes(...FULL), omitted: 109 });
       expect(formatSnapshotMessage(decision)).toMatch(
-        /\nThe page has 109 more elements, further from view, that are not listed\. To reach one, scroll to the listed element nearest it/,
+        /\nThe page has 109 more elements not listed: off screen or hidden\. To reach one off screen, scroll to the listed element nearest it/,
       );
     });
 

@@ -382,7 +382,7 @@
       if (result.success) {
         await pageSettled(deadline);
         cancelDebouncedSnapshot(); // this snapshot covers what it would have sent
-        diffAndBroadcastSnapshot();
+        diffAndBroadcastSnapshot({ always: true });
       } else if (earlierChangePending) {
         scheduleDebouncedSnapshot();
       }
@@ -400,7 +400,7 @@
   async function handleAgentMessage(event) {
     const data = event.data;
     if (data?.type === 'request-snapshot') {
-      diffAndBroadcastSnapshot();
+      diffAndBroadcastSnapshot({ always: true });
     } else if (data?.type === 'action') {
       postToAgent(await runAction(data));
     }
@@ -655,8 +655,16 @@
   // Whether the last snapshot left elements out: only then does a scroll
   // change what a snapshot holds, so only then does one send a snapshot.
   let pageOverCap = false;
+  let lastOmitted = 0;
 
-  function diffAndBroadcastSnapshot() {
+  // `always` is for the snapshots someone waits for: an action's settled page
+  // (#25: its tool response carries it, changed or not), an explicit
+  // request-snapshot and a frame load. A change nobody asked for (the
+  // debounce) that leaves the snapshot as it was is dropped instead: on a page
+  // over the cap every scroll schedules one, and an empty delta would only
+  // cost the model a turn (M9 fix wave, C1).
+  /** @param {{ always: boolean }} options */
+  function diffAndBroadcastSnapshot({ always }) {
     // Before the handshake there's no one to tell; agent-client asks for a
     // fresh snapshot once connected, so nothing is lost by dropping this.
     if (!agentPort) return;
@@ -669,8 +677,11 @@
       const prev = lastNodesById.get(node.selector);
       return !prev || JSON.stringify(prev) !== JSON.stringify(node);
     });
+    const unchanged = changed.length === 0 && removed.length === 0 && omitted === lastOmitted;
 
     lastNodesById = nodesById;
+    lastOmitted = omitted;
+    if (unchanged && !always) return;
     postToAgent({ type: 'snapshot', full, changed, removed, ...(omitted > 0 ? { omitted } : {}) });
   }
 
@@ -699,7 +710,7 @@
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = undefined;
-      diffAndBroadcastSnapshot();
+      diffAndBroadcastSnapshot({ always: false });
     }, SNAPSHOT_DEBOUNCE_MS);
   }
 
@@ -806,11 +817,12 @@
       setUpDocument = doc;
       navigationInFlight = false;
       lastNodesById = new Map(); // a new document has nothing in common with the old diff state
+      lastOmitted = 0;
       watchIframeMutations();
       // `navigated` first, so the agent marks a keyframe before this load's
       // snapshot arrives rather than after it (which forced a redundant one).
       postToAgent({ type: 'navigated' });
-      diffAndBroadcastSnapshot();
+      diffAndBroadcastSnapshot({ always: true });
     }
 
     const path = iframe.contentWindow?.location.pathname;

@@ -111,8 +111,8 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
     under `prefers-reduced-motion: reduce`, where every animation and transition is also off),
     and the host's own `position: fixed`, `z-index` and `display: block`. Status colours
     `--color-danger` and `--color-warning` (light #b45309 5.0:1, dark #fbbf24 10.6:1 on the
-    surface). At ≤ 340 px the card takes a half gutter, a 32 px orb (`--orb-size`) and half
-    gaps, so "Talk to the AI Presenter" stays on one line inside its button at 320 px. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
+    surface). Below 380 px the card takes a 32 px orb (`--orb-size`), half gaps and tighter
+    padding (and at ≤ 340 px a half gutter), so "Talk to the AI Presenter" stays on one line inside its button at 320 px and keeps room at 360 px. `main.jsx` imports it with Vite's `?inline` and puts it in the shadow root
     as one `<style>` (covered by the CSP's `style-src 'unsafe-inline'`).
   - `clientLog.js` — the client log (spec R23): `startClientLog({ nonce, bundleBase })`, called
     once per page by `main.jsx` before the mount, listens for window `error` /
@@ -196,18 +196,24 @@ that holds Prettier, Playwright (`e2e/`, `playwright.config.js`) and the cross-p
   templates in). A successful action's result waits for the page to **settle** (no mutation,
   input or change for 100 ms, capped at 1 s; a link click first waits for the new page; all by a
   3.7 s deadline) and follows that page's snapshot on the port (#25);
-  a failure answers at once; changes nobody asked for go out on a 250 ms debounce. A snapshot
+  a failure answers at once; changes nobody asked for go out on a 250 ms debounce, and only
+  when they change the snapshot (an empty delta is dropped; an action's settled page, a
+  `request-snapshot` and a frame load always go out, M9 fix wave). A snapshot
   holds at most 30 nodes (`MAX_SNAPSHOT_NODES`); on a page with more (issue #22, M9 T6) it keeps
   the 30 nearest the frame's viewport (on screen first, unrendered last), in page order, and
-  says how many it left out (`omitted`), a scroll on such a page sends a new one, and
+  says how many it left out (`omitted`), a scroll on such a page sends a new one when it changes
+  what is kept, and
   `domSnapshotContext.js` makes any removal there a keyframe that tells the model to scroll for
   the rest. The `scroll` action is instant, so its result waits for no animation. No build step.
 - `target-app/` (static) — 3-page mock app used as the demo target: `index.html` + `home.js`
   (counter), `settings.html` + `settings.js` (Save confirmation; also a Notes textarea and a
   Plan select for `fill`), `orders.html` + `orders.js` (M9 T6, issue #22: the dense page — a
   60-row table, each row a checkbox and a Ship button, with a selected count and Ship
-  selected, then an eleven-field New order form; 139 `data-testid`s, past the snapshot cap),
-  `style.css`, and `routes.json` — the one route list (route name →
+  selected, then an eleven-field New order form; 139 `data-testid`s, past the snapshot cap; the
+  rows are static markup, so a late `orders.js` only wires up the controls and moves nothing,
+  and a right-edge fade marks a table scrolled short of its end), `style.css` (every page's
+  `main` keeps 360 px free at its bottom, so its last control scrolls clear of the session
+  card), and `routes.json` — the one route list (route name →
   page path): the server templates it into the sandbox page for `bridge.js`, and
   `actionTools.js` imports it for `navigate`'s enum. No build step.
 
@@ -272,7 +278,8 @@ its own script tag's `data-ds-nonce` (the `document.scripts` entry whose `src` i
   `file:line` references point at pre-rebuild code; each "Fixed" note names
   the current location. Update it in place; don't start a second tracking doc.
 - `docs/adr/` — architecture decisions: 0001 private bridge channel, 0002 `checkJs` type
-  checking, 0003 hosting on Render, 0004 Live token locked to the model only.
+  checking, 0003 hosting on Render, 0004 Live token locked to the model only, 0005 the Gemini
+  SDK loaded on Talk.
 - `docs/superpowers/` — the `/build` cycle: `specs/assessment.md` (every item done or filed as
   an issue, M8 T4), `specs/design.md` (the spec and its R1–R24 checklist) and `plans/plan.md`
   (milestones M4–M8 and their tasks, the time log and the kit calibration proposal).
@@ -309,7 +316,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (446 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (449 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; the capture node's muted output; capture releases
@@ -319,7 +326,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   the report shapes, the nonce in the query and a JSON Blob, the per-page caps, a missing
   `sendBeacon` dropped, nothing sent once disabled or from a `token` failure on), `bridge` (runs
   `sandbox/bridge.js` against a stubbed iframe; over the cap, the nodes nearest the viewport
-  and a snapshot on scroll), `bridgeChannel`, `bridgeProtocol` (the typedef
+  and a snapshot on scroll, none for a scroll that keeps the same nodes, a `request-snapshot`
+  answered even so), `bridgeChannel`, `bridgeProtocol` (the typedef
   copies match), `captureWorklet` (`public/capture-worklet.js` under a stubbed worklet scope:
   frame size, 16 kHz from 48/44.1 kHz, no aliasing, a silent output), `domSnapshotContext` (incl. the
   `omitted` line and a removal over the cap as a keyframe), `knowledgeStore` (incl.
@@ -354,7 +362,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (43
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 7 Playwright specs (47
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (14: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
@@ -381,6 +389,9 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `sdk.spec.js` (3, ADR 0005: the built entry has no SDK code and both files are within the
   spec's budgets; the page loads without the SDK chunk, a hover fetches it once, Talk connects;
   an aborted chunk gives Can't connect with one toast and Retry, which loads it and connects),
+  `targetApp.spec.js` (4, M9 fix wave: Orders with `orders.js` held back 300 ms shifts under
+  0.05; its table's right-edge fade until scrolled to the end; at 360 px with a session open,
+  Create order on Orders and Save on Settings, scrolled to the bottom, sit above the card),
   `audio.spec.js` (1: the fake mic through the real capture worklet under the CSP — 2560-byte
   `audio/pcm;rate=16000` frames at ~12.5/s, not silence, none after End) and
   `a11y.spec.js` (12: axe with zero violations, in light and dark, on `/` idle, failed with its

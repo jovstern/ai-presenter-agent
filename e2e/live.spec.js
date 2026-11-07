@@ -326,8 +326,9 @@ const KNOWLEDGE_FILE = {
   text: [
     '# Demo notes',
     'The code name of this demo is Pelican.',
-    'The demo app has two pages: Home, with a counter, and Settings, with notifications,',
-    'notes, a plan (Free, Pro or Team) and a Save button. Saving shows a confirmation.',
+    'The demo app has three pages: Home, with a counter; Settings, with notifications,',
+    'notes, a plan (Free, Pro or Team) and a Save button; and Orders, with a table of orders',
+    'and a New order form. Saving the settings shows a confirmation.',
     'The Pro plan adds priority support and unlimited projects; the Team plan adds shared',
     'workspaces and single sign-on. Notifications are off by default.',
   ].join('\n'),

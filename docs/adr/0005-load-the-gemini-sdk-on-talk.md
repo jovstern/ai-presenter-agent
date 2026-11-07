@@ -44,7 +44,7 @@ Issue #20's options:
   first Talk waits for the slower of the two, not both. Pointing at or focusing Talk starts the
   load (`preloadLiveSdk`), so it is usually in before the press.
 - A chunk that doesn't load fails the attempt at once as `fatal: 'sdk'` — "Can't connect", the
-  reason "The voice client couldn't load. Check your connection, then retry." and **Retry**,
+  reason "The voice client couldn't load. Check your connection, then retry or reload the page." and **Retry**,
   which imports it again. The reconnect backoff is for the voice socket; a minute of retries on a
   missing file would only hide it. The client log accepts the `sdk` kind (`server/app.js`).
 - The CSP is unchanged: a module script and its `import()` are same-origin scripts, covered by

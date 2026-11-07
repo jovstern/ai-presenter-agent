@@ -10,6 +10,14 @@ nav a {
   margin-right: 12px;
 }
 
+/* The presenter card floats over the bottom of the frame (about 311 px tall
+   while a session is open, plus its gutter), so every page leaves that much
+   room below its last control: scrolled to the end, it sits clear of the
+   card. */
+main {
+  padding-bottom: 360px;
+}
+
 /* Controls take the page's font (browsers default them to a smaller system
    one), so the original controls and the M6 ones (Notes, Plan) match. */
 button,
@@ -117,14 +125,26 @@ body.wide {
   gap: 12px;
 }
 
+/* Disabled reads as unavailable at a glance, not only by its grey text: a
+   dashed edge and no fill, against an enabled button's solid edge and grey
+   fill. */
 button:disabled {
-  /* 4.5:1 on the button's own background. */
+  /* 7:1 on white. */
   color: #595959;
+  background: #fff;
+  border-style: dashed;
   cursor: not-allowed;
 }
 
 button:disabled:hover {
-  background: #f2f2f2;
+  background: #fff;
+}
+
+/* A touch screen gets a 44 px tall target on every button. */
+@media (pointer: coarse) {
+  button {
+    min-height: 44px;
+  }
 }
 
 /* A narrow screen scrolls the table, not the page. Positioned, so the
@@ -133,6 +153,12 @@ button:disabled:hover {
 .table-scroll {
   position: relative;
   overflow-x: auto;
+}
+
+/* More columns to the right (orders.js sets the class until the table is
+   scrolled to its end): the right edge fades out. A mask, so nothing moves. */
+.table-scroll--more {
+  mask-image: linear-gradient(to left, transparent, #000 40px);
 }
 
 table {
@@ -161,19 +187,65 @@ tbody th {
   text-align: right;
 }
 
-td input[type='checkbox'] {
+td input[type='checkbox'],
+.check input[type='checkbox'] {
   width: 20px;
   height: 20px;
   margin: 0;
-  vertical-align: middle;
 }
 
-/* A form reads best at the other pages' width, not the table's. The room
-   below it lets its last controls scroll clear of the presenter card, which
-   floats over the bottom of the frame. */
+/* A selected order, told by its tint as well as its ticked box (the text
+   stays at 15:1 on it). */
+tbody tr:has(input:checked) {
+  background: #e8f0fe;
+}
+
+/* The checkbox's label fills its cell, so the whole 44 x 44 px cell ticks it. */
+td.select {
+  padding: 0;
+}
+
+td.select label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* A phone: tighter cells, so more of the table fits before it scrolls. */
+@media (max-width: 479px) {
+  th,
+  td {
+    padding: 6px 4px;
+  }
+}
+
+/* A checkbox and its text on one row, the whole row a 44 px tall target. */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+/* A form reads best at the other pages' width, not the table's. */
 .order-form {
   max-width: 480px;
-  padding-bottom: 160px;
+}
+
+/* Required, shown by an asterisk the field's name leaves out (`/ ''`): the
+   input's `required` already says it to assistive technology, and the
+   bridge's snapshot reads the label's text, which stays the bare name. */
+.field label.required::after {
+  content: ' *' / '';
+}
+
+.form-note {
+  color: #595959;
+  font-size: 0.875rem;
 }
 
 .order-form .field input {

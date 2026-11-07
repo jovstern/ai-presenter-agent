@@ -23,7 +23,11 @@
 
       <!-- The denser page (issue #22): 60 rows, each with a checkbox and a
            button, then a form of eleven fields, so a snapshot reaches
-           bridge.js's MAX_SNAPSHOT_NODES. orders.js fills the table. -->
+           bridge.js's MAX_SNAPSHOT_NODES. The rows are static markup, the same
+           on every load so a test can name an order: built by a script, a
+           deferred orders.js could paint the form first and then push it
+           ~2,900 px down (CLS 0.679, docs/metrics/m09.md). orders.js only
+           wires up the controls. -->
       <section aria-labelledby="orders-list-heading">
         <h2 id="orders-list-heading" class="visually-hidden">Order list</h2>
         <p class="toolbar">
@@ -42,7 +46,1196 @@
                 <th scope="col"><span class="visually-hidden">Action</span></th>
               </tr>
             </thead>
-            <tbody id="orders-body"></tbody>
+            <tbody id="orders-body">
+              <tr data-number="1001">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1001-select"
+                      aria-label="Select order 1001, Acme"
+                  /></label>
+                </td>
+                <th scope="row">1001</th>
+                <td>Acme</td>
+                <td class="numeric">$256.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1001-ship" aria-label="Ship order 1001">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1002">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1002-select"
+                      aria-label="Select order 1002, Globex"
+                  /></label>
+                </td>
+                <th scope="row">1002</th>
+                <td>Globex</td>
+                <td class="numeric">$293.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1002-ship" aria-label="Ship order 1002">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1003">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1003-select"
+                      aria-label="Select order 1003, Initech"
+                  /></label>
+                </td>
+                <th scope="row">1003</th>
+                <td>Initech</td>
+                <td class="numeric">$330.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1003-ship" aria-label="Ship order 1003">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1004">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1004-select"
+                      aria-label="Select order 1004, Umbrella"
+                  /></label>
+                </td>
+                <th scope="row">1004</th>
+                <td>Umbrella</td>
+                <td class="numeric">$367.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1004-ship" aria-label="Ship order 1004">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1005">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1005-select"
+                      aria-label="Select order 1005, Hooli"
+                  /></label>
+                </td>
+                <th scope="row">1005</th>
+                <td>Hooli</td>
+                <td class="numeric">$404.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1005-ship" aria-label="Ship order 1005">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1006">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1006-select"
+                      aria-label="Select order 1006, Stark"
+                  /></label>
+                </td>
+                <th scope="row">1006</th>
+                <td>Stark</td>
+                <td class="numeric">$41.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1006-ship" aria-label="Ship order 1006">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1007">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1007-select"
+                      aria-label="Select order 1007, Wayne"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1007</th>
+                <td>Wayne</td>
+                <td class="numeric">$78.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1007-ship"
+                    aria-label="Shipped, order 1007"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1008">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1008-select"
+                      aria-label="Select order 1008, Wonka"
+                  /></label>
+                </td>
+                <th scope="row">1008</th>
+                <td>Wonka</td>
+                <td class="numeric">$115.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1008-ship" aria-label="Ship order 1008">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1009">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1009-select"
+                      aria-label="Select order 1009, Tyrell"
+                  /></label>
+                </td>
+                <th scope="row">1009</th>
+                <td>Tyrell</td>
+                <td class="numeric">$152.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1009-ship" aria-label="Ship order 1009">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1010">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1010-select"
+                      aria-label="Select order 1010, Cyberdyne"
+                  /></label>
+                </td>
+                <th scope="row">1010</th>
+                <td>Cyberdyne</td>
+                <td class="numeric">$189.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1010-ship" aria-label="Ship order 1010">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1011">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1011-select"
+                      aria-label="Select order 1011, Soylent"
+                  /></label>
+                </td>
+                <th scope="row">1011</th>
+                <td>Soylent</td>
+                <td class="numeric">$226.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1011-ship" aria-label="Ship order 1011">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1012">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1012-select"
+                      aria-label="Select order 1012, Vandelay"
+                  /></label>
+                </td>
+                <th scope="row">1012</th>
+                <td>Vandelay</td>
+                <td class="numeric">$263.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1012-ship" aria-label="Ship order 1012">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1013">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1013-select"
+                      aria-label="Select order 1013, Acme"
+                  /></label>
+                </td>
+                <th scope="row">1013</th>
+                <td>Acme</td>
+                <td class="numeric">$300.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1013-ship" aria-label="Ship order 1013">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1014">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1014-select"
+                      aria-label="Select order 1014, Globex"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1014</th>
+                <td>Globex</td>
+                <td class="numeric">$337.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1014-ship"
+                    aria-label="Shipped, order 1014"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1015">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1015-select"
+                      aria-label="Select order 1015, Initech"
+                  /></label>
+                </td>
+                <th scope="row">1015</th>
+                <td>Initech</td>
+                <td class="numeric">$374.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1015-ship" aria-label="Ship order 1015">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1016">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1016-select"
+                      aria-label="Select order 1016, Umbrella"
+                  /></label>
+                </td>
+                <th scope="row">1016</th>
+                <td>Umbrella</td>
+                <td class="numeric">$411.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1016-ship" aria-label="Ship order 1016">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1017">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1017-select"
+                      aria-label="Select order 1017, Hooli"
+                  /></label>
+                </td>
+                <th scope="row">1017</th>
+                <td>Hooli</td>
+                <td class="numeric">$48.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1017-ship" aria-label="Ship order 1017">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1018">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1018-select"
+                      aria-label="Select order 1018, Stark"
+                  /></label>
+                </td>
+                <th scope="row">1018</th>
+                <td>Stark</td>
+                <td class="numeric">$85.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1018-ship" aria-label="Ship order 1018">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1019">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1019-select"
+                      aria-label="Select order 1019, Wayne"
+                  /></label>
+                </td>
+                <th scope="row">1019</th>
+                <td>Wayne</td>
+                <td class="numeric">$122.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1019-ship" aria-label="Ship order 1019">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1020">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1020-select"
+                      aria-label="Select order 1020, Wonka"
+                  /></label>
+                </td>
+                <th scope="row">1020</th>
+                <td>Wonka</td>
+                <td class="numeric">$159.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1020-ship" aria-label="Ship order 1020">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1021">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1021-select"
+                      aria-label="Select order 1021, Tyrell"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1021</th>
+                <td>Tyrell</td>
+                <td class="numeric">$196.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1021-ship"
+                    aria-label="Shipped, order 1021"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1022">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1022-select"
+                      aria-label="Select order 1022, Cyberdyne"
+                  /></label>
+                </td>
+                <th scope="row">1022</th>
+                <td>Cyberdyne</td>
+                <td class="numeric">$233.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1022-ship" aria-label="Ship order 1022">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1023">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1023-select"
+                      aria-label="Select order 1023, Soylent"
+                  /></label>
+                </td>
+                <th scope="row">1023</th>
+                <td>Soylent</td>
+                <td class="numeric">$270.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1023-ship" aria-label="Ship order 1023">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1024">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1024-select"
+                      aria-label="Select order 1024, Vandelay"
+                  /></label>
+                </td>
+                <th scope="row">1024</th>
+                <td>Vandelay</td>
+                <td class="numeric">$307.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1024-ship" aria-label="Ship order 1024">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1025">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1025-select"
+                      aria-label="Select order 1025, Acme"
+                  /></label>
+                </td>
+                <th scope="row">1025</th>
+                <td>Acme</td>
+                <td class="numeric">$344.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1025-ship" aria-label="Ship order 1025">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1026">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1026-select"
+                      aria-label="Select order 1026, Globex"
+                  /></label>
+                </td>
+                <th scope="row">1026</th>
+                <td>Globex</td>
+                <td class="numeric">$381.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1026-ship" aria-label="Ship order 1026">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1027">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1027-select"
+                      aria-label="Select order 1027, Initech"
+                  /></label>
+                </td>
+                <th scope="row">1027</th>
+                <td>Initech</td>
+                <td class="numeric">$418.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1027-ship" aria-label="Ship order 1027">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1028">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1028-select"
+                      aria-label="Select order 1028, Umbrella"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1028</th>
+                <td>Umbrella</td>
+                <td class="numeric">$55.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1028-ship"
+                    aria-label="Shipped, order 1028"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1029">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1029-select"
+                      aria-label="Select order 1029, Hooli"
+                  /></label>
+                </td>
+                <th scope="row">1029</th>
+                <td>Hooli</td>
+                <td class="numeric">$92.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1029-ship" aria-label="Ship order 1029">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1030">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1030-select"
+                      aria-label="Select order 1030, Stark"
+                  /></label>
+                </td>
+                <th scope="row">1030</th>
+                <td>Stark</td>
+                <td class="numeric">$129.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1030-ship" aria-label="Ship order 1030">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1031">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1031-select"
+                      aria-label="Select order 1031, Wayne"
+                  /></label>
+                </td>
+                <th scope="row">1031</th>
+                <td>Wayne</td>
+                <td class="numeric">$166.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1031-ship" aria-label="Ship order 1031">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1032">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1032-select"
+                      aria-label="Select order 1032, Wonka"
+                  /></label>
+                </td>
+                <th scope="row">1032</th>
+                <td>Wonka</td>
+                <td class="numeric">$203.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1032-ship" aria-label="Ship order 1032">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1033">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1033-select"
+                      aria-label="Select order 1033, Tyrell"
+                  /></label>
+                </td>
+                <th scope="row">1033</th>
+                <td>Tyrell</td>
+                <td class="numeric">$240.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1033-ship" aria-label="Ship order 1033">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1034">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1034-select"
+                      aria-label="Select order 1034, Cyberdyne"
+                  /></label>
+                </td>
+                <th scope="row">1034</th>
+                <td>Cyberdyne</td>
+                <td class="numeric">$277.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1034-ship" aria-label="Ship order 1034">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1035">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1035-select"
+                      aria-label="Select order 1035, Soylent"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1035</th>
+                <td>Soylent</td>
+                <td class="numeric">$314.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1035-ship"
+                    aria-label="Shipped, order 1035"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1036">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1036-select"
+                      aria-label="Select order 1036, Vandelay"
+                  /></label>
+                </td>
+                <th scope="row">1036</th>
+                <td>Vandelay</td>
+                <td class="numeric">$351.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1036-ship" aria-label="Ship order 1036">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1037">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1037-select"
+                      aria-label="Select order 1037, Acme"
+                  /></label>
+                </td>
+                <th scope="row">1037</th>
+                <td>Acme</td>
+                <td class="numeric">$388.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1037-ship" aria-label="Ship order 1037">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1038">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1038-select"
+                      aria-label="Select order 1038, Globex"
+                  /></label>
+                </td>
+                <th scope="row">1038</th>
+                <td>Globex</td>
+                <td class="numeric">$25.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1038-ship" aria-label="Ship order 1038">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1039">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1039-select"
+                      aria-label="Select order 1039, Initech"
+                  /></label>
+                </td>
+                <th scope="row">1039</th>
+                <td>Initech</td>
+                <td class="numeric">$62.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1039-ship" aria-label="Ship order 1039">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1040">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1040-select"
+                      aria-label="Select order 1040, Umbrella"
+                  /></label>
+                </td>
+                <th scope="row">1040</th>
+                <td>Umbrella</td>
+                <td class="numeric">$99.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1040-ship" aria-label="Ship order 1040">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1041">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1041-select"
+                      aria-label="Select order 1041, Hooli"
+                  /></label>
+                </td>
+                <th scope="row">1041</th>
+                <td>Hooli</td>
+                <td class="numeric">$136.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1041-ship" aria-label="Ship order 1041">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1042">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1042-select"
+                      aria-label="Select order 1042, Stark"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1042</th>
+                <td>Stark</td>
+                <td class="numeric">$173.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1042-ship"
+                    aria-label="Shipped, order 1042"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1043">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1043-select"
+                      aria-label="Select order 1043, Wayne"
+                  /></label>
+                </td>
+                <th scope="row">1043</th>
+                <td>Wayne</td>
+                <td class="numeric">$210.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1043-ship" aria-label="Ship order 1043">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1044">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1044-select"
+                      aria-label="Select order 1044, Wonka"
+                  /></label>
+                </td>
+                <th scope="row">1044</th>
+                <td>Wonka</td>
+                <td class="numeric">$247.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1044-ship" aria-label="Ship order 1044">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1045">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1045-select"
+                      aria-label="Select order 1045, Tyrell"
+                  /></label>
+                </td>
+                <th scope="row">1045</th>
+                <td>Tyrell</td>
+                <td class="numeric">$284.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1045-ship" aria-label="Ship order 1045">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1046">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1046-select"
+                      aria-label="Select order 1046, Cyberdyne"
+                  /></label>
+                </td>
+                <th scope="row">1046</th>
+                <td>Cyberdyne</td>
+                <td class="numeric">$321.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1046-ship" aria-label="Ship order 1046">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1047">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1047-select"
+                      aria-label="Select order 1047, Soylent"
+                  /></label>
+                </td>
+                <th scope="row">1047</th>
+                <td>Soylent</td>
+                <td class="numeric">$358.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1047-ship" aria-label="Ship order 1047">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1048">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1048-select"
+                      aria-label="Select order 1048, Vandelay"
+                  /></label>
+                </td>
+                <th scope="row">1048</th>
+                <td>Vandelay</td>
+                <td class="numeric">$395.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1048-ship" aria-label="Ship order 1048">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1049">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1049-select"
+                      aria-label="Select order 1049, Acme"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1049</th>
+                <td>Acme</td>
+                <td class="numeric">$32.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1049-ship"
+                    aria-label="Shipped, order 1049"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1050">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1050-select"
+                      aria-label="Select order 1050, Globex"
+                  /></label>
+                </td>
+                <th scope="row">1050</th>
+                <td>Globex</td>
+                <td class="numeric">$69.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1050-ship" aria-label="Ship order 1050">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1051">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1051-select"
+                      aria-label="Select order 1051, Initech"
+                  /></label>
+                </td>
+                <th scope="row">1051</th>
+                <td>Initech</td>
+                <td class="numeric">$106.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1051-ship" aria-label="Ship order 1051">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1052">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1052-select"
+                      aria-label="Select order 1052, Umbrella"
+                  /></label>
+                </td>
+                <th scope="row">1052</th>
+                <td>Umbrella</td>
+                <td class="numeric">$143.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1052-ship" aria-label="Ship order 1052">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1053">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1053-select"
+                      aria-label="Select order 1053, Hooli"
+                  /></label>
+                </td>
+                <th scope="row">1053</th>
+                <td>Hooli</td>
+                <td class="numeric">$180.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1053-ship" aria-label="Ship order 1053">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1054">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1054-select"
+                      aria-label="Select order 1054, Stark"
+                  /></label>
+                </td>
+                <th scope="row">1054</th>
+                <td>Stark</td>
+                <td class="numeric">$217.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1054-ship" aria-label="Ship order 1054">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1055">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1055-select"
+                      aria-label="Select order 1055, Wayne"
+                  /></label>
+                </td>
+                <th scope="row">1055</th>
+                <td>Wayne</td>
+                <td class="numeric">$254.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1055-ship" aria-label="Ship order 1055">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1056">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1056-select"
+                      aria-label="Select order 1056, Wonka"
+                      disabled
+                  /></label>
+                </td>
+                <th scope="row">1056</th>
+                <td>Wonka</td>
+                <td class="numeric">$291.99</td>
+                <td class="status">Shipped</td>
+                <td>
+                  <button
+                    type="button"
+                    data-testid="order-1056-ship"
+                    aria-label="Shipped, order 1056"
+                    disabled
+                  >
+                    Shipped
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1057">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1057-select"
+                      aria-label="Select order 1057, Tyrell"
+                  /></label>
+                </td>
+                <th scope="row">1057</th>
+                <td>Tyrell</td>
+                <td class="numeric">$328.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1057-ship" aria-label="Ship order 1057">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1058">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1058-select"
+                      aria-label="Select order 1058, Cyberdyne"
+                  /></label>
+                </td>
+                <th scope="row">1058</th>
+                <td>Cyberdyne</td>
+                <td class="numeric">$365.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1058-ship" aria-label="Ship order 1058">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1059">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1059-select"
+                      aria-label="Select order 1059, Soylent"
+                  /></label>
+                </td>
+                <th scope="row">1059</th>
+                <td>Soylent</td>
+                <td class="numeric">$402.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1059-ship" aria-label="Ship order 1059">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+              <tr data-number="1060">
+                <td class="select">
+                  <label
+                    ><input
+                      type="checkbox"
+                      data-testid="order-1060-select"
+                      aria-label="Select order 1060, Vandelay"
+                  /></label>
+                </td>
+                <th scope="row">1060</th>
+                <td>Vandelay</td>
+                <td class="numeric">$39.99</td>
+                <td class="status">Pending</td>
+                <td>
+                  <button type="button" data-testid="order-1060-ship" aria-label="Ship order 1060">
+                    Ship
+                  </button>
+                </td>
+              </tr>
+            </tbody>
           </table>
         </div>
       </section>
@@ -50,8 +1243,9 @@
       <section aria-labelledby="new-order-heading">
         <h2 id="new-order-heading">New order</h2>
         <form id="new-order-form" class="order-form">
+          <p class="form-note">* required</p>
           <p class="field">
-            <label for="order-customer">Customer</label>
+            <label for="order-customer" class="required">Customer</label>
             <input
               id="order-customer"
               name="customer"
@@ -140,7 +1334,7 @@
             <input id="order-date" name="date" data-testid="order-date" type="date" />
           </p>
           <p>
-            <label>
+            <label class="check">
               <input data-testid="order-priority" name="priority" type="checkbox" />
               Priority shipping
             </label>

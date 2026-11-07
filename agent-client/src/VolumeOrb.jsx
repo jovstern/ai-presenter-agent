@@ -16,8 +16,9 @@ import { useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
 // styles.css shows the orb at rest (or, live under reduced motion, a static
 // level). While the session reconnects, the loop is off and styles.css
 // pulses the halo slowly instead (data-reconnecting; CSS only, none under
-// reduced motion), so the orb shows something is still happening. Decorative: hidden from assistive technology, since the card's
-// status line says the same thing in words (L2).
+// reduced motion), so the orb shows something is still happening.
+// Decorative: hidden from assistive technology, since the card's status line
+// says the same thing in words (L2).
 
 const REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
 // A rising level shows at once; a falling one keeps this share of the last

@@ -869,10 +869,34 @@ describe('sandbox/bridge.js snapshots of a page over the cap', () => {
     frame.doc.dispatchEvent(new Event('scroll'));
     await vi.waitFor(() => expect(messages).toHaveLength(2));
 
-    const scrolled = /** @type {SnapshotMessage} */ (messages.at(-1));
+    const scrolled = defined(messages.at(-1));
     expect(scrolled.full.map((node) => node.selector)).toEqual(selectors(10, 39));
     expect(scrolled.removed).toEqual(selectors(0, 9));
     expect(scrolled.changed.map((node) => node.selector)).toEqual(selectors(30, 39));
+  });
+
+  it('sends nothing on a small scroll of a page over the cap that keeps the same elements', async () => {
+    // Scrolled to b20, b10–b39 are the 30 kept; 10 px further they still are,
+    // and no node's state changed, so an empty delta would only cost the model
+    // a turn (C1, M9 fix wave).
+    const page = { scrollY: 20 * ROW_HEIGHT };
+    const { messages } = await loadTallPage(40, page);
+    expect(defined(messages.at(-1)).full.map((node) => node.selector)).toEqual(selectors(10, 39));
+
+    page.scrollY += 10;
+    frame.doc.dispatchEvent(new Event('scroll'));
+    await sleep(SNAPSHOT_DEBOUNCE_MS * 2);
+
+    expect(messages).toHaveLength(1);
+  });
+
+  it('still answers an explicit request-snapshot when nothing changed', async () => {
+    const { messages } = await loadTallPage(40, { scrollY: 0 });
+
+    agentPort.postMessage({ type: 'request-snapshot' });
+    await vi.waitFor(() => expect(messages).toHaveLength(2));
+
+    expect(defined(messages.at(-1))).toMatchObject({ changed: [], removed: [], omitted: 10 });
   });
 
   it('sends nothing on a scroll of a page under the cap: what it holds can’t change', async () => {

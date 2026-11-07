@@ -61,6 +61,15 @@ function DocumentIcon() {
   );
 }
 
+// The over-limit alert appears under the rules field, which on a short phone
+// is below the fold while the viewer types, so it is scrolled into view once,
+// when it appears (a stable ref callback runs on mount only), not on every
+// keystroke after.
+/** @param {HTMLElement | null} node */
+function scrollIntoViewOnMount(node) {
+  node?.scrollIntoView({ block: 'nearest' });
+}
+
 /**
  * The knowledge button and its dialog (spec Screens, R21): files and standing
  * rules, read from and written to knowledgeStore.js. The store is the one
@@ -326,7 +335,12 @@ export function KnowledgeModal({ portalContainer, open, onOpenChange }) {
             </p>
           )}
           {over > 0 && (
-            <p id={rulesErrorId} className="knowledge-modal__error" role="alert">
+            <p
+              id={rulesErrorId}
+              className="knowledge-modal__error"
+              role="alert"
+              ref={scrollIntoViewOnMount}
+            >
               Rules are {formatCount(over)} characters over the limit and aren&rsquo;t saved.
               Shorten them to save.
             </p>

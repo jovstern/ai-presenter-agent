@@ -80,7 +80,8 @@ test.describe('when the SDK chunk does not load', () => {
       await route.continue();
     });
     const { panel, status, button, toasts } = card(page);
-    const reason = "The voice client couldn't load. Check your connection, then retry.";
+    const reason =
+      "The voice client couldn't load. Check your connection, then retry or reload the page.";
 
     await page.goto('/');
     // A click with no pointer or focus before it: the press itself loads the chunk.

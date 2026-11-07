@@ -282,9 +282,9 @@ come from `status`.
   with the transcript spanning them above and the status, reason and mic lines as a caption
   under the button column, aligned with the primary button (M7 fix wave). The knowledge button
   is a 16 px inline SVG document icon (`currentColor`, `aria-hidden`) and the count, with
-  `title="Knowledge files"`. The primary label never wraps (`white-space: nowrap`); at 340 px and
-  below the card's padding and the two buttons' padding tighten so "Talk to the AI Presenter" fits
-  at 320 px.
+  `title="Knowledge files"`. The primary label never wraps (`white-space: nowrap`); below 380 px
+  the card's padding and the two buttons' padding tighten (and at 340 px and below the gutter halves) so "Talk to the AI Presenter" fits
+  at 320 px and keeps room at 360 px.
 - **Phone (360 px):** the card is full width at the bottom with a 16 px gutter.
 - **Desktop:** a 344 px card with a 16 px offset (320 until M7 T4, where "Talk to the AI Presenter" wrapped).
 - **Keyboard:** everything is reachable, focus is visible, Escape closes the dialog and focus

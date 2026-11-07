@@ -36,14 +36,14 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   (each one's name, state, a text field's `value`, and a select's `options` by visible text):
   the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
-  after every load, after a debounced DOM mutation (250 ms), before each successful action's
+  after every load, after a debounced DOM mutation (250 ms) that changed it, before each successful action's
   result once the page has **settled**, and on request (`sandbox/bridge.js`). At most 30
   nodes: see **Snapshot cap**.
 - **Snapshot cap** — `MAX_SNAPSHOT_NODES` (30) in `sandbox/bridge.js`. On a page with more
   `data-testid` elements (the target app's Orders page has 139), a snapshot keeps the 30
   nearest the frame's viewport (on screen first, unrendered last), in page order, and counts
-  the rest as `omitted`; a scroll on such a page sends a new snapshot. The model is told the
-  count in each keyframe and scrolls to reach the rest.
+  the rest as `omitted`; a scroll on such a page sends a new snapshot when it changes which
+  nodes are kept. The model is told the count in each keyframe and scrolls to reach the rest.
 - **Settled** — the page after an action, as the bridge waits for it: no mutation, input or
   change for 100 ms, or 1 s of waiting, whichever comes first; when the action started a
   navigation (a link click), the new page once loaded. All of it ends within 3.7 s of the

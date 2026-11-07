@@ -59,7 +59,15 @@ async function pick(files) {
   await act(async () => fireEvent.change(input, { target: { files } }));
 }
 
-beforeEach(() => localStorage.clear());
+// jsdom has no scrollIntoView; a real browser always does.
+/** @type {import('vitest').Mock<(arg?: boolean | ScrollIntoViewOptions) => void>} */
+let scrollIntoView;
+
+beforeEach(() => {
+  localStorage.clear();
+  scrollIntoView = vi.fn();
+  Element.prototype.scrollIntoView = scrollIntoView;
+});
 
 afterEach(() => {
   cleanup();
@@ -269,6 +277,26 @@ describe('KnowledgeModal', () => {
     expect(within(dialog).queryByRole('alert')).toBeNull();
     expect(rules.hasAttribute('aria-invalid')).toBe(false);
     expect(knowledgeStore.getRules()).toBe('Be brief, always.');
+  });
+
+  it('scrolls the over-limit alert into view once, when the rules go over', async () => {
+    const ui = renderModal();
+    const { dialog } = await openDialog(ui);
+    const rules = within(dialog).getByRole('textbox', { name: /Rules/ });
+    const max = knowledgeStore.MAX_RULES_CHARS;
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max) } });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    // On a short phone the alert lands below the fold, under the field.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 1) } });
+    const alert = within(dialog).getByRole('alert');
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.contexts[0]).toBe(alert);
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+
+    // Still over: no scroll on every keystroke, so the viewer can scroll away.
+    fireEvent.change(rules, { target: { value: 'a'.repeat(max + 2) } });
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
   });
 
   it('focuses the first control on open', async () => {

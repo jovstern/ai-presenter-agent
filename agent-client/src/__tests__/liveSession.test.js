@@ -890,7 +890,8 @@ describe('createLiveSession', () => {
 
     expect(statusNames()).toEqual(['connecting', 'failed']);
     expect(statuses.at(-1)).toMatchObject({
-      reason: "The voice client couldn't load. Check your connection, then retry.",
+      reason:
+        "The voice client couldn't load. Check your connection, then retry or reload the page.",
       fatal: 'sdk', // not a reload: Retry imports the chunk again
     });
     expect(live.calls).toHaveLength(0);

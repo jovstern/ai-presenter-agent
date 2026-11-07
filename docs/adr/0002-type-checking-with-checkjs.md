@@ -75,5 +75,6 @@ It widens from there.
 - `captureWorklet.test.js` imports the worklet through a non-literal specifier: the worklet is
   a classic script that `jsconfig.worklet.json` checks against its own scope, and a literal
   `import()` would pull it into the tests' program without those types.
-- `@types/node` comes in transitively (the SDK's `protobufjs`, Vite), not as a direct
-  dependency.
+- `@types/node` is a direct dev dependency of agent-client, pinned to the Node 24 line
+  (`24.19.2`, M9 fix wave) to match `.nvmrc`. It used to come in transitively (the SDK's
+  `protobufjs`, Vite), which resolved it to 22.x.

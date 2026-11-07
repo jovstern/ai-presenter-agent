@@ -4,7 +4,7 @@
 // viewer reaches for Talk (preloadLiveSdk) or presses it (liveSession.js's
 // openSession, in parallel with the token request) — never on page load.
 // Nothing else may import it as a value, or it is back in the page-load chunk
-// (e2e/bundle.spec.js checks the build).
+// (e2e/sdk.spec.js checks the build).
 
 /** @typedef {typeof import('@google/genai/web')} LiveSdk */
 

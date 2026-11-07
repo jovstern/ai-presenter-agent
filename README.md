@@ -201,12 +201,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 6 specs, 43 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 7 specs, 47 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 21 files, 432 tests
+npm test        # vitest: 21 files, 449 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only),
@@ -335,7 +335,8 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   `save-confirmation`. On the Orders page (139 elements, issue #22) the snapshot keeps the 30
   nearest the view, within the 4 kB keyframe budget; ticking a row and filling a field are
   deltas, scrolling to the form a keyframe that brings it in, and a viewer's own scroll sends a
-  snapshot of what came into view.
+  snapshot of what came into view (a scroll that keeps the same 30 sends nothing: the unit
+  tests check that).
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
@@ -370,6 +371,11 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   within the spec's budgets; the page loads without the SDK chunk, pointing at Talk fetches it
   once, and Talk connects (twice, one fetch); an aborted chunk ends in "Can't connect" with one
   toast and Retry, nothing retried by itself, and Retry loads it and connects.
+- `targetApp.spec.js` — the target app's own layout: Orders loaded with `orders.js` held back
+  300 ms shifts less than 0.05 (its rows are static markup; built by the script they once
+  shifted the page 0.679), its table fades at the right edge until scrolled to the end, and at
+  360 px with a session open Create order (Orders) and Save (Settings), scrolled to the bottom,
+  sit above the card.
 - `audio.spec.js` — the mic path in the real browser: Chromium's fake mic through the real
   capture worklet (loaded under the CSP, from `/agent-client/capture-worklet.js`) to the fake
   Live socket: `audio/pcm;rate=16000` frames of 2560 bytes at ~12.5 a second, not silence, and
@@ -462,16 +468,12 @@ One per milestone, recorded from the e2e harness for each pull request:
 
 Filed as issues at the close of cycle 1 (`docs/superpowers/specs/assessment.md` §8):
 
-- [#17](https://github.com/jovstern/ai-presenter-agent/issues/17) widget motion: the dialog's
-  enter and exit, an orb pulse while reconnecting;
-- [#18](https://github.com/jovstern/ai-presenter-agent/issues/18) card and dialog details: an
-  outline End button, counter colours near the limit, clamped file names;
-- [#19](https://github.com/jovstern/ai-presenter-agent/issues/19) verify mic capture in Safari
-  and Firefox (verified in Chromium only);
-- [#20](https://github.com/jovstern/ai-presenter-agent/issues/20) bundle headroom: 0.76 kB under
-  the 180 kB budget (drop the Gemini SDK for a direct socket, or load it on Talk);
-- [#22](https://github.com/jovstern/ai-presenter-agent/issues/22) tune the snapshot cap and
-  refresh ratio on a larger target page.
+- [#19](https://github.com/jovstern/ai-presenter-agent/issues/19) verify mic capture in real
+  Safari and Firefox (M9 gave the capture node a muted output for WebKit; the check in the real
+  browsers waits for the deployed site);
+- [#23](https://github.com/jovstern/ai-presenter-agent/issues/23) go live on Render, on request.
+
+M9 closed #17, #18, #20, #21 and #22.
 
 Deliberately not here:
 

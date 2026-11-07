@@ -91,7 +91,7 @@ const FATAL_REASONS = {
   // stale page and the card turns Try again into Reload page.
   config:
     "The server isn't configured to connect. Contact the site owner, then try again (you may need to reload the page).",
-  sdk: "The voice client couldn't load. Check your connection, then retry.",
+  sdk: "The voice client couldn't load. Check your connection, then retry or reload the page.",
 };
 const EXHAUSTED_REASON = `Could not reconnect after ${MAX_ATTEMPTS} attempts.`;
 

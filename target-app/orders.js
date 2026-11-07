@@ -1,65 +1,19 @@
 // The Orders page: a table of 60 orders, each with a checkbox and a Ship
 // button, and a New order form (issue #22: a page dense enough to reach the
-// bridge's snapshot cap). A file rather than an inline <script>: the server's
-// CSP is script-src 'self' (server/app.js).
+// bridge's snapshot cap). The rows are static markup in orders.html, so
+// nothing this deferred script does moves the layout (M9 fix wave, F1); it
+// only wires up the controls. A file rather than an inline <script>: the
+// server's CSP is script-src 'self' (server/app.js).
 (function () {
-  const ORDER_COUNT = 60;
   const FIRST_ORDER = 1001;
-  const CUSTOMERS = [
-    'Acme',
-    'Globex',
-    'Initech',
-    'Umbrella',
-    'Hooli',
-    'Stark',
-    'Wayne',
-    'Wonka',
-    'Tyrell',
-    'Cyberdyne',
-    'Soylent',
-    'Vandelay',
-  ];
-  const money = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' });
 
   const body = document.getElementById('orders-body');
+  const tableScroll = document.querySelector('.table-scroll');
   const selectedCount = document.querySelector('[data-testid="orders-selected-count"]');
   const shipSelected = document.querySelector('[data-testid="ship-selected"]');
   const form = document.getElementById('new-order-form');
   const confirmation = document.querySelector('[data-testid="order-confirmation"]');
   if (!body || !selectedCount || !(shipSelected instanceof HTMLButtonElement)) return;
-
-  /**
-   * One row; the same data on every load, so a test can name an order.
-   * @param {number} number
-   * @param {number} index
-   */
-  function orderRow(number, index) {
-    const customer = CUSTOMERS[index % CUSTOMERS.length];
-    const total = money.format(((number * 37) % 400) + 19.99);
-    const shipped = index % 7 === 6;
-
-    const row = document.createElement('tr');
-    const select = document.createElement('input');
-    select.type = 'checkbox';
-    select.dataset.testid = `order-${number}-select`;
-    select.setAttribute('aria-label', `Select order ${number}, ${customer}`);
-    const ship = document.createElement('button');
-    ship.type = 'button';
-    ship.dataset.testid = `order-${number}-ship`;
-
-    const cells = [select, String(number), customer, total, '', ship];
-    cells.forEach((content, column) => {
-      const cell = document.createElement(column === 1 ? 'th' : 'td');
-      if (column === 1) cell.scope = 'row';
-      if (column === 3) cell.className = 'numeric';
-      if (column === 4) cell.className = 'status';
-      cell.append(content);
-      row.append(cell);
-    });
-    row.dataset.number = String(number);
-    setShipped(row, shipped);
-    return row;
-  }
 
   /**
    * @param {HTMLTableRowElement} row
@@ -91,10 +45,6 @@
     shipSelected.disabled = count === 0;
   }
 
-  body.append(
-    ...Array.from({ length: ORDER_COUNT }, (_, index) => orderRow(FIRST_ORDER + index, index)),
-  );
-
   body.addEventListener('change', updateSelection);
   body.addEventListener('click', (event) => {
     const ship = event.target instanceof Element ? event.target.closest('button') : null;
@@ -111,7 +61,20 @@
     updateSelection();
   });
 
-  let nextOrder = FIRST_ORDER + ORDER_COUNT;
+  // On a narrow screen the table scrolls sideways, and its last column (Ship)
+  // starts out of view: a fade on the right edge says there is more, until
+  // the table is scrolled to its end (style.css). An overlay, so it moves
+  // nothing whenever it comes or goes.
+  if (tableScroll instanceof HTMLElement) {
+    const showMore = () => {
+      const rest = tableScroll.scrollWidth - tableScroll.clientWidth - tableScroll.scrollLeft;
+      tableScroll.classList.toggle('table-scroll--more', rest > 1);
+    };
+    tableScroll.addEventListener('scroll', showMore, { passive: true });
+    new ResizeObserver(showMore).observe(tableScroll);
+  }
+
+  let nextOrder = FIRST_ORDER + body.querySelectorAll('tr').length;
   if (!(form instanceof HTMLFormElement)) return;
   form.addEventListener('submit', (event) => {
     event.preventDefault();

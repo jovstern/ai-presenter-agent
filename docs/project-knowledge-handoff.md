@@ -375,6 +375,14 @@ Two npm packages (`agent-client`, `server`) and two static directories (`sandbox
   nodes carry long selects (a select's options can add ~1.2 kB on their own, so the budget is
   not guaranteed by a node count), and a real site rather than the mock
   (`docs/metrics/README.md` § M9 T6).
+- **Does an unsolicited snapshot interrupt the Live model?** A change nobody asked for (the
+  viewer's click or scroll, async page JS) goes to the session as client content
+  (`sendClientContent`, `turnComplete: false`) while the model may be speaking or between tool
+  calls. Whether Gemini Live treats that as an interruption, or only as context for its next
+  turn, has not been measured. The M9 fix wave narrowed the exposure: `bridge.js` no longer
+  posts a debounced snapshot that changes nothing (a scroll on a page over the cap that keeps
+  the same 30 nodes used to send an empty delta). A live e2e that scrolls the frame while the
+  agent talks, listening for a cut-off turn, would answer it.
 - **Not deployed yet.** The host is decided (Render, [ADR 0003](./adr/0003-hosting-on-render.md));
   `render.yaml`, the env parsed at startup (`server/config.js`) and `trust proxy` landed in M8
   T1, the client log (`/api/client-log`, `clientLog.js`) in M8 T2, checked locally only; the

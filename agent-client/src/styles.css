@@ -282,7 +282,7 @@ button:active {
 
 @keyframes orb-pulse {
   from {
-    opacity: 0.06;
+    opacity: 0.12;
     transform: scale(0.55);
   }
   to {
@@ -354,15 +354,14 @@ button:active {
   border-style: dashed;
 }
 
-/* The narrowest phones (320 px): a tighter card, so the primary button keeps
+/* Narrow phones (below 380 px): a tighter card, so the primary button keeps
    "Talk to the AI Presenter" on one line, inside its border, beside the orb and
-   the knowledge button: a half gutter, a smaller orb (decoration, not a
-   control, so no 44 px hit area to keep) and half gaps. At 320 px the button
-   has about 15 px to spare around the label in system-ui, room for a wider
-   system font. */
-@media (max-width: 340px) {
+   the knowledge button: a smaller orb (decoration, not a control, so no 44 px
+   hit area to keep), half gaps and tighter padding. Without it the label had
+   7 px to spare at 380 px and none at 360 px; with it, 39 px at 360 px and
+   20 px at 341 px in system-ui, room for a wider system font. */
+@media (max-width: 379px) {
   :host {
-    --gutter: var(--space-2);
     --orb-size: 32px;
   }
 
@@ -374,6 +373,14 @@ button:active {
   .agent-app__primary,
   .agent-app__knowledge-btn {
     padding: 0 var(--space-2);
+  }
+}
+
+/* The narrowest phones (320 px) also take a half gutter: there the label has
+   15 px to spare. A 360 px phone keeps the 16 px gutter (spec Screens). */
+@media (max-width: 340px) {
+  :host {
+    --gutter: var(--space-2);
   }
 }
 

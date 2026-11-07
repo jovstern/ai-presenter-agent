@@ -75,15 +75,18 @@
 // clicks (docs/metrics/m06.md).
 // A known limit of the fingerprint: a page with an element that changes on
 // its own (a clock, a live feed) makes every state new, so a no-op loop there
-// never repeats a signature. The target app has none. A model that overshoots
-// (keeps clicking past the number it was asked for) is progress to the guard
-// too, and only the budget stops it: it sees the counter in each response.
-// ACTION_BUDGET is the
-// backstop: one request gets 50 actions, then each further one is refused
-// with a stop-and-ask (not "repeated"), until the user speaks. The six-step
-// task takes 6; 50 still lets "increment the counter to 50" finish, and with
-// the bridge's settle (100 ms quiet, 1 s cap per action) it bounds a runaway
-// to about a minute of acting, plus the model's own turns.
+// never repeats a signature. The target app has none. On a page over the
+// bridge's snapshot cap (Orders), the snapshot holds the elements nearest the
+// viewport, so the fingerprint depends on the scroll position too: a viewer's
+// scroll between two actions makes the next state new and resets period-1
+// detection. A model that overshoots (keeps clicking past the number it was
+// asked for) is progress to the guard too, and only the budget stops it: it
+// sees the counter in each response. ACTION_BUDGET is the backstop: one
+// request gets 50 actions, then each further one is refused with a
+// stop-and-ask (not "repeated"), until the user speaks. The six-step task
+// takes 6; 50 still lets "increment the counter to 50" finish, and with the
+// bridge's settle (100 ms quiet, 1 s cap per action) it bounds a runaway to
+// about a minute of acting, plus the model's own turns.
 const REPEAT_LIMIT = 3;
 export const ACTION_BUDGET = 50;
 const PAGE_RULES = [

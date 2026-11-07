@@ -508,6 +508,16 @@ return { selector, tag: el.tagName.toLowerCase(), label: labelFor(el),
          disabled: !!el.disabled, hidden: el.hidden || cs.display === "none" || cs.visibility === "hidden" };
 ```
 
+> **Follow-up (M9 fix wave, code review C1):** on a page over the cap, every scroll scheduled a
+> debounced snapshot, and `diffAndBroadcastSnapshot` posted it even when the scroll kept the same
+> 30 nodes, so the model got empty deltas. `diffAndBroadcastSnapshot({ always })` in
+> `sandbox/bridge.js` now drops a snapshot with nothing changed, nothing removed and the same
+> `omitted`, unless someone waits for it: an action's settled page (#25), a `request-snapshot`
+> and a frame load pass `always: true`; only the debounce passes `false`. `bridge.test.js` covers
+> the small scroll (nothing sent) and the explicit request (answered). Whether an unsolicited
+> snapshot can interrupt the model at all is an open question in
+> `project-knowledge-handoff.md` §3.3.
+
 ---
 
 ## Medium
@@ -702,6 +712,12 @@ check(sig) {
 
 Feed transcript text (normalised) through the same guard, or add a separate cap on spoken turns
 per model turn.
+
+> **Known limit (M9 fix wave, code review M6):** on a page over the bridge's snapshot cap
+> (Orders), the snapshot holds the 30 nodes nearest the viewport, so the page fingerprint
+> depends on the scroll position: a viewer's scroll between two actions makes the next state new
+> and resets period-1 detection. Written into `loopGuard.js`'s known-limits comment; the
+> budget (`ACTION_BUDGET`) still bounds such a loop.
 
 ### [x] M7 — `liveConnectConstraints.config` partly duplicates the client's connect config
 
