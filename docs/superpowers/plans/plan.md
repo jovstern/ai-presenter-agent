@@ -678,6 +678,42 @@ without the deploy; this task moved to #23, done from `master` after the merge.*
 
 *(small, 6 min)*
 
+
+---
+
+## M9 — Wrap-up (one PR; branch `m9-wrap-up`)
+
+The user's call (2026-11-07): close every open issue in one PR without stopping for approval,
+except going live. **#23 (go live on Render) is the last task of the project and is not
+started until the user asks for it by name.** #19's real-browser half needs the deployed site
+and a real mic, so it moves with #23.
+
+**Demo flow:** the agent counts to 10 with no doubled answer; the card's End button is outline;
+the knowledge dialog fades in; the orb pulses while reconnecting.
+
+**T1 — Bundle headroom (#20).** The user delegated the architecture choice. Load the Gemini SDK
+only when Talk is pressed (option D), or the cheapest correct alternative the measurements
+favour; an ADR records it. Page-load bundle well under budget; first-Talk connect stays inside
+its budget. *(large, 25 min)*
+
+**T2 — The doubled answer (#29).** Tool `behavior` / response `scheduling` and a pinned voice,
+measured in live runs with the agent's transcripts recorded. *(large, 25 min)*
+
+**T3 — Loop guard: an explicit two-round request (#28).** *(small, 6 min)*
+
+**T4 — Widget polish (#17, #18) and the button label.** Dialog motion, an orb pulse while
+reconnecting, an outline End button, counter colours, clamped file names; the user's
+"Talk to the AI Presenter" label, with tests and docs. *(medium, 12 min)*
+
+**T5 — Test hygiene (#21, #26).** Typecheck `src/__tests__/`; the 1 MB pcm test no longer
+times out under load. *(medium, 12 min)*
+
+**T6 — Snapshot knobs on a denser page (#22) and the cross-browser capture half of #19
+that runs locally** (WebKit's sink node pulled through a muted output; Firefox and WebKit
+checked with Playwright where a fake mic exists). *(large, 20 min)*
+
+**T7 (last; only when the user asks) — Go live (#23, the rest of #19).**
+
 ---
 
 ## Time estimate
