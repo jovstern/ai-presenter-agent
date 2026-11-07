@@ -85,7 +85,7 @@ them before disconnecting. Unit-tested in `liveSession.test.js` ("timing marks")
 | `ds:reconnected` | the first `open` after a drop that the session recovered from |
 | `ds:keyframe` | a full page snapshot sent to the model (on its own or inside a tool response); `detail` holds `bytes` (UTF-8, the whole message) and `nodes` |
 | `ds:knowledge` | the knowledge context sent to the model; `detail.bytes` (UTF-8) |
-| `ds:loop-trip` | the loop guard tripped; `detail.kind` is `action` (a call refused) or `utterance` (a corrective turn sent) |
+| `ds:loop-trip` | the loop guard tripped; `detail.kind` is `action` (a call refused as a loop), `budget` (a call refused past the request's 50 actions) or `utterance` (a corrective turn sent) |
 
 ### `.metrics/live.json`
 

@@ -34,16 +34,23 @@ function stubFrame(
     onSrcSet: null,
   };
   Object.defineProperty(iframe, 'contentDocument', { get: () => state.doc });
-  Object.defineProperty(iframe, 'contentWindow', {
-    get: () => ({
-      location: { pathname: state.path },
+  // One window per document, as in a browser, where a document's listeners
+  // (the bridge's beforeunload / pagehide) go with it.
+  const newWindow = () =>
+    Object.assign(new EventTarget(), {
+      location: {
+        get pathname() {
+          return state.path;
+        },
+      },
       getComputedStyle: () => ({ display: 'block', visibility: 'visible' }),
       // The frame's realm: its documents are this jsdom window's.
       HTMLInputElement: window.HTMLInputElement,
       HTMLTextAreaElement: window.HTMLTextAreaElement,
       HTMLSelectElement: window.HTMLSelectElement,
-    }),
-  });
+    });
+  state.win = newWindow();
+  Object.defineProperty(iframe, 'contentWindow', { get: () => state.win });
   Object.defineProperty(iframe, 'src', {
     get: () => state.srcSets.at(-1) ?? '',
     set: (value) => {
@@ -55,6 +62,7 @@ function stubFrame(
   state.load = (path) => {
     state.path = path;
     state.doc = document.implementation.createHTMLDocument('');
+    state.win = newWindow();
     iframe.dispatchEvent(new Event('load'));
   };
   state.nextSrcSet = () => new Promise((resolve) => (state.onSrcSet = resolve));
@@ -168,14 +176,14 @@ describe('sandbox/bridge.js navigate', () => {
   });
 
   it('reports failure, inside the agent channel’s 4 s action timeout, when the page never loads', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
     const srcSet = frame.nextSrcSet();
     const replies = [];
     agentPort.onmessage = (event) => replies.push(event.data);
     agentPort.postMessage({ type: 'action', id: 'a3', action: 'navigate', args: ['settings'] });
     await srcSet;
 
-    await vi.advanceTimersByTimeAsync(3_499);
+    await vi.advanceTimersByTimeAsync(3_699);
     expect(replies).toEqual([]);
 
     const result = nextMessage(agentPort, 'action-result');
@@ -714,5 +722,304 @@ describe('sandbox/bridge.js snapshots', () => {
       <button data-testid="by-aria-label" aria-label="${long}">Go</button>`);
 
     expect(full.map((node) => node.label.length)).toEqual([60, 60, 60]);
+  });
+});
+
+// An action's result waits for the page to settle, and the snapshot of the
+// settled page goes out first, so the agent can send it inside that action's
+// tool response (#25). Settled: no mutation, input or change for
+// SETTLE_QUIET_MS, or SETTLE_CAP_MS after the action, whichever comes first,
+// and all of it inside ACTION_DEADLINE_MS from the action's start.
+describe("sandbox/bridge.js an action's page", () => {
+  const SETTLE_QUIET_MS = 100;
+  const SETTLE_CAP_MS = 1000;
+  const SNAPSHOT_DEBOUNCE_MS = 250;
+  const ACTION_DEADLINE_MS = 3700;
+  // Captured before any test fakes setTimeout: a real wait, so a port message
+  // that is going to arrive gets the chance to.
+  const realSetTimeout = globalThis.setTimeout;
+  const sleep = (ms) => new Promise((resolve) => realSetTimeout(resolve, ms));
+  // Waits, in real time, for port messages that are on their way: a fixed
+  // sleep can be too short on a loaded machine.
+  async function until(predicate) {
+    for (let waited = 0; !predicate() && waited < 2000; waited += 5) await sleep(5);
+  }
+
+  // A Home-like page whose increment button, like target-app/home.js, bumps
+  // the counter in its click handler. Resolves once the load's snapshot and
+  // the debounced one of the new content are in, so a test starts quiet.
+  async function loadCounterPage() {
+    const messages = [];
+    agentPort.onmessage = ({ data }) => messages.push(data);
+    frame.load('/target-app/index.html');
+    frame.doc.body.innerHTML = `
+      <span data-testid="counter-value">0</span>
+      <button data-testid="counter-increment">Increment</button>
+      <button data-testid="noop">Nothing</button>`;
+    frame.doc.querySelector('[data-testid="counter-increment"]').addEventListener('click', () => {
+      const value = frame.doc.querySelector('[data-testid="counter-value"]');
+      value.textContent = String(Number(value.textContent) + 1);
+    });
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS);
+    await until(() => messages.some((m) => m.type === 'snapshot' && m.full.length > 0));
+    expect(messages.at(-1)).toMatchObject({ type: 'snapshot', full: expect.any(Array) });
+    messages.length = 0;
+    return messages;
+  }
+
+  /**
+   * Posts a click and resolves once the bridge has run it, so the fake clock
+   * only moves after the action started.
+   * @param {string} id @param {string} selector
+   */
+  async function click(id, selector) {
+    const el = frame.doc.querySelector(`[data-testid="${selector}"]`);
+    let clicked = !el; // a missing element is never clicked
+    el?.addEventListener('click', () => (clicked = true), { once: true });
+    agentPort.postMessage({ type: 'action', id, action: 'click', args: [selector] });
+    await until(() => clicked);
+  }
+
+  beforeEach(() => {
+    // performance too: the bridge measures its deadline with performance.now().
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  });
+
+  it('posts the snapshot showing a click’s change before the click’s result, and no second one', async () => {
+    const messages = await loadCounterPage();
+
+    await click('c1', 'counter-increment');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 2);
+
+    expect(messages).toEqual([
+      {
+        type: 'snapshot',
+        full: expect.any(Array),
+        changed: [expect.objectContaining({ selector: 'counter-value', label: '1' })],
+        removed: [],
+      },
+      { type: 'action-result', id: 'c1', success: true },
+    ]);
+    // The click's mutation scheduled the debounced snapshot too; the settled
+    // one replaced it, so nothing follows once the debounce would have fired.
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS * 2);
+    await sleep(20);
+    expect(messages).toHaveLength(2);
+  });
+
+  it('answers a click that changes nothing once the quiet window has passed, with an empty diff first', async () => {
+    const messages = await loadCounterPage();
+
+    await click('c2', 'noop');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS - 1);
+    await sleep(20);
+    expect(messages).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await until(() => messages.length >= 2);
+    expect(messages).toEqual([
+      { type: 'snapshot', full: expect.any(Array), changed: [], removed: [] },
+      { type: 'action-result', id: 'c2', success: true },
+    ]);
+  });
+
+  it('restarts the quiet window on every mutation, and answers by the cap on a page that never stops', async () => {
+    const messages = await loadCounterPage();
+    const value = frame.doc.querySelector('[data-testid="counter-value"]');
+
+    await click('c3', 'noop');
+    // A mutation every 50 ms, so the page is never quiet for 100 ms.
+    for (let elapsed = 0; elapsed < SETTLE_CAP_MS - 50; elapsed += 50) {
+      value.setAttribute('data-tick', String(elapsed));
+      await vi.advanceTimersByTimeAsync(50);
+    }
+    await sleep(20);
+    expect(messages).toEqual([]);
+
+    value.setAttribute('data-tick', 'last');
+    await vi.advanceTimersByTimeAsync(50);
+    await until(() => messages.length >= 2);
+    expect(messages.map((m) => m.type)).toEqual(['snapshot', 'action-result']);
+    expect(messages[1]).toEqual({ type: 'action-result', id: 'c3', success: true });
+  });
+
+  it('answers a failed action at once, with no snapshot', async () => {
+    const messages = await loadCounterPage();
+
+    await click('c4', 'missing');
+    await until(() => messages.length >= 1);
+
+    expect(messages).toEqual([
+      {
+        type: 'action-result',
+        id: 'c4',
+        success: false,
+        error: 'No element with data-testid="missing"',
+      },
+    ]);
+  });
+
+  it('posts a navigate’s settled snapshot after the load’s own, then the result', async () => {
+    const messages = [];
+    agentPort.onmessage = ({ data }) => messages.push(data);
+    const srcSet = frame.nextSrcSet();
+    agentPort.postMessage({ type: 'action', id: 'n1', action: 'navigate', args: ['settings'] });
+    await srcSet;
+
+    frame.load('/target-app/settings.html');
+    frame.doc.body.innerHTML = '<button data-testid="save-button">Save</button>';
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 4);
+
+    expect(messages.map((m) => m.type)).toEqual([
+      'navigated',
+      'snapshot', // the load's, of the still-empty document
+      'snapshot', // the settled page
+      'action-result',
+    ]);
+    expect(messages[2].full).toEqual([expect.objectContaining({ selector: 'save-button' })]);
+    expect(messages[3]).toEqual({ type: 'action-result', id: 'n1', success: true });
+  });
+
+  // An earlier change's debounced snapshot, still pending when an action
+  // starts, would land inside the settle window and turn the action's page
+  // into a keyframe; the action's own snapshot covers that change instead.
+  it('cancels an earlier change’s pending debounced snapshot when an action starts', async () => {
+    const messages = await loadCounterPage();
+    frame.doc.querySelector('[data-testid="noop"]').textContent = 'Still nothing';
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS - 50);
+
+    await click('c5', 'noop');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 2);
+    await sleep(20);
+
+    expect(messages).toEqual([
+      {
+        type: 'snapshot',
+        full: expect.any(Array),
+        changed: [expect.objectContaining({ selector: 'noop', label: 'Still nothing' })],
+        removed: [],
+      },
+      { type: 'action-result', id: 'c5', success: true },
+    ]);
+  });
+
+  it('still sends that earlier change when the action fails', async () => {
+    const messages = await loadCounterPage();
+    frame.doc.querySelector('[data-testid="noop"]').textContent = 'Still nothing';
+
+    await click('c6', 'missing');
+    await until(() => messages.length >= 1);
+    expect(messages.map((m) => m.type)).toEqual(['action-result']);
+
+    await vi.advanceTimersByTimeAsync(SNAPSHOT_DEBOUNCE_MS);
+    await until(() => messages.length >= 2);
+    expect(messages[1]).toMatchObject({
+      type: 'snapshot',
+      changed: [expect.objectContaining({ selector: 'noop', label: 'Still nothing' })],
+    });
+  });
+
+  // A link click: the old document doesn't change, so without the wait the
+  // response carried an empty delta of the page being left (#25 review).
+  // The click handler stands in for the browser starting the navigation.
+  /** @param {string} selector */
+  function startsNavigation(selector) {
+    frame.doc
+      .querySelector(`[data-testid="${selector}"]`)
+      .addEventListener('click', () => frame.win.dispatchEvent(new Event('beforeunload')));
+  }
+
+  it('answers a click that starts a navigation only once the new page has loaded and settled', async () => {
+    const messages = await loadCounterPage();
+    startsNavigation('noop');
+
+    await click('l1', 'noop');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS * 3); // the new page is slow to arrive
+    await sleep(20);
+    expect(messages).toEqual([]);
+
+    frame.load('/target-app/settings.html');
+    frame.doc.body.innerHTML = '<button data-testid="save-button">Save</button>';
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 4);
+
+    expect(messages.map((m) => m.type)).toEqual([
+      'navigated',
+      'snapshot', // the load's
+      'snapshot', // the settled new page
+      'action-result',
+    ]);
+    expect(messages[2].full).toEqual([expect.objectContaining({ selector: 'save-button' })]);
+    expect(messages[3]).toEqual({ type: 'action-result', id: 'l1', success: true });
+  });
+
+  it('answers a click whose navigation never loads by the deadline', async () => {
+    const messages = await loadCounterPage();
+    startsNavigation('noop');
+
+    await click('l2', 'noop');
+    await vi.advanceTimersByTimeAsync(ACTION_DEADLINE_MS - 1);
+    await sleep(20);
+    expect(messages).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await until(() => messages.length >= 2);
+    expect(messages.map((m) => m.type)).toEqual(['snapshot', 'action-result']);
+    expect(messages[1]).toEqual({ type: 'action-result', id: 'l2', success: true });
+
+    // That navigation is given up on: the next action doesn't wait for it.
+    await click('l3', 'counter-increment');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 4);
+    expect(messages[3]).toEqual({ type: 'action-result', id: 'l3', success: true });
+  });
+
+  it('gives up on a navigate that never loads, so the next action answers after the quiet window', async () => {
+    const messages = await loadCounterPage();
+    const srcSet = frame.nextSrcSet();
+    agentPort.postMessage({ type: 'action', id: 'n3', action: 'navigate', args: ['settings'] });
+    await srcSet;
+    frame.win.dispatchEvent(new Event('beforeunload')); // the browser starting it
+
+    await vi.advanceTimersByTimeAsync(ACTION_DEADLINE_MS);
+    await until(() => messages.length >= 1);
+    expect(messages).toEqual([
+      {
+        type: 'action-result',
+        id: 'n3',
+        success: false,
+        error: 'The page did not finish loading.',
+      },
+    ]);
+
+    await click('c7', 'counter-increment');
+    await vi.advanceTimersByTimeAsync(SETTLE_QUIET_MS);
+    await until(() => messages.length >= 3);
+    expect(messages.slice(1).map((m) => m.type)).toEqual(['snapshot', 'action-result']);
+  });
+
+  // The worst case: a navigate whose page loads just before the deadline onto
+  // a page that never stops mutating still answers by it, inside the agent
+  // channel's 4 s action timeout (bridgeChannel.js).
+  it('answers a navigate that loads at the last moment onto a page that never settles by the deadline', async () => {
+    const messages = [];
+    agentPort.onmessage = ({ data }) => messages.push(data);
+    const srcSet = frame.nextSrcSet();
+    agentPort.postMessage({ type: 'action', id: 'n2', action: 'navigate', args: ['settings'] });
+    await srcSet;
+
+    await vi.advanceTimersByTimeAsync(ACTION_DEADLINE_MS - 50);
+    frame.load('/target-app/settings.html');
+    frame.doc.body.setAttribute('data-tick', '0');
+    await vi.advanceTimersByTimeAsync(40);
+    frame.doc.body.setAttribute('data-tick', '1');
+    await vi.advanceTimersByTimeAsync(10);
+
+    await until(() => messages.some((m) => m.type === 'action-result'));
+    expect(messages.at(-1)).toEqual({ type: 'action-result', id: 'n2', success: true });
+    expect(messages.at(-2)).toMatchObject({ type: 'snapshot' });
   });
 });

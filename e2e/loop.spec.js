@@ -11,6 +11,24 @@ import { TOKEN_OK, card, fakeGeminiLive, pageNonce, stubToken } from './fakeLive
 // card's own states (pending Cancel, the failures and their toasts) are
 // widget.spec.js's.
 
+/**
+ * The nodes a `page` lists: a keyframe's all, a delta's changed ones.
+ * @param {string} page
+ */
+function snapshotNodes(page) {
+  return JSON.parse(page.split('\n')[1]);
+}
+
+/**
+ * The counter's value in a `page`, if the snapshot lists it.
+ * @param {string} page
+ */
+function counterIn(page) {
+  return snapshotNodes(page).find(
+    (/** @type {{ selector: string }} */ node) => node.selector === 'counter-value',
+  )?.label;
+}
+
 test('a tool batch drives the iframe and the session survives a dropped socket', async ({
   page,
 }) => {
@@ -63,14 +81,16 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
     hidden: false,
     checked: false,
   });
-  // Only id, name and success: whether the click's own snapshot rides along
-  // as `page` depends on the bridge's 250 ms debounce outlasting a port round
-  // trip, which is timing, not behaviour (liveSession.test.js covers both).
-  expect(toggleResponse).toMatchObject({
+  // The click's own response carries the page it left: the bridge waits for
+  // the page to settle and sends that snapshot before the result (#25).
+  expect(toggleResponse).toEqual({
     id: 'call-toggle',
     name: 'click',
-    response: { success: true },
+    response: { success: true, page: expect.stringMatching(/^Page snapshot \(delta\)/) },
   });
+  expect(snapshotNodes(toggleResponse.response.page)).toContainEqual(
+    expect.objectContaining({ selector: 'notifications-toggle', checked: true }),
+  );
 
   // The server drops the socket. The reconnect's setupComplete is held back so
   // the page is seen waiting in `reconnecting` before it is Live again.
@@ -94,4 +114,112 @@ test('a tool batch drives the iframe and the session survives a dropped socket',
   await page.waitForTimeout(1500);
   expect(token.count).toBe(2);
   expect(live.sockets).toHaveLength(2);
+});
+
+// #25: each action's response says what it did to the page, so a model asked
+// to "increment the counter to 3" can see where the counter is after each
+// click instead of getting three bare successes.
+test('every click of a batch answers with the page it left: the counter at 1, 2, 3', async ({
+  page,
+}) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Live');
+  await expect(frame.getByTestId('counter-value')).toHaveText('0');
+
+  const clicks = [1, 2, 3].map((n) => ({
+    id: `inc-${n}`,
+    name: 'click',
+    args: { selector: 'counter-increment' },
+  }));
+  live.sendToLatest({ toolCall: { functionCalls: clicks } });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(3);
+  await expect(frame.getByTestId('counter-value')).toHaveText('3');
+  const responses = live.toolResponses();
+  expect(responses.map((r) => r.id)).toEqual(['inc-1', 'inc-2', 'inc-3']);
+  expect(responses.map((r) => r.response.success)).toEqual([true, true, true]);
+  expect(responses.map((r) => counterIn(r.response.page))).toEqual(['1', '2', '3']);
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
+// #25: the loop guard judges an action on the page it was taken on, so ten
+// identical clicks that each move the counter on are progress, not a loop
+// (the old guard refused the 4th: "I can't repeat the action further").
+test('ten identical counter clicks all run: the counter reaches 10', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Live');
+  await expect(frame.getByTestId('counter-value')).toHaveText('0');
+
+  const clicks = Array.from({ length: 10 }, (_, i) => ({
+    id: `inc-${i + 1}`,
+    name: 'click',
+    args: { selector: 'counter-increment' },
+  }));
+  live.sendToLatest({ toolCall: { functionCalls: clicks } });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(10);
+  await expect(frame.getByTestId('counter-value')).toHaveText('10');
+  const responses = live.toolResponses();
+  expect(responses.map((r) => r.response.success)).toEqual(Array(10).fill(true));
+  expect(responses.map((r) => counterIn(r.response.page))).toEqual(
+    Array.from({ length: 10 }, (_, i) => String(i + 1)),
+  );
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
+// #25 review: a link click leaves the old document unchanged, so its quiet
+// window used to pass and answer with an empty delta of the page being left.
+// The bridge now waits for the new page (here 300 ms late) and its response
+// carries the Settings keyframe.
+test('a link click answers with the page it opened, not the one it left', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+  await page.route('**/target-app/settings.html', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await route.continue();
+  });
+
+  await page.goto('/');
+  await button('Talk to the presenter').click();
+  await expect(status).toHaveText('Live');
+  await expect(frame.getByTestId('counter-value')).toHaveText('0');
+
+  live.sendToLatest({
+    toolCall: {
+      functionCalls: [{ id: 'call-link', name: 'click', args: { selector: 'nav-settings' } }],
+    },
+  });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(1);
+  const [linkResponse] = live.toolResponses();
+  expect(linkResponse).toEqual({
+    id: 'call-link',
+    name: 'click',
+    response: { success: true, page: expect.stringMatching(/^Page snapshot \(full\):/) },
+  });
+  const selectors = snapshotNodes(linkResponse.response.page).map((node) => node.selector);
+  expect(selectors).toContain('notifications-toggle');
+  expect(selectors).not.toContain('counter-value');
+  await expect(frame.getByRole('heading', { name: 'Settings' })).toBeVisible();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
 });

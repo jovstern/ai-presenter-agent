@@ -1166,6 +1166,61 @@ describe('createLiveSession', () => {
     ]);
   });
 
+  // bridge.js posts each successful action's settled snapshot just before its
+  // result (#25): every call of a batch answers with the page it left. This
+  // passed before #25 too: it guards liveSession's half of the contract (one
+  // held snapshot per call, a delta each); bridge.test.js and e2e/loop.spec.js
+  // prove the bridge's half, the fix itself.
+  it('answers each call of a batch with its own page, a delta of what that call changed', async () => {
+    const { liveSession, bridge } = setup();
+    const call = await connectAndEstablish(liveSession);
+    const counter = (value) => ({
+      selector: 'counter-value',
+      tag: 'span',
+      label: String(value),
+      disabled: false,
+      hidden: false,
+    });
+    const button = {
+      selector: 'counter-increment',
+      tag: 'button',
+      label: 'Increment',
+      disabled: false,
+      hidden: false,
+    };
+    const pageAt = (value) => [counter(value), button];
+    bridge.emitSnapshot({ full: pageAt(0), changed: pageAt(0), removed: [] }); // the first keyframe
+    let value = 0;
+    bridge.dispatchAction.mockImplementation(async () => {
+      value += 1;
+      bridge.emitSnapshot({ full: pageAt(value), changed: [counter(value)], removed: [] });
+      return { success: true };
+    });
+
+    const clicks = [1, 2, 3].map((n) => ({
+      id: `inc-${n}`,
+      name: 'click',
+      args: { selector: 'counter-increment' },
+    }));
+    call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks } });
+    await flush();
+
+    const responses = call.session.sendToolResponse.mock.calls.map(
+      ([arg]) => arg.functionResponses,
+    );
+    expect(responses.map((r) => r.id)).toEqual(['inc-1', 'inc-2', 'inc-3']);
+    expect(responses.map((r) => r.response.page)).toEqual(
+      [1, 2, 3].map(
+        (n) => `Page snapshot (delta) — changed:\n${JSON.stringify([counter(n)])}\nremoved:\n[]`,
+      ),
+    );
+    // Nothing went out on its own: each snapshot rode in its call's response.
+    const standalone = call.session.sendClientContent.mock.calls.filter(([arg]) =>
+      arg.turns.startsWith('Page snapshot'),
+    );
+    expect(standalone).toHaveLength(1);
+  });
+
   it('answers a tool call without a page when no snapshot arrived during it', async () => {
     const { liveSession } = setup();
     const call = await connectAndEstablish(liveSession);
@@ -1385,6 +1440,167 @@ describe('createLiveSession: loop guard', () => {
     expect(responses).toHaveLength(4);
     expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
     expect(responses[3].response.error).toMatch(/repeated/i);
+  });
+
+  // #25: an action is judged on the page it was taken on (the latest full
+  // snapshot), so identical clicks that move the counter on are progress.
+  describe('the page an action is taken on', () => {
+    const counter = (value) => ({
+      selector: 'counter-value',
+      tag: 'span',
+      label: String(value),
+      disabled: false,
+      hidden: false,
+    });
+    const button = {
+      selector: 'counter-increment',
+      tag: 'button',
+      label: 'Increment',
+      disabled: false,
+      hidden: false,
+    };
+    const pageAt = (value) => [counter(value), button];
+    const clicks = (count) =>
+      Array.from({ length: count }, (_, i) => ({
+        id: `inc-${i + 1}`,
+        name: 'click',
+        args: { selector: 'counter-increment' },
+      }));
+    const responsesOf = (call) =>
+      call.session.sendToolResponse.mock.calls.map(([arg]) => arg.functionResponses);
+    let markSpy;
+    const loopTrips = () =>
+      markSpy.mock.calls
+        .filter(([name]) => name === 'ds:loop-trip')
+        .map(([, options]) => options?.detail);
+
+    beforeEach(() => {
+      markSpy = vi.spyOn(performance, 'mark');
+    });
+
+    afterEach(() => markSpy.mockRestore());
+
+    /**
+     * A bridge whose click settles on the counter moved on by `step`, sent
+     * before the result, as bridge.js does.
+     * @param {number} step 1 for a working button, 0 for one that does nothing.
+     */
+    async function sessionWithCounter(step) {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      bridge.emitSnapshot({ full: pageAt(0), changed: pageAt(0), removed: [] }); // the keyframe
+      let value = 0;
+      bridge.dispatchAction.mockImplementation(async () => {
+        value += step;
+        bridge.emitSnapshot({
+          full: pageAt(value),
+          changed: step ? [counter(value)] : [],
+          removed: [],
+        });
+        return { success: true };
+      });
+      return { call, bridge };
+    }
+
+    it('dispatches a batch of 10 counter clicks that each move the counter on', async () => {
+      const { call, bridge } = await sessionWithCounter(1);
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(10) } });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(10);
+      const responses = responsesOf(call);
+      expect(responses.map((r) => r.response.success)).toEqual(Array(10).fill(true));
+      expect(responses.some((r) => 'error' in r.response)).toBe(false);
+      expect(loopTrips()).toEqual([]);
+    });
+
+    it('refuses the 4th identical click on a page it leaves unchanged', async () => {
+      const { call, bridge } = await sessionWithCounter(0);
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(4) } });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+      const responses = responsesOf(call);
+      expect(responses.map((r) => r.response.success)).toEqual([true, true, true, false]);
+      expect(responses[3].response.error).toMatch(/repeated/i);
+    });
+
+    it('judges the first call of a new batch on the page the last batch left', async () => {
+      const { call, bridge } = await sessionWithCounter(0);
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(3) } });
+      await flush();
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(1) } });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+      expect(responsesOf(call).at(-1).response).toMatchObject({ success: false });
+    });
+
+    // #25 review: the save confirmation stays and the toggle alternates, so
+    // toggle, save, toggle, save never meets the same page twice; the bare
+    // actions' A-B-A-B still trips it.
+    it('refuses toggle, save, toggle, save on the 4th call though every page differs', async () => {
+      const { liveSession, bridge } = setup();
+      const call = await connectAndEstablish(liveSession);
+      const app = { checked: false, saved: false };
+      const settingsPage = () => [
+        {
+          selector: 'notifications-toggle',
+          tag: 'input',
+          label: 'Enable notifications',
+          disabled: false,
+          hidden: false,
+          checked: app.checked,
+        },
+        {
+          selector: 'save-confirmation',
+          tag: 'p',
+          label: 'Saved',
+          disabled: false,
+          hidden: !app.saved,
+        },
+      ];
+      bridge.emitSnapshot({ full: settingsPage(), changed: settingsPage(), removed: [] });
+      bridge.dispatchAction.mockImplementation(async (_name, [selector]) => {
+        if (selector === 'notifications-toggle') app.checked = !app.checked;
+        else app.saved = true;
+        bridge.emitSnapshot({ full: settingsPage(), changed: settingsPage(), removed: [] });
+        return { success: true };
+      });
+      const toggle = (id) => ({ id, name: 'click', args: { selector: 'notifications-toggle' } });
+      const save = (id) => ({ id, name: 'click', args: { selector: 'save-button' } });
+
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [toggle('1'), save('2'), toggle('3'), save('4')] },
+      });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+      const responses = responsesOf(call);
+      expect(responses.map((r) => r.response.success)).toEqual([true, true, true, false]);
+      expect(responses[3].response.error).toMatch(/repeated/i);
+    });
+
+    it('past 50 actions in one request, tells the model to stop and ask, not that it repeated', async () => {
+      const { call, bridge } = await sessionWithCounter(1);
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(51) } });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(50);
+      const last = responsesOf(call).at(-1);
+      expect(last).toMatchObject({ id: 'inc-51', response: { success: false } });
+      expect(last.response.error).toMatch(/ask the user/i);
+      expect(last.response.error).not.toMatch(/repeated/i);
+      expect(loopTrips()).toEqual([{ kind: 'budget' }]);
+
+      // The user answering is a new request, with a new budget.
+      call.params.callbacks.onmessage({
+        serverContent: { inputTranscription: { text: 'Yes, go on.' } },
+      });
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(1) } });
+      await flush();
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(51);
+    });
   });
 
   describe('the utterance loop guard', () => {

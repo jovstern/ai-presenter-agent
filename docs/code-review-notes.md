@@ -384,6 +384,13 @@ if (message.serverContent?.interrupted) {
 > order and sends each `sendToolResponse` before the next call; a batch from a retired generation
 > stops instead of answering into a new session. `liveSession.test.js` covers the in-order
 > `[navigate, click]` batch and the mid-batch reconnect.
+>
+> **#25.** Serialization now also gives each call its own page: the bridge answers a successful
+> action only once the page has settled, right after that page's snapshot, so every successful
+> action's response in a batch carries `page` — one held snapshot, a delta against the previous response's (several
+> held, e.g. a navigate's load and settle, still make a keyframe). `liveSession.test.js` (a batch
+> of three clicks, each response its own counter value) and `e2e/loop.spec.js` (the same on the
+> real page).
 
 `handleServerMessage` does `for (const fc of message.toolCall.functionCalls) handleToolCall(fc)`
 (`useLiveAgent.js:172-174`) with no `await` — `handleToolCall` is `async`. If the model emits
@@ -424,6 +431,33 @@ if (message.toolCall) {
 > button-like input's value, the placeholder and the title; and every source, the placeholder,
 > title and `aria-label` included, is cut to 60 characters (`MAX_NAME_LENGTH`). Tested in
 > `bridge.test.js`.
+>
+> **#25 (found by the user).** Replacing the fixed post-action wait with the debounce alone left
+> an action's own change out of its tool response: the bridge answered in 1–2 ms and the
+> snapshot followed 250 ms later as a separate client turn, so "increment the counter to 10"
+> got ten bare `{ success: true }`. A successful action's result now waits for the page to
+> settle (no mutation, input or change for `SETTLE_QUIET_MS` = 100 ms, capped at
+> `SETTLE_CAP_MS` = 1 s), cancels the pending debounced snapshot, posts the settled one and then
+> the result; the port's order makes `liveSession.js` hold it and send it as that call's `page`.
+> A failure answers at once. The debounce stays for changes nobody asked for. Tested in
+> `bridge.test.js`, `e2e/bridge.spec.js` and `e2e/loop.spec.js`.
+>
+> **#25 review.** A link click left the old document unchanged, so its quiet window passed and
+> the response carried an empty delta of the page being left. The frame's window now marks a
+> navigation in flight on `beforeunload` / `pagehide` (cleared by the next load), and a
+> successful action that leaves one waits for the new page, then settles, so a link click's
+> response carries the new page's keyframe (`e2e/loop.spec.js`, with the page 300 ms late). A
+> navigation that never loads is given up on at the deadline. Every wait of one action (a
+> navigate's load, a link's new page, the settling) ends by one deadline, `ACTION_DEADLINE_MS`
+> = 3.7 s after the action starts, inside the agent's 4 s. An action also cancels an earlier
+> change's pending debounced snapshot when it starts (it would land in the settle window and
+> force a keyframe); a success's snapshot covers that change, and a failure re-arms it.
+> Re-review minors: a navigate that fails to load clears the in-flight mark too, so the next
+> action doesn't wait for the dead navigation; the deadline is measured with `performance.now()`
+> (monotonic), not `Date.now()`. Known and accepted: a navigation that starts but never commits
+> (a 204, a download, a cancelled one) fires `beforeunload` and no load, so the mark stays set
+> and the next successful action waits out its 3.7 s deadline once before clearing it; not
+> reachable on today's target app.
 
 Two issues in one area:
 
@@ -499,8 +533,9 @@ both functions.
 
 > Fixed in M4 T2: `sandbox/bridge.js` wraps every action in try/catch and replies `{success:false, error}` on a throw.
 > The M4 fix wave closed the same class of gap for `navigate`: it used to report success when its
-> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits 3.5 s
-> for a load of the requested path only and replies `{success:false, error:'The page did not finish
+> page never loaded (its 5 s wait "failed open", past the agent's 4 s timeout). Now it waits until
+> the action's 3.7 s deadline (3.5 s until #25, whose settling after the load shares that
+> deadline) for a load of the requested path only and replies `{success:false, error:'The page did not finish
 > loading.'}` otherwise (`agent-client/src/__tests__/bridge.test.js`).
 
 `bridge.js:188-191` calls `handler(data.args)` directly. A throw inside `fill` / `click` (e.g. the
@@ -587,6 +622,28 @@ a framework's controlled input needs it.
 > picked up by the mic is transcribed as the user and clears the action window. Gating
 > `userSpoke()` on length was not done: the 14 live-e2e transcripts show no echo and one real
 > 3-word request fragment a gate would have dropped.
+>
+> #25 follow-up (PR #27): with every response now carrying the page, the period-1 rule refused
+> legitimate progress — "increment the counter to 10" stopped at 3 ("I can't repeat the action
+> further"). `actionSignature()` now takes the page the action was taken on:
+> `pageFingerprint()` (32-bit FNV-1a of the latest full snapshot's JSON, base 36), which
+> `liveSession.js` updates on every snapshot, so within a batch it is the page the previous
+> call's settled snapshot left, and after a connect or resume the keyframe it requests. The
+> rules are unchanged, but run on two histories (#25 review): periods 1, 2 and 3 on the page
+> signatures, and 2 and 3 on the bare actions. A routine with a lasting side effect never
+> meets the same pages twice (the save confirmation stays visible, the toggle alternates:
+> fill/toggle/save twice is a period-6 cycle of page signatures, toggle/save twice period 4),
+> so only the bare history catches it; a constant run is no cycle, so it can't block the
+> counter. A no-op click on an unchanged page still trips on the 4th, a toggle flipped
+> on/off/on/off on the page signatures, home/settings/home/settings and toggle/save/toggle/save
+> on the 4th call, fill/toggle/save repeated on round 2's save; with no snapshot yet the
+> signature is the bare action. A model that overshoots the asked number is progress to the
+> guard too, stopped only by the budget below. Known limit: an element that changes on its own (a clock)
+> makes every state new. Backstop: `ACTION_BUDGET` (50 actions per request, `spendAction()`),
+> past which each call is refused with a stop-and-ask message (not "repeated"), marked
+> `ds:loop-trip` `budget`; the user speaking restores it. Tested in `loopGuard.test.js`,
+> `liveSession.test.js` (10 advancing clicks pass; 4 no-op clicks trip; the 51st call) and
+> `e2e/loop.spec.js` (10 real clicks, the counter at 10).
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says

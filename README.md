@@ -197,12 +197,12 @@ npm install     # at the repo root, once: Prettier, Playwright, axe
 npx playwright install chromium   # once, for the e2e
 npm run check   # Prettier check, then lint + typecheck + tests + build in agent-client,
                 # lint + typecheck + tests in server
-npm run e2e     # Playwright (Chromium): 5 specs, 33 tests, no Gemini key needed
+npm run e2e     # Playwright (Chromium): 5 specs, 36 tests, no Gemini key needed
 npm run e2e:live  # opt-in, macOS: the live e2e against the real Gemini Live API (needs the key)
 npm run format  # Prettier write
 
 cd agent-client
-npm test        # vitest: 20 files, 381 tests
+npm test        # vitest: 20 files, 414 tests
 npm run lint    # ESLint: agent-client plus sandbox/, target-app/ and the e2e/ suite
 npm run typecheck  # tsc: checkJs + strict, sandbox/bridge.js included; the capture worklet
                    # in its own project (jsconfig.worklet.json, AudioWorklet globals only)
@@ -217,14 +217,15 @@ The suite in `agent-client/src/__tests__/`:
 - `liveSession.test.js` — the session state machine against a fake Live client: one reconnect
   per drop, superseded connects, in-order tool batches, the token and model it connects with,
   resumption without re-greeting, the
-  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, one corrective turn
+  `reconnecting` → `failed` sequence, a token response with no token retried, the loop guard (a cycle refused, ten counter clicks that each move the page on all run while
+  four no-op clicks, or toggle/save/toggle/save over pages that all differ, are refused, the 51st action of a request refused with a stop-and-ask, one corrective turn
   per repeated-sentence episode, never sent to a replacement session; the user speaking clears
   the action window, and narration between tool calls is no loop), the SDK's real order
   (setupComplete and a queued tool call delivered before `connect()` resolves: still answered,
   and before any client turn — the knowledge and the greeting wait for its response, as does a
   knowledge change during any batch; the greeting by whether the attempt resumed),
   `dispose()`; a resume refused as "already connected" keeps its handle; a snapshot that arrives
-  during a tool batch goes out inside the next tool response (`page`); a still-attached refusal
+  during a tool batch goes out inside the next tool response (`page`), one per call of a batch; a still-attached refusal
   retried after 400 ms × the attempt; knowledge not resent to a resumed session unless it changed after the handle (M9); the `ds:*`
   timing and size marks; the 10 s setup timeout; the handle kept on a network failure and dropped
   on a server close; the backoff reset only after 5 s open or the first content; the two fatal
@@ -254,7 +255,11 @@ The suite in `agent-client/src/__tests__/`:
   fails and names the options); a test id with a quote in it is found (`CSS.escape`);
   a select's snapshot lists its option texts; replies survive a later patch of `MessagePort.prototype.postMessage`; a
   checkbox is named by its `<label>` and reports `checked`, and toggling it sends a snapshot;
-  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters.
+  names follow the accessible-name order (`aria-labelledby` first) and are cut to 60 characters;
+  a successful action's snapshot of the settled page comes before its result (after 100 ms of
+  quiet, by the 1 s cap on a page that never stops; a link click's after its new page loads; all
+  by the 3.7 s deadline), a failure answers at once, and an action cancels an earlier change's
+  pending debounced snapshot (re-armed if it fails).
 - `bridgeProtocol.test.js` — `sandbox/bridge.js`'s copy of the protocol typedefs matches
   `src/bridgeProtocol.js`, and both list the spec's six message types.
 - `actionTools.test.js` — named tool args to the bridge's positional order; unknown and
@@ -273,7 +278,11 @@ The suite in `agent-client/src/__tests__/`:
   drop, the rules counter and its polite near-limit note, over-limit rules kept with an alert
   and not saved, the file picker from a real button, open focus, Tab wrapping both ways,
   Escape returning focus to the knowledge button.
-- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, repeated agent
+- `loopGuard.test.js` — the loop guard: repeats, A-B-A-B and period-3 cycles, on the page
+  signatures and the bare actions (identical clicks that move the counter on pass; the same
+  click on the same page, a toggle flipped back and forth, and on a model of the app whose
+  save confirmation stays: toggle/save twice and fill/toggle/save twice, still trip), the
+  50-action budget, repeated agent
   sentences, realistic sequences that must pass, the window cleared by the user speaking and the
   utterance episode by a tool call.
 - `pcm.test.js` — base64 encode/decode of PCM frames: a 1 MB frame encodes (chunked, no stack
@@ -301,12 +310,16 @@ frame (`e2e/fixtures.js`). The suite in `e2e/`:
   `fill` works on the Settings textarea and select (by text and by value, firing `input` and
   `change`; no matching option leaves the selection alone), that an unknown action, an unknown
   route and `fill` on a non-input are rejected, that a second
-  `ds-bridge-connect` and forged `window` messages are ignored, and that a mutation brings a
-  snapshot with `hidden` right for `save-confirmation`.
+  `ds-bridge-connect` and forged `window` messages are ignored, and that a navigate and a click
+  each post their settled snapshot before their result, with `hidden` right for
+  `save-confirmation`.
 - `loop.spec.js` — the real `/` page against a fake Gemini Live (`page.routeWebSocket`, so the
   real `@google/genai` socket code runs) with Chromium's fake mic and a stubbed token endpoint: a
   tool batch (navigate → Settings, then click the toggle) changes the iframe and answers with
-  `toolResponse`s in order, the navigate's carrying the Settings keyframe; a server-side close shows `Reconnecting…`, then Live, with exactly
+  `toolResponse`s in order, the navigate's carrying the Settings keyframe and the click's the
+  toggle checked; a batch of three counter clicks answers with the counter at 1, 2 and 3; ten
+  identical counter clicks all run and leave it at 10; a link
+  click answers with the Settings keyframe even when the page arrives 300 ms late; a server-side close shows `Reconnecting…`, then Live, with exactly
   one token request (carrying the page nonce) per (re)connect; End returns to "Not
   connected". The card's own states are `widget.spec.js`'s.
 - `widget.spec.js` — every card state on the real `/` page through the same fake-Live harness

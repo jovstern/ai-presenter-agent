@@ -36,7 +36,16 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   (each one's name, state, a text field's `value`, and a select's `options` by visible text):
   the full node list plus its diff
   against the previous snapshot (`changed`, `removed`). Sent
-  after every load, after a debounced DOM mutation, and on request (`sandbox/bridge.js`).
+  after every load, after a debounced DOM mutation (250 ms), before each successful action's
+  result once the page has **settled**, and on request (`sandbox/bridge.js`).
+- **Settled** — the page after an action, as the bridge waits for it: no mutation, input or
+  change for 100 ms, or 1 s of waiting, whichever comes first; when the action started a
+  navigation (a link click), the new page once loaded. All of it ends within 3.7 s of the
+  action's start. That snapshot goes out just before the action's result, so it rides in that
+  successful action's tool response as `page` (#25). A change the viewer makes during the
+  window is credited to the action. A navigation that starts but never commits (a 204, a
+  download) makes the next successful action wait out its deadline once; the target app has
+  none.
 - **Keyframe** — a snapshot told to the model in full: on the first send, after a navigation,
   or when the diff covers most of the page (`agent-client/src/domSnapshotContext.js`).
 - **Delta** — a snapshot told to the model as only what changed and what was removed. Cheaper
@@ -75,16 +84,23 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
   the reason.
 - **Tool batch** — the function calls of one model `toolCall` message. Run one at a time, in
   order, answered with one tool response each; a snapshot that arrives meanwhile rides inside
-  the next response (`liveSession.js`).
+  the next response (`liveSession.js`), so each successful call carries its own settled page.
 - **Client turn** — anything the agent-client tells the model as content rather than as a tool
   response: the knowledge context, the greeting, the loop's corrective turn. None is sent while
   a tool batch runs: each is **held** (one per kind) until the batch's last response, since the
   model takes a turn between a function call and its response as the user talking over it
   (`sendTurn` in `liveSession.js`).
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
-  **action signature** (tool name + normalised arguments) that is the 4th identical one in a
-  row, or completes an A-B-A-B or A-B-C-A-B-C **cycle**, is refused and the model is told to
-  try something else. The window covers one request: the user speaking clears it. An **agent
+  **action signature** (tool name + normalised arguments + a **page fingerprint**, a hash of
+  the latest full snapshot: the page the action was taken on) that is the 4th identical one in
+  a row, or that completes an A-B-A-B or A-B-C-A-B-C **cycle** of page signatures or of the
+  bare actions (a routine whose side effects last never meets the same pages twice), is
+  refused and the model is told to try something else. The same click that moves the page on
+  (the counter at 0, 1, 2, …) is progress, not a repeat: a constant run is no cycle; with no
+  snapshot yet the signature is the bare action. A request
+  also has an **action budget** of 50: past it each action is refused with "ask the user
+  whether to go on". The window and the budget cover one request: the user speaking clears
+  them. An **agent
   turn** (its transcription fragments up to `turnComplete`) whose normalised sentence fills 3
   of the last 5 turns is an **utterance loop**: `liveSession` sends one **corrective turn** per
   episode, which ends when the agent says something else, calls a tool (narrating each step of

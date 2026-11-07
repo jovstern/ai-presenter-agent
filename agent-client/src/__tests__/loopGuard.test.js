@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { createLoopGuard, actionSignature, normaliseUtterance } from '../loopGuard.js';
+import {
+  createLoopGuard,
+  actionSignature,
+  normaliseUtterance,
+  pageFingerprint,
+  ACTION_BUDGET,
+} from '../loopGuard.js';
 
-const sig = (name, args) => actionSignature(name, args);
+const sig = (name, args, page) => actionSignature(name, args, page);
 const increment = sig('click', { selector: 'counter-increment' });
 const decrement = sig('click', { selector: 'counter-decrement' });
 const goHome = sig('navigate', { route: 'home' });
@@ -92,6 +98,172 @@ describe('loopGuard: cycles', () => {
     [goHome, goSettings, goHome].forEach((s) => guard.check(s));
     guard.reset();
     expect(guard.check(goSettings)).toBe(false);
+  });
+});
+
+// #25: each response now shows the page, so an action is judged on the page
+// it was taken on. The same click that moves the page on (the counter at 0, 1,
+// 2, …) is progress; the same click on the same page is still a loop.
+describe('loopGuard: the page an action was taken on is part of its signature', () => {
+  const incrementAt = (/** @type {number} */ value) =>
+    sig('click', { selector: 'counter-increment' }, `counter=${value}`);
+
+  it('passes 10 and 50 identical clicks that each move the counter on', () => {
+    for (const count of [10, 50]) {
+      const sequence = Array.from({ length: count }, (_, value) => incrementAt(value));
+      expect(run(sequence).some(Boolean)).toBe(false);
+    }
+  });
+
+  it('still trips the 4th identical click on an unchanged page', () => {
+    expect(run([0, 0, 0, 0].map(incrementAt))).toEqual([false, false, false, true]);
+  });
+
+  it('still trips a toggle flipped on, off, on, off (period 2 over two states)', () => {
+    const flipOn = sig('click', { selector: 'notifications-toggle' }, 'off');
+    const flipOff = sig('click', { selector: 'notifications-toggle' }, 'on');
+    expect(run([flipOn, flipOff, flipOn, flipOff])).toEqual([false, false, false, true]);
+  });
+
+  it('still trips home → settings → home → settings taken from the same two pages', () => {
+    const toSettings = sig('navigate', { route: 'settings' }, 'home-page');
+    const toHome = sig('navigate', { route: 'home' }, 'settings-page');
+    expect(run([toSettings, toHome, toSettings, toHome])).toEqual([false, false, false, true]);
+  });
+
+  it('falls back to the bare action when there is no page yet', () => {
+    expect(sig('click', { selector: 'counter-increment' }, undefined)).toBe(increment);
+    expect(run([increment, increment, increment, increment]).at(-1)).toBe(true);
+  });
+});
+
+// The rules as liveSession runs them: each call checked with its page
+// signature and its bare action, on a model of the target app whose side
+// effects last (the save confirmation stays visible, the toggle alternates),
+// so a routine repeated on it never meets the same states twice.
+describe('loopGuard: cycles on the real app, whose states never repeat', () => {
+  /** @typedef {[string, Record<string, unknown>]} Step */
+  /** @type {Record<string, Step>} */
+  const steps = {
+    fill: ['fill', { selector: 'name', value: 'Ada' }],
+    toggle: ['click', { selector: 'notifications-toggle' }],
+    save: ['click', { selector: 'save-button' }],
+    inc: ['click', { selector: 'counter-increment' }],
+    dec: ['click', { selector: 'counter-decrement' }],
+    toSettings: ['navigate', { route: 'settings' }],
+    toHome: ['navigate', { route: 'home' }],
+  };
+
+  /**
+   * Plays the step names on a fresh guard and app; a refused step changes nothing.
+   * @param {(keyof typeof steps)[]} names
+   */
+  function play(names) {
+    const guard = createLoopGuard();
+    const app = { route: 'home', counter: 0, name: '', notifications: false, saved: false };
+    return names.map((stepName) => {
+      const [name, args] = steps[stepName];
+      const page = JSON.stringify(app);
+      const tripped = guard.check(sig(name, args, page), sig(name, args));
+      if (tripped) return true;
+      if (stepName === 'fill') app.name = 'Ada';
+      if (stepName === 'toggle') app.notifications = !app.notifications;
+      if (stepName === 'save') app.saved = true;
+      if (stepName === 'inc') app.counter += 1;
+      if (stepName === 'dec') app.counter -= 1;
+      if (stepName === 'toSettings') app.route = 'settings';
+      if (stepName === 'toHome') app.route = 'home';
+      return false;
+    });
+  }
+
+  it("trips fill, toggle, save repeated on round 2's save", () => {
+    expect(play(['fill', 'toggle', 'save', 'fill', 'toggle', 'save'])).toEqual([
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('trips toggle, save, toggle, save on the 4th call', () => {
+    expect(play(['toggle', 'save', 'toggle', 'save'])).toEqual([false, false, false, true]);
+  });
+
+  it('trips the toggle alone flip-flopping on the 4th call', () => {
+    expect(play(['toggle', 'toggle', 'toggle', 'toggle'])).toEqual([false, false, false, true]);
+  });
+
+  it('trips home → settings → home → settings on the 4th call', () => {
+    expect(play(['toSettings', 'toHome', 'toSettings', 'toHome'])).toEqual([
+      false,
+      false,
+      false,
+      true,
+    ]);
+  });
+
+  it('trips increment, decrement, increment, decrement on the 4th call', () => {
+    expect(play(['inc', 'dec', 'inc', 'dec'])).toEqual([false, false, false, true]);
+  });
+
+  it('passes 10 and 50 counter clicks, and the six-step task', () => {
+    expect(play(Array(10).fill('inc')).some(Boolean)).toBe(false);
+    expect(play(Array(50).fill('inc')).some(Boolean)).toBe(false);
+    expect(play(['inc', 'inc', 'toSettings', 'toggle', 'fill', 'save']).some(Boolean)).toBe(false);
+  });
+});
+
+describe('pageFingerprint', () => {
+  const node = (selector, label, extra = {}) => ({
+    selector,
+    tag: 'span',
+    label,
+    disabled: false,
+    hidden: false,
+    ...extra,
+  });
+
+  it('is a short string, the same for the same nodes', () => {
+    const page = [node('counter-value', '3'), node('counter-increment', 'Increment')];
+    const again = [node('counter-value', '3'), node('counter-increment', 'Increment')];
+    expect(pageFingerprint(page)).toBe(pageFingerprint(again));
+    expect(pageFingerprint(page)).toMatch(/^[0-9a-z]{1,8}$/);
+  });
+
+  it('differs when a label, a checked state or a value changes', () => {
+    const base = pageFingerprint([node('counter-value', '3')]);
+    expect(pageFingerprint([node('counter-value', '4')])).not.toBe(base);
+    expect(pageFingerprint([node('counter-value', '3', { checked: true })])).not.toBe(base);
+    expect(pageFingerprint([node('counter-value', '3', { value: 'Ada' })])).not.toBe(base);
+  });
+
+  it('distinguishes an empty page from no page', () => {
+    expect(pageFingerprint([])).toMatch(/^[0-9a-z]{1,8}$/);
+  });
+});
+
+// A backstop for what the page signature can't see (a page with a clock makes
+// every state new): one request gets ACTION_BUDGET actions, then the model is
+// told to stop and ask.
+describe('loopGuard: the action budget per request', () => {
+  it('allows ACTION_BUDGET (50) actions, refuses the next, and resets when the user speaks', () => {
+    expect(ACTION_BUDGET).toBe(50);
+    const guard = createLoopGuard();
+    const spent = Array.from({ length: ACTION_BUDGET + 2 }, () => guard.spendAction());
+    expect(spent.slice(0, ACTION_BUDGET).some(Boolean)).toBe(false);
+    expect(spent.slice(ACTION_BUDGET)).toEqual([true, true]);
+    guard.userSpoke();
+    expect(guard.spendAction()).toBe(false);
+  });
+
+  it('reset() restores the budget', () => {
+    const guard = createLoopGuard();
+    for (let i = 0; i <= ACTION_BUDGET; i += 1) guard.spendAction();
+    guard.reset();
+    expect(guard.spendAction()).toBe(false);
   });
 });
 
