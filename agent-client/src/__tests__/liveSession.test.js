@@ -38,6 +38,8 @@ vi.mock('../liveSdk.js', async (importOriginal) => {
 });
 
 const MAX_ATTEMPTS = 6;
+// What a loop refusal (not the budget's) says: the action repeats the last few.
+const LOOP_REFUSAL = /repeats your last few actions/i;
 
 function tokenResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -494,7 +496,7 @@ describe('createLiveSession', () => {
     );
     expect(responses).toHaveLength(4);
     expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
-    expect(responses[3].response.error).toMatch(/repeated/i);
+    expect(responses[3].response.error).toMatch(LOOP_REFUSAL);
   });
 
   it('a manual connect() after failed resets the attempts and really retries', async () => {
@@ -1523,25 +1525,25 @@ describe('timing marks', () => {
 });
 
 describe('createLiveSession: loop guard', () => {
-  it('blocks the call that completes an A-B-A-B cycle with the loop guard, like a repeat', async () => {
+  // #28: two rounds of A-B can be the request; the third is refused.
+  it('dispatches home, settings, home, settings and refuses the third round', async () => {
     const { liveSession, bridge } = setup();
     const call = await connectAndEstablish(liveSession);
     const go = (id, route) => ({ id, name: 'navigate', args: { route } });
+    const routes = ['home', 'settings', 'home', 'settings', 'home', 'settings'];
 
     call.params.callbacks.onmessage({
-      toolCall: {
-        functionCalls: [go('1', 'home'), go('2', 'settings'), go('3', 'home'), go('4', 'settings')],
-      },
+      toolCall: { functionCalls: routes.map((route, i) => go(String(i + 1), route)) },
     });
     await flush();
 
-    expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+    expect(bridge.dispatchAction).toHaveBeenCalledTimes(5);
     const responses = call.session.sendToolResponse.mock.calls.map(
       ([arg]) => arg.functionResponses,
     );
-    expect(responses).toHaveLength(4);
-    expect(responses[3]).toMatchObject({ id: '4', response: { success: false } });
-    expect(responses[3].response.error).toMatch(/repeated/i);
+    expect(responses.map((r) => r.response.success)).toEqual([true, true, true, true, true, false]);
+    expect(responses[5]).toMatchObject({ id: '6', response: { success: false } });
+    expect(responses[5].response.error).toMatch(LOOP_REFUSAL);
   });
 
   // #25: an action is judged on the page it was taken on (the latest full
@@ -1624,7 +1626,7 @@ describe('createLiveSession: loop guard', () => {
       expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
       const responses = responsesOf(call);
       expect(responses.map((r) => r.response.success)).toEqual([true, true, true, false]);
-      expect(responses[3].response.error).toMatch(/repeated/i);
+      expect(responses[3].response.error).toMatch(LOOP_REFUSAL);
     });
 
     it('judges the first call of a new batch on the page the last batch left', async () => {
@@ -1640,8 +1642,9 @@ describe('createLiveSession: loop guard', () => {
 
     // #25 review: the save confirmation stays and the toggle alternates, so
     // toggle, save, toggle, save never meets the same page twice; the bare
-    // actions' A-B-A-B still trips it.
-    it('refuses toggle, save, toggle, save on the 4th call though every page differs', async () => {
+    // actions' A-B cycle catches it. #28: two rounds ("notifications on and
+    // save, then off and save") are a request; the third round is refused.
+    it('dispatches on, save, off, save and refuses toggle, save on its third round', async () => {
       const { liveSession, bridge } = setup();
       const call = await connectAndEstablish(liveSession);
       const app = { checked: false, saved: false };
@@ -1677,10 +1680,43 @@ describe('createLiveSession: loop guard', () => {
       });
       await flush();
 
-      expect(bridge.dispatchAction).toHaveBeenCalledTimes(3);
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(4);
+      expect(responsesOf(call).map((r) => r.response.success)).toEqual([true, true, true, true]);
+      expect(app).toEqual({ checked: false, saved: true });
+      expect(loopTrips()).toEqual([]);
+
+      call.params.callbacks.onmessage({
+        toolCall: { functionCalls: [toggle('5'), save('6'), toggle('7')] },
+      });
+      await flush();
+
+      expect(bridge.dispatchAction).toHaveBeenCalledTimes(5);
       const responses = responsesOf(call);
-      expect(responses.map((r) => r.response.success)).toEqual([true, true, true, false]);
-      expect(responses[3].response.error).toMatch(/repeated/i);
+      expect(responses.map((r) => r.response.success)).toEqual([
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+      ]);
+      expect(responses[5].response.error).toMatch(LOOP_REFUSAL);
+      expect(loopTrips()).toEqual([{ kind: 'action' }, { kind: 'action' }]);
+    });
+
+    // #28: a refusal asks the model to stop and check in with the user, as the
+    // budget does, rather than to try something else on its own.
+    it('words a loop refusal as stop, say what was done, and ask whether to go on', async () => {
+      const { call } = await sessionWithCounter(0);
+      call.params.callbacks.onmessage({ toolCall: { functionCalls: clicks(4) } });
+      await flush();
+
+      const { error } = responsesOf(call)[3].response;
+      expect(error).toMatch(/not done/i);
+      expect(error).toMatch(/tell the user what you have done/i);
+      expect(error).toMatch(/ask the user whether to go on/i);
+      expect(error).not.toMatch(/try something different/i);
     });
 
     it('past 50 actions in one request, tells the model to stop and ask, not that it repeated', async () => {
@@ -1692,7 +1728,8 @@ describe('createLiveSession: loop guard', () => {
       const last = responsesOf(call).at(-1);
       expect(last).toMatchObject({ id: 'inc-51', response: { success: false } });
       expect(last.response.error).toMatch(/ask the user/i);
-      expect(last.response.error).not.toMatch(/repeated/i);
+      expect(last.response.error).toMatch(/50 actions/);
+      expect(last.response.error).not.toMatch(LOOP_REFUSAL);
       expect(loopTrips()).toEqual([{ kind: 'budget' }]);
 
       // The user answering is a new request, with a new budget.

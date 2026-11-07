@@ -287,7 +287,7 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `e2e` and `e2e:live`.
 - When touching `liveSession.js`, `useLiveAgent.js` or `bridge.js`, reconcile changes against
   `docs/code-review-notes.md`'s existing items rather than creating a second tracking surface.
-- Tests: `agent-client/src/__tests__/` has 21 vitest files (426 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
+- Tests: `agent-client/src/__tests__/` has 21 vitest files (431 tests): `actionTools`, `AgentApp.test.jsx` (in a real shadow root: the
   card and its toast region inert while the knowledge dialog is open, restored on close; the
   SDK preloaded on pointing at or focusing Talk, not before),
   `audioIO` (the secure-context check; capture releases everything once; the resume timeout;
@@ -305,7 +305,8 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   focus, the Tab wrap both ways, Escape returning focus), `liveSdk` (one import shared, a failed one forgotten, no static
   `@google/genai` import anywhere in `src/`), `liveSession` (incl. the SDK loading in parallel
   with the token, a chunk that didn't load failing at once as `sdk`, and the pinned voice and
-  blocking declarations, a resume included), `loopGuard`, `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
+  blocking declarations, a resume included; a loop refusal asking the model to stop and ask the
+  user), `loopGuard` (two rounds of an A-B cycle pass, the third trips: #28), `pcm`, `shadowFocus` (rendered Tab stops only), `renderIsolation.test.jsx` (`React.Profiler` over 50 fake
   animation frames: no commit, `--level` moved 50 times; a transcript line skips the orb; a compiler canary), `transcript` (merge, spacing, turn
   boundary, the bound of 20), `Transcript.test.jsx` (live-region attributes, a node per fragment, the reserved box, following the newest line and leaving a viewer who scrolled up, a Tab stop only when overflowing, a fractional content height not overflowing by a fraction of a pixel), `useLiveAgent.test.jsx` (Testing
   Library: the card's states and the failure toast — once per failure, reason and Dismiss only, the
@@ -327,16 +328,17 @@ template/demo-agent data model, and real RAG. §5.1 (RAG-lite knowledge modal) i
   `config` (`loadConfig`: defaults, blank means unset, a missing or whitespace-only key fatal
   in production only, bad variables named without their values and all at once),
   `expiringMap` (expiry, pruning on access, the cap) and `geminiMint` (the token's
-  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (39
+  config: single use, model-only lock with `lockAdditionalFields: []`). `e2e/` has 6 Playwright specs (40
   tests) on `e2e/fixtures.js`, whose `test` fails on any console error, page error or CSP
   violation in any frame: `bridge.spec.js` (12: `sandbox/bridge.js` on a fixture page, the test
   doing the real handshake and port transfer — the actions, the allowlist, unknown routes, the
   bridge accepting exactly `navigate`'s enum, `fill` on the Settings textarea and select (by
-  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (4: the real
+  text, by value, no match), a second connect and forged `window` messages ignored, snapshots, an action's settled snapshot before its result), `loop.spec.js` (5: the real
   `/` page against a fake Gemini Live via `page.routeWebSocket` — a tool batch, a dropped
   socket, one token per reconnect, the page nonce; a batch of three counter clicks, each
   response's `page` showing 1, 2, 3; ten identical counter clicks all run (the loop guard judges
-  each on the page it was taken on), the counter at 10; a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
+  each on the page it was taken on), the counter at 10; navigate, toggle on, save, toggle off,
+  save all `success: true` (an explicit two-round request passes the loop guard, #28); a link click answered with the new page's keyframe), `widget.spec.js` (8, M7 T6: every card state
   through the same harness — the demo test "widget demo: Talk, Live with the orb and transcript, a
   lost connection, Retry" walks idle → pending Cancel → Live with the orb's `--level` following fake
   agent audio → a coalesced transcript → a forced close → reconnecting → the backoff run out on

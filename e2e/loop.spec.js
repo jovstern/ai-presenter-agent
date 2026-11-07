@@ -183,6 +183,59 @@ test('ten identical counter clicks all run: the counter reaches 10', async ({ pa
   await expect(status).toHaveText('Not connected');
 });
 
+// #28: "turn notifications on and save, then off and save" is two rounds of
+// toggle, save; the loop guard refused the 4th call as an A-B-A-B cycle. Two
+// rounds now pass (a third is refused, loopGuard.test.js).
+test('an explicit two-round request runs: on, save, off, save all succeed', async ({ page }) => {
+  await stubToken(page, TOKEN_OK);
+  const live = await fakeGeminiLive(page);
+  const { status, button } = card(page);
+  const frame = page.frameLocator('#target-app-frame');
+
+  await page.goto('/');
+  await button('Talk to the AI Presenter').click();
+  await expect(status).toHaveText('Live');
+
+  const toggle = (/** @type {string} */ id) => ({
+    id,
+    name: 'click',
+    args: { selector: 'notifications-toggle' },
+  });
+  const save = (/** @type {string} */ id) => ({
+    id,
+    name: 'click',
+    args: { selector: 'save-button' },
+  });
+  live.sendToLatest({
+    toolCall: {
+      functionCalls: [
+        { id: 'call-navigate', name: 'navigate', args: { route: 'settings' } },
+        toggle('on'),
+        save('save-1'),
+        toggle('off'),
+        save('save-2'),
+      ],
+    },
+  });
+
+  await expect.poll(() => live.toolResponses()).toHaveLength(5);
+  const responses = live.toolResponses();
+  expect(responses.map((r) => r.id)).toEqual(['call-navigate', 'on', 'save-1', 'off', 'save-2']);
+  expect(responses.map((r) => r.response.success)).toEqual(Array(5).fill(true));
+  expect(responses.some((r) => 'error' in r.response)).toBe(false);
+  expect(snapshotNodes(responses[1].response.page)).toContainEqual(
+    expect.objectContaining({ selector: 'notifications-toggle', checked: true }),
+  );
+  expect(snapshotNodes(responses[3].response.page)).toContainEqual(
+    expect.objectContaining({ selector: 'notifications-toggle', checked: false }),
+  );
+  await expect(frame.getByTestId('notifications-toggle')).not.toBeChecked();
+  await expect(frame.getByTestId('save-confirmation')).toBeVisible();
+
+  await button('End').click();
+  await expect(status).toHaveText('Not connected');
+});
+
 // #25 review: a link click leaves the old document unchanged, so its quiet
 // window used to pass and answer with an empty delta of the page being left.
 // The bridge now waits for the new page (here 300 ms late) and its response

@@ -647,6 +647,25 @@ a framework's controlled input needs it.
 > `ds:loop-trip` `budget`; the user speaking restores it. Tested in `loopGuard.test.js`,
 > `liveSession.test.js` (10 advancing clicks pass; 4 no-op clicks trip; the 51st call) and
 > `e2e/loop.spec.js` (10 real clicks, the counter at 10).
+>
+> M9 T3 (#28): the period-2 rule refused an explicit two-round request on its 4th call —
+> "turn notifications on and save, then off and save" (the bare actions' A-B-A-B) or
+> "Settings, Home, Settings, Home" (the page signatures' too, since it meets the same two pages
+> again). Ruling, both of the issue's options: a period-2 cycle now trips on its third round
+> (`repeats: 3`, in both histories, the 6th call, as period 3 already did), so a runaway costs
+> two more actions and every further call of it is refused; and the loop refusal no longer
+> says "…repeated too many times… try something different" but, like the budget's, "…so it
+> was not done. Stop here, tell the user what you have done so far, and ask the user whether
+> to go on", so a third round the user did ask for costs one question rather than a dead end,
+> and a refused model checks in instead of improvising. Unchanged: period 1 (a no-op click on
+> an unchanged page still trips on the 4th), period 3 (two rounds, the 6th call; no request
+> for a routine twice has been seen), the window of 6, the 50-action budget, the system
+> instruction (its "try a different approach rather than repeating" covers a failed action;
+> the refusal itself says what to do). The `ds:loop-trip` kinds are unchanged. Tested in
+> `loopGuard.test.js` (on/save/off/save and Settings/Home twice pass; the 10-call A-B runaway
+> refused from the 6th call on), `liveSession.test.js` (both requests dispatched; the third
+> round refused; the refusal's wording) and `e2e/loop.spec.js` (navigate, on, save, off, save
+> on the real Settings page, all `success: true`).
 
 `loopGuard.js` only flags **consecutive identical** signatures. The classic agent loop is a short
 cycle — click A, click B, click A, click B — which sails straight through. Spec goal #5 also says

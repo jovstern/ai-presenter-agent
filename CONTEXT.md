@@ -98,9 +98,11 @@ the term; read that file for the details. Decisions behind them are in `docs/adr
 - **Loop guard** — stops the model going in circles (`agent-client/src/loopGuard.js`). An
   **action signature** (tool name + normalised arguments + a **page fingerprint**, a hash of
   the latest full snapshot: the page the action was taken on) that is the 4th identical one in
-  a row, or that completes an A-B-A-B or A-B-C-A-B-C **cycle** of page signatures or of the
-  bare actions (a routine whose side effects last never meets the same pages twice), is
-  refused and the model is told to try something else. The same click that moves the page on
+  a row, or that completes an A-B-A-B-A-B or A-B-C-A-B-C **cycle** of page signatures or of
+  the bare actions (a routine whose side effects last never meets the same pages twice), is
+  refused and the model is told to stop, tell the user what it has done and ask whether to go
+  on. Two rounds of A-B pass (#28): "notifications on and save, then off and save", or
+  "Settings, Home, Settings, Home", is a request. The same click that moves the page on
   (the counter at 0, 1, 2, …) is progress, not a repeat: a constant run is no cycle; with no
   snapshot yet the signature is the bare action. A request
   also has an **action budget** of 50: past it each action is refused with "ask the user

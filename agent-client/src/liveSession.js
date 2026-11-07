@@ -164,10 +164,12 @@ export const VOICE_NAME = 'Kore';
 // The error a refused action answers with. A loop (loopGuard.check) is the
 // same action on the same page, or a cycle of two or three different
 // actions, so one action repeated while it moves the page on never gets it;
-// past the request's budget (loopGuard.spendAction) the model is told to
-// check in, not that it repeated.
+// past the request's budget (loopGuard.spendAction) the model is told the
+// count, not that it repeated. Both end the same way (#28): stop, say what was
+// done, ask the user. A repeat the user really asked for then costs one
+// question; "try something different" sent the model off on its own instead.
 const LOOP_REFUSAL =
-  'This action has repeated too many times, alone or in a cycle with your last few — try something different.';
+  'This repeats your last few actions (the same action on the same page, or a cycle with the ones before it), so it was not done. Stop here, tell the user what you have done so far, and ask the user whether to go on.';
 const BUDGET_REFUSAL = `That is ${ACTION_BUDGET} actions since the user last spoke. Stop here, tell the user what you have done so far, and ask the user whether to go on.`;
 
 // Sent once per utterance-loop episode (loopGuard.checkUtterance).
